@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: studyquest-sync
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: STUDYQUEST_ADMIN_PASSWORD
+        sync: false
+      - key: STUDYQUEST_INVITE_CODE
+        sync: false
+      - key: STUDYQUEST_MAX_ACCOUNTS
+        value: "5"
+      - key: STUDYQUEST_MAX_STATE_BYTES
+        value: "1048576"
+      - key: PGSSLMODE
+        value: require
