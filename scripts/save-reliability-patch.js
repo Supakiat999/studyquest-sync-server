@@ -116,6 +116,43 @@ document.addEventListener('visibilitychange', () => {
   );
 }
 
+const gradeAwareHasUserData = `function hasUserData(s) {
+  const hasObjectEntries = value => value && typeof value === 'object' && Object.keys(value).length > 0;
+  const hasCustomSubjects = value => value && typeof value === 'object' && Object.values(value).some(list => Array.isArray(list) && list.length);
+  return !!(s && (
+    (Array.isArray(s.tasks) && s.tasks.length) ||
+    (Array.isArray(s.notebooks) && s.notebooks.length) ||
+    (Array.isArray(s.notes) && s.notes.length) ||
+    (Array.isArray(s.fileLinks) && s.fileLinks.length) ||
+    (Array.isArray(s.checklistItems) && s.checklistItems.length) ||
+    (Array.isArray(s.trips) && s.trips.length) ||
+    (Array.isArray(s.sessions) && s.sessions.length) ||
+    hasObjectEntries(s.grades) ||
+    hasObjectEntries(s.cutoffs) ||
+    hasObjectEntries(s.electiveNames) ||
+    hasCustomSubjects(s.customSubjects) ||
+    (Array.isArray(s.customCurricula) && s.customCurricula.length) ||
+    (Array.isArray(s.archivedCurriculumIds) && s.archivedCurriculumIds.length) ||
+    hasObjectEntries(s.activeSemesterByCurriculum) ||
+    (s.tracker && Array.isArray(s.tracker.weeks) && s.tracker.weeks.length) ||
+    hasObjectEntries(s.studyTime) ||
+    hasObjectEntries(s.xpByDay) ||
+    hasObjectEntries(s.completedByDay) ||
+    Number(s.totalXP || 0) > 0 ||
+    Number(s.totalDone || 0) > 0 ||
+    Number(s.pomodorosDone || 0) > 0 ||
+    Number(s.streak || 0) > 0
+  ));
+}
+`;
+
+if (!html.includes("const hasObjectEntries = value => value && typeof value === 'object' && Object.keys(value).length > 0;")) {
+  html = html.replace(
+    /function hasUserData\(s\) \{\s+return !!\(s && \(\s+\(Array\.isArray\(s\.tasks\) && s\.tasks\.length\) \|\|\s+\(Array\.isArray\(s\.notebooks\) && s\.notebooks\.length\) \|\|\s+\(Array\.isArray\(s\.notes\) && s\.notes\.length\) \|\|\s+\(Array\.isArray\(s\.fileLinks\) && s\.fileLinks\.length\) \|\|\s+\(Array\.isArray\(s\.checklistItems\) && s\.checklistItems\.length\) \|\|\s+\(Array\.isArray\(s\.trips\) && s\.trips\.length\) \|\|\s+\(Array\.isArray\(s\.sessions\) && s\.sessions\.length\)\s+\)\);\s+\}/,
+    gradeAwareHasUserData
+  );
+}
+
 if (html !== original) {
   fs.writeFileSync(htmlPath, html);
   console.log("Applied StudyQuest save reliability patch.");
