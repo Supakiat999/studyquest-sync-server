@@ -19,6 +19,20 @@
       }[ch]));
     }
 
+    async function performLogout() {
+      const user = window.__STUDYQUEST_AUTH_USER__;
+      if (AUTH_SERVER_AVAILABLE && !(user && user.legacy) && typeof window.studyquestFlushSave === "function") {
+        await window.studyquestFlushSave().catch(() => {});
+      }
+      if (AUTH_SERVER_AVAILABLE && !(user && user.legacy)) {
+        await fetch("/api/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
+      }
+      try { sessionStorage.removeItem(LEGACY_SESSION_KEY); } catch (error) {}
+      window.location.reload();
+    }
+
+    window.studyquestLogout = performLogout;
+
     function renderAccountBadge(user) {
       if (!user || !user.username) return;
       if (!document.body) {
@@ -32,13 +46,7 @@
         document.body.appendChild(badge);
       }
       badge.innerHTML = `<strong>${escapeHtml(user.username)}</strong><button type="button">Logout</button>`;
-      badge.querySelector("button").addEventListener("click", async () => {
-        if (AUTH_SERVER_AVAILABLE && !user.legacy) {
-          await fetch("/api/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
-        }
-        try { sessionStorage.removeItem(LEGACY_SESSION_KEY); } catch (error) {}
-        window.location.reload();
-      });
+      badge.querySelector("button").addEventListener("click", performLogout);
     }
 
     function unlock(user = { username: "admin", legacy: true }) {
@@ -512,6 +520,14 @@
     transform: translateY(-1px);
     border-color: var(--accent);
     box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  }
+  .logout-header-btn {
+    padding-inline: 12px;
+    color: var(--red);
+  }
+  .logout-header-btn:hover {
+    border-color: var(--red);
+    color: var(--red);
   }
   .settings-row { display:flex; gap:10px; align-items:center; }
   .profile-preview {
@@ -2104,6 +2120,7 @@
       </div>
       <button class="btn btn-ghost" onclick="openQuickCapture()" title="Quick add task (Q)">Quick Capture</button>
       <button class="btn btn-primary" onclick="openCreateTask()">+ New Task</button>
+      <button class="btn btn-ghost logout-header-btn" onclick="studyquestLogout()" title="Sign out of this StudyQuest account">Logout</button>
       <button class="profile-btn" id="profileBtn" onclick="openProfileSettings()" title="Profile and settings">SQ</button>
     </div>
   </header>
@@ -3164,6 +3181,7 @@ const SERVER_STATE_ENDPOINT = '/api/state';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 let serverSaveTimer = null;
 let saveStatusClearTimer = null;
+let lastServerSaveStartedAt = 0;
 
 function canUseServerStorage() {
   return window.location.protocol === 'http:' || window.location.protocol === 'https:';
@@ -3273,6 +3291,8 @@ function normalizeState(saved) {
 }
 
 function hasUserData(s) {
+  const hasObjectEntries = value => value && typeof value === 'object' && Object.keys(value).length > 0;
+  const hasCustomSubjects = value => value && typeof value === 'object' && Object.values(value).some(list => Array.isArray(list) && list.length);
   return !!(s && (
     (Array.isArray(s.tasks) && s.tasks.length) ||
     (Array.isArray(s.notebooks) && s.notebooks.length) ||
@@ -3280,7 +3300,22 @@ function hasUserData(s) {
     (Array.isArray(s.fileLinks) && s.fileLinks.length) ||
     (Array.isArray(s.checklistItems) && s.checklistItems.length) ||
     (Array.isArray(s.trips) && s.trips.length) ||
-    (Array.isArray(s.sessions) && s.sessions.length)
+    (Array.isArray(s.sessions) && s.sessions.length) ||
+    hasObjectEntries(s.grades) ||
+    hasObjectEntries(s.cutoffs) ||
+    hasObjectEntries(s.electiveNames) ||
+    hasCustomSubjects(s.customSubjects) ||
+    (Array.isArray(s.customCurricula) && s.customCurricula.length) ||
+    (Array.isArray(s.archivedCurriculumIds) && s.archivedCurriculumIds.length) ||
+    hasObjectEntries(s.activeSemesterByCurriculum) ||
+    (s.tracker && Array.isArray(s.tracker.weeks) && s.tracker.weeks.length) ||
+    hasObjectEntries(s.studyTime) ||
+    hasObjectEntries(s.xpByDay) ||
+    hasObjectEntries(s.completedByDay) ||
+    Number(s.totalXP || 0) > 0 ||
+    Number(s.totalDone || 0) > 0 ||
+    Number(s.pomodorosDone || 0) > 0 ||
+    Number(s.streak || 0) > 0
   ));
 }
 
@@ -3360,28 +3395,70 @@ function queueServerStateSave() {
   }
   setSaveStatus('saving', 'Saving...');
   clearTimeout(serverSaveTimer);
-  serverSaveTimer = setTimeout(saveStateToServer, 350);
+  serverSaveTimer = setTimeout(() => saveStateToServer(), 350);
 }
 
-async function saveStateToServer() {
+async function saveStateToServer(options = {}) {
+  const { keepalive = false, silent = false } = options;
   if (!canUseServerStorage()) {
-    setSaveStatus('local', 'Local only');
-    return;
+    if (!silent) setSaveStatus('local', 'Local only');
+    return false;
   }
+  clearTimeout(serverSaveTimer);
+  serverSaveTimer = null;
+  lastServerSaveStartedAt = Date.now();
   try {
     const res = await fetch(SERVER_STATE_ENDPOINT, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state),
+      keepalive,
     });
     if (!res.ok) throw new Error('Server save failed');
-    setSaveStatus('saved', 'Saved');
+    if (!silent) setSaveStatus('saved', 'Saved');
+    return true;
   } catch (e) {
     console.warn('StudyQuest server save failed', e);
-    setSaveStatus('error', 'Save error');
+    if (!silent) setSaveStatus('error', 'Save error');
+    return false;
   }
 }
+
+async function flushStateToServerBeforeExit() {
+  if (!canUseServerStorage()) return false;
+  return saveStateToServer({ silent: true });
+}
+
+function bestEffortSaveBeforePageExit() {
+  if (!canUseServerStorage()) return;
+  if (!state || Date.now() - lastServerSaveStartedAt < 300) return;
+  try {
+    const body = JSON.stringify(state);
+    localStorage.setItem(currentStorageKey(), body);
+    if (body.length < 60000 && navigator.sendBeacon) {
+      const blob = new Blob([body], { type: 'application/json' });
+      if (navigator.sendBeacon(SERVER_STATE_ENDPOINT, blob)) return;
+    }
+    if (body.length < 60000) {
+      fetch(SERVER_STATE_ENDPOINT, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('StudyQuest final save failed', e);
+  }
+}
+
+window.studyquestFlushSave = flushStateToServerBeforeExit;
+window.addEventListener('pagehide', bestEffortSaveBeforePageExit);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') bestEffortSaveBeforePageExit();
+});
 
 function loadState() {
   try {
@@ -5096,9 +5173,110 @@ const BALAC_CURRICULUM = [
     {code:'xxxxxxx_ge',name:'General Education',credits:3},
   ]},
 ];
+const INDUSTRIAL_PHARMACY_CURRICULUM = [
+  { sem:'Y1-S1', label:'Year 1 · Sem I', subjects:[
+    {code:'2301103',name:'CALCULUS I',credits:3},
+    {code:'2302161',name:'GEN CHEM',credits:3},
+    {code:'2603282',name:'STAT BIO SCIENCE',credits:3},
+    {code:'3300112',name:'IDG I',credits:2},
+    {code:'5500111',name:'EXP ENG I',credits:3},
+    {code:'3300199',name:'PIL I',credits:1},
+    {code:'xxxxxxx',name:'GEN ED / FREE ELECTIVE',credits:6},
+  ]},
+  { sem:'Y1-S2', label:'Year 1 · Sem II', subjects:[
+    {code:'2302236',name:'PHYSICAL CHEMISTRY',credits:2},
+    {code:'2302263',name:'ORG CHEM I',credits:3},
+    {code:'2302162',name:'CHEM LAB PHARM SCI',credits:1},
+    {code:'2304116',name:'PHYS PHARM SCI',credits:2},
+    {code:'3315101',name:'PHARMACOG I',credits:2},
+    {code:'5500112',name:'EXP ENG II',credits:3},
+    {code:'3300199',name:'PIL I',credits:1},
+    {code:'xxxxxxx',name:'GEN ED / FREE ELECTIVE',credits:6},
+  ]},
+  { sem:'Y2-S1', label:'Year 2 · Sem I', subjects:[
+    {code:'2302264',name:'ORG CHEM II',credits:3},
+    {code:'3300230',name:'CELL BIO BIOCHEM',credits:4},
+    {code:'3300231',name:'PHYSIO CLIN BIO I',credits:3},
+    {code:'3300233',name:'PHYSIO BIO LAB I',credits:1},
+    {code:'3300232',name:'PHYSIO CLIN BIO II',credits:3},
+    {code:'3300234',name:'PHYSIO BIO LAB II',credits:1},
+    {code:'3300113',name:'MICROBIO PHARM',credits:1.5},
+    {code:'3300235',name:'IMMUNO PHARM',credits:2},
+    {code:'3300299',name:'PIL II',credits:1},
+  ]},
+  { sem:'Y2-S2', label:'Year 2 · Sem II', subjects:[
+    {code:'3300237',name:'DDD ACTION TOX',credits:5},
+    {code:'3300236',name:'PHARM NUTR',credits:1.5},
+    {code:'3300331',name:'IDT I',credits:1.5},
+    {code:'3300332',name:'IDT II',credits:5},
+    {code:'3300242',name:'IDQ III',credits:2},
+    {code:'3300244',name:'IDG II',credits:2},
+    {code:'3300299',name:'PIL II',credits:1},
+    {code:'0295107',name:'GEN ED: Patient Safety',credits:3},
+  ]},
+  { sem:'Y3-S1', label:'Year 3 · Sem I', subjects:[
+    {code:'3300334',name:'IDT IV',credits:4},
+    {code:'3300243',name:'IDQ IV',credits:4},
+    {code:'3300238',name:'IDQ I',credits:2.5},
+    {code:'3300240',name:'IDQ LAB I',credits:1},
+    {code:'3300336',name:'IDG III',credits:2},
+    {code:'3300398',name:'PIL III',credits:1},
+    {code:'xxxxxxx',name:'GEN ED',credits:3},
+  ]},
+  { sem:'Y3-S2', label:'Year 3 · Sem II', subjects:[
+    {code:'3300333',name:'IDT III',credits:5},
+    {code:'3300335',name:'IDT V',credits:4},
+    {code:'3300340',name:'IDG IV',credits:2},
+    {code:'3300239',name:'IDQ II',credits:2.5},
+    {code:'3300241',name:'IDQ LAB II',credits:1},
+    {code:'3300338',name:'IDQ V',credits:4},
+    {code:'3300398',name:'PIL III',credits:1},
+  ]},
+  { sem:'Y4-S1', label:'Year 4 · Sem I', subjects:[
+    {code:'3300433',name:'IDT VI',credits:5},
+    {code:'3300434',name:'IDT VII',credits:2.5},
+    {code:'3300431',name:'IDQ VI',credits:3},
+    {code:'3300435',name:'IDG V',credits:2},
+    {code:'3300399',name:'PIL IV',credits:3},
+    {code:'5500309',name:'PROF ENG PHARM I',credits:3},
+    {code:'xxxxxxx',name:'GEN ED',credits:3},
+  ]},
+  { sem:'Y4-S2', label:'Year 4 · Sem II', subjects:[
+    {code:'3300432',name:'IDQ VII',credits:2},
+    {code:'3300436',name:'IDG VI',credits:2},
+    {code:'3311501',name:'PRIN IND PHAR PROC',credits:3},
+    {code:'3311502',name:'PRIN IND PHAR ENG',credits:2},
+    {code:'3315501',name:'PHARMACOG II',credits:2},
+    {code:'5500310',name:'PROF ENG PHARM II',credits:3},
+    {code:'xxxxxxx',name:'GEN ED',credits:3},
+  ]},
+  { sem:'Y5-S1', label:'Year 5 · Sem I', subjects:[
+    {code:'3300498',name:'PIL V',credits:3},
+    {code:'3300499',name:'PIL VI',credits:3},
+    {code:'3300503',name:'SENIOR RES PROJ',credits:2},
+    {code:'3311401',name:'INT GMP',credits:2},
+    {code:'3311503',name:'TECH REQ REG PHARM',credits:1},
+    {code:'3314501',name:'DRUG QC I',credits:2},
+    {code:'33xxxxx',name:'Professional elective',credits:6},
+  ]},
+  { sem:'Y5-S2', label:'Year 5 · Sem II', subjects:[
+    {code:'3300503',name:'SENIOR PROJ',credits:2},
+    {code:'3300xxx',name:'Professional electives',credits:14},
+  ]},
+  { sem:'Y6-S1', label:'Year 6 · Sem I', subjects:[
+    {code:'3301602',name:'PPRAC IND I',credits:4},
+    {code:'3301603',name:'PPRAC IND II',credits:4},
+    {code:'3301604',name:'PPRAC RC DEV PPROD',credits:4},
+    {code:'33016xx',name:'Elective professional practice',credits:4},
+  ]},
+  { sem:'Y6-S2', label:'Year 6 · Sem II', subjects:[
+    {code:'3300xxx',name:'Elective professional practice',credits:12},
+  ]},
+];
 const BUILTIN_CURRICULA = {
   ice: { id:'ice', name:'ICE', semesters: CURRICULUM },
   balac: { id:'balac', name:'BALAC', semesters: BALAC_CURRICULUM },
+  industrial_pharmacy: { id:'industrial_pharmacy', name:'Industrial Pharmacy', semesters: INDUSTRIAL_PHARMACY_CURRICULUM },
 };
 const BUILTIN_CURRICULUM_IDS = Object.keys(BUILTIN_CURRICULA);
 const BALAC_TOTAL_CREDITS = BALAC_CURRICULUM.reduce((a,s)=>a+s.subjects.reduce((b,sub)=>b+sub.credits,0),0);
@@ -13378,6 +13556,12 @@ async function spotifyLogin() {
 
 async function handleSpotifyCallback() {
   const params = new URLSearchParams(window.location.search);
+  const spotifyError = params.get("error");
+  if (spotifyError) {
+    window.history.replaceState({}, document.title, SPOTIFY_REDIRECT_URI);
+    spotifyToast("Spotify login was cancelled or failed: " + spotifyError, "#f76a6a");
+    return;
+  }
   const code = params.get("code");
   if (!code) return;
   const expectedState = localStorage.getItem("spotify_auth_state");

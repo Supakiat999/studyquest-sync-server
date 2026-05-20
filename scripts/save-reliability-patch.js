@@ -153,6 +153,23 @@ if (!html.includes("const hasObjectEntries = value => value && typeof value === 
   );
 }
 
+if (!html.includes("Spotify login was cancelled or failed:")) {
+  html = html.replace(
+    `async function handleSpotifyCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");`,
+    `async function handleSpotifyCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const spotifyError = params.get("error");
+  if (spotifyError) {
+    window.history.replaceState({}, document.title, SPOTIFY_REDIRECT_URI);
+    spotifyToast("Spotify login was cancelled or failed: " + spotifyError, "#f76a6a");
+    return;
+  }
+  const code = params.get("code");`
+  );
+}
+
 if (html !== original) {
   fs.writeFileSync(htmlPath, html);
   console.log("Applied StudyQuest save reliability patch.");
