@@ -7,6 +7,7 @@ const { Pool } = require("pg");
 const PORT = Number(process.env.PORT || 3001);
 const ROOT = __dirname;
 const HTML_PATH = path.join(ROOT, "public", "claudever9.html");
+const V13_HTML_PATH = path.join(ROOT, "public", "claudever13.html");
 const SESSION_COOKIE = "sq_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const ADMIN_USERNAME = "admin";
@@ -438,7 +439,12 @@ const server = http.createServer(async (req, res) => {
 
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
-    if (url.pathname === "/" || url.pathname === "/claudever9.html") {
+    if (url.pathname === "/v13" || url.pathname === "/claudever13.html") {
+      send(req, res, 200, fs.readFileSync(V13_HTML_PATH), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
+    if (url.pathname === "/" || url.pathname === "/app.html" || url.pathname === "/claudever9.html") {
       send(req, res, 200, fs.readFileSync(HTML_PATH), { "content-type": "text/html; charset=utf-8" });
       return;
     }

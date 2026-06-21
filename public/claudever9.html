@@ -2119,6 +2119,7 @@
         </div>
       </div>
       <button class="btn btn-ghost" onclick="openQuickCapture()" title="Quick add task (Q)">Quick Capture</button>
+      <button class="btn btn-ghost" onclick="openV13BetaModal()" title="Try the v13 beta with a backup prompt">v13 Beta</button>
       <button class="btn btn-primary" onclick="openCreateTask()">+ New Task</button>
       <button class="btn btn-ghost logout-header-btn" onclick="studyquestLogout()" title="Sign out of this StudyQuest account">Logout</button>
       <button class="profile-btn" id="profileBtn" onclick="openProfileSettings()" title="Profile and settings">SQ</button>
@@ -3010,6 +3011,20 @@
   </div>
 </div>
 
+
+<!-- V13 BETA MODAL -->
+<div class="modal-overlay" id="v13BetaModal">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-title">Try StudyQuest v13 Beta?</div>
+    <div style="font-size:13px;line-height:1.6;color:var(--text-dim);white-space:pre-wrap;">v13 uses the same StudyQuest account data as this beta app. Export a backup before testing so your current work has a clean restore point.</div>
+    <div class="modal-btns" style="flex-wrap:wrap;">
+      <button class="btn btn-ghost" type="button" onclick="closeV13BetaModal()">Cancel</button>
+      <button class="btn btn-ghost" type="button" onclick="exportV13BetaBackup()">Export Backup</button>
+      <button class="btn btn-primary" type="button" id="v13BetaOpenBtn" onclick="openV13Beta()">Open v13</button>
+    </div>
+  </div>
+</div>
+
 <!-- APP CONFIRM MODAL -->
 <div class="modal-overlay" id="appConfirmModal">
   <div class="modal" style="max-width:420px;">
@@ -3024,6 +3039,37 @@
 
 <script>
 // ════════════════════════════════════════════════════════
+
+function openV13BetaModal() {
+  openModal('v13BetaModal');
+}
+
+function closeV13BetaModal() {
+  closeModal('v13BetaModal');
+}
+
+function exportV13BetaBackup() {
+  exportData();
+  showToast('Backup downloaded. Open v13 when you are ready.', '#6af7b0');
+}
+
+async function openV13Beta() {
+  const btn = document.getElementById('v13BetaOpenBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Opening...';
+  }
+  try {
+    if (typeof window.studyquestFlushSave === 'function') {
+      await window.studyquestFlushSave().catch(() => {});
+    } else if (typeof saveStateToServer === 'function') {
+      await saveStateToServer().catch(() => {});
+    }
+  } finally {
+    window.location.href = '/v13';
+  }
+}
+
 // STATE
 // ════════════════════════════════════════════════════════
 const LEVELS = [
