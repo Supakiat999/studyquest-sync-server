@@ -231,7 +231,7 @@ async function ensureSchema() {
   await pool.query(fs.readFileSync(path.join(ROOT, "schema.sql"), "utf8"));
   await pool.query("delete from sessions where expires_at < now()");
 
-  const admin = await pool.query("select username from accounts where username = $1", [ADMIN_USERNAME]);
+  const admin = await pool.query("select username, password_record from accounts where username = $1", [ADMIN_USERNAME]);
   if (!admin.rowCount) {
     const initialPassword = ADMIN_PASSWORD || crypto.randomBytes(18).toString("base64url");
     await pool.query(
@@ -239,6 +239,18 @@ async function ensureSchema() {
        values ($1, $2, $3::jsonb, null, 0)`,
       [ADMIN_USERNAME, "Admin", JSON.stringify(passwordRecord(initialPassword))]
     );
+    return;
+  }
+
+  if (ADMIN_PASSWORD && !verifyPassword(ADMIN_PASSWORD, admin.rows[0].password_record)) {
+    await pool.query(
+      `update accounts
+       set password_record = $2::jsonb, updated_at = now()
+       where username = $1`,
+      [ADMIN_USERNAME, JSON.stringify(passwordRecord(ADMIN_PASSWORD))]
+    );
+    await pool.query("delete from sessions where username = $1", [ADMIN_USERNAME]);
+    console.log("Synced admin password from STUDYQUEST_ADMIN_PASSWORD.");
   }
 }
 

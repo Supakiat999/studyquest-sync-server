@@ -36,6 +36,7 @@ Deployment notes from June 21, 2026:
 - The `/app.html` route is enabled by commit `ca06691389394c9a9105d0718587fc3dc68773af`, which runs `scripts/route-alias-patch.js` before `server.js` starts.
 - The `/v13` and `/claudever13.html` routes serve the experimental v13 beta. The main beta header shows a `v13 Beta` button with an export-backup prompt before opening v13.
 - v13 shares the same account state as the main beta, so users should export a backup before testing. Hosted v13 redirects logged-out users back to `/app.html` instead of silently saving local/default data.
+- The admin account password is synced from the private `STUDYQUEST_ADMIN_PASSWORD` environment variable on startup. If the admin login stops working, update that Render environment variable and redeploy/restart the service.
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
 - Render's own Free Postgres is not a forever database plan because it expires after 30 days. For long-term no-monthly-cost storage, use Neon Free Postgres or another durable database/export plan.
