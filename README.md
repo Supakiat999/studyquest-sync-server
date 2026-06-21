@@ -4,6 +4,34 @@ This folder is a Render-ready StudyQuest sync server backed by PostgreSQL.
 
 It is separate from the local laptop sync bridge. The hosted version is the better long-term option when friends do not want to use Tailscale.
 
+## Live App
+
+Open the live app here:
+
+```text
+https://studyquest-sync-server.onrender.com/app.html
+```
+
+Backup/root link:
+
+```text
+https://studyquest-sync-server.onrender.com/
+```
+
+Current Render service:
+
+```text
+studyquest-sync-server
+```
+
+Deployment notes from June 21, 2026:
+
+- Render shows this web service as `Node Free`.
+- The `/app.html` route is enabled by commit `ca06691389394c9a9105d0718587fc3dc68773af`, which runs `scripts/route-alias-patch.js` before `server.js` starts.
+- Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
+- Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
+- Render's own Free Postgres is not a forever database plan because it expires after 30 days. For long-term no-monthly-cost storage, use Neon Free Postgres or another durable database/export plan.
+
 ## Best Free Long-Term Setup
 
 Use:
@@ -73,7 +101,13 @@ The included `render.yaml` uses Render's own Postgres database. Keep it only for
 After deployment, open:
 
 ```text
-https://YOUR-RENDER-SERVICE.onrender.com/claudever9.html
+https://studyquest-sync-server.onrender.com/app.html
+```
+
+For a new clone/service, replace the host with your own Render service URL:
+
+```text
+https://YOUR-RENDER-SERVICE.onrender.com/app.html
 ```
 
 Log in with:
@@ -102,7 +136,13 @@ To migrate safely, export only the `admin.state` object and POST it to the hoste
 The Android app has a Connect screen. Paste the hosted URL:
 
 ```text
-https://YOUR-RENDER-SERVICE.onrender.com/claudever9.html
+https://studyquest-sync-server.onrender.com/app.html
+```
+
+For a new clone/service, replace the host with your own Render service URL:
+
+```text
+https://YOUR-RENDER-SERVICE.onrender.com/app.html
 ```
 
 After it connects once, the app remembers that URL.
