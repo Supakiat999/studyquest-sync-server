@@ -10,6 +10,8 @@ create table if not exists accounts (
 
 alter table accounts add column if not exists state_revision bigint not null default 0;
 alter table accounts add column if not exists state_updated_at timestamptz;
+alter table accounts add column if not exists password_change_required boolean not null default false;
+alter table accounts add column if not exists temporary_password_expires_at timestamptz;
 
 create table if not exists sessions (
   token_hash text primary key,
@@ -55,3 +57,24 @@ create table if not exists sync_devices (
 );
 
 create index if not exists sync_devices_username_idx on sync_devices(username);
+
+create table if not exists password_recovery_requests (
+  id text primary key,
+  username text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'approved', 'completed', 'denied', 'expired')),
+  source text not null default 'user'
+    check (source in ('user', 'admin')),
+  admin_note text,
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  completed_at timestamptz,
+  expires_at timestamptz
+);
+
+create unique index if not exists password_recovery_one_pending_idx
+  on password_recovery_requests(username) where status = 'pending';
+create index if not exists password_recovery_status_created_idx
+  on password_recovery_requests(status, created_at desc);
+create index if not exists password_recovery_username_created_idx
+  on password_recovery_requests(username, created_at desc);

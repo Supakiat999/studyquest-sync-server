@@ -20,10 +20,13 @@ const PBKDF2_DIGEST = "sha512";
 const MAX_ACCOUNTS = Number(process.env.STUDYQUEST_MAX_ACCOUNTS || 5);
 const MAX_AUTH_BODY_BYTES = 64 * 1024;
 const MAX_STATE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_BYTES || 1024 * 1024);
+const TEMP_PASSWORD_MAX_AGE_SECONDS = 24 * 60 * 60;
 const IS_HOSTED = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
 
 const ADMIN_PASSWORD = process.env.STUDYQUEST_ADMIN_PASSWORD;
 const INVITE_CODE = process.env.STUDYQUEST_INVITE_CODE;
+const ADMIN_CONTACT_LABEL = String(process.env.STUDYQUEST_ADMIN_CONTACT_LABEL || "Contact your StudyQuest admin").trim().slice(0, 120);
+const ADMIN_CONTACT_URL = safeContactUrl(process.env.STUDYQUEST_ADMIN_CONTACT_URL);
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
@@ -153,6 +156,35 @@ function verifyPassword(password, record) {
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
+function readableSecret(length = 12) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let value = "";
+  for (let index = 0; index < length; index += 1) {
+    value += alphabet[crypto.randomInt(0, alphabet.length)];
+  }
+  return value;
+}
+
+function recoveryCaseId() {
+  return `SQ-${readableSecret(10)}`;
+}
+
+function temporaryPassword() {
+  return `SQ!${readableSecret(6)}-${readableSecret(6)}-${readableSecret(4)}`;
+}
+
+function stateSummary(value) {
+  const state = value && typeof value === "object" ? value : {};
+  return {
+    tasks: Array.isArray(state.tasks) ? state.tasks.length : 0,
+    notes: Array.isArray(state.notes) ? state.notes.length : 0,
+    files: Array.isArray(state.fileLinks) ? state.fileLinks.length : 0,
+    checklist: Array.isArray(state.checklistItems) ? state.checklistItems.length : 0,
+    grades: state.grades && typeof state.grades === "object" ? Object.keys(state.grades).length : 0,
+    trips: Array.isArray(state.trips) ? state.trips.length : 0,
+  };
+}
+
 function isAllowedOrigin(req, origin) {
   if (!origin) return false;
   try {
@@ -234,6 +266,11 @@ async function ensureSchema() {
   await pool.query("delete from sessions where expires_at < now()");
   await pool.query("delete from sync_pairing_codes where expires_at < now() or used_at is not null");
   await pool.query("delete from state_backups where created_at < now() - interval '30 days'");
+  await pool.query(
+    `update password_recovery_requests
+     set status = 'expired', resolved_at = coalesce(resolved_at, now())
+     where status = 'approved' and expires_at < now()`
+  );
 
   const admin = await pool.query("select username, password_record from accounts where username = $1", [ADMIN_USERNAME]);
   if (!admin.rowCount) {
@@ -249,7 +286,8 @@ async function ensureSchema() {
   if (ADMIN_PASSWORD && !verifyPassword(ADMIN_PASSWORD, admin.rows[0].password_record)) {
     await pool.query(
       `update accounts
-       set password_record = $2::jsonb, updated_at = now()
+       set password_record = $2::jsonb, password_change_required = false,
+           temporary_password_expires_at = null, updated_at = now()
        where username = $1`,
       [ADMIN_USERNAME, JSON.stringify(passwordRecord(ADMIN_PASSWORD))]
     );
@@ -334,6 +372,29 @@ async function handleLogin(req, res) {
     return;
   }
 
+  if (user.password_change_required) {
+    if (!user.temporary_password_expires_at || new Date(user.temporary_password_expires_at).getTime() <= Date.now()) {
+      await pool.query(
+        `update password_recovery_requests
+         set status = 'expired', resolved_at = coalesce(resolved_at, now())
+         where username = $1 and status = 'approved'`,
+        [username]
+      );
+      sendJson(req, res, 403, {
+        ok: false,
+        code: "TEMPORARY_PASSWORD_EXPIRED",
+        error: "That temporary password expired. Contact your StudyQuest admin for a new reset.",
+      });
+      return;
+    }
+    sendJson(req, res, 409, {
+      ok: false,
+      code: "PASSWORD_CHANGE_REQUIRED",
+      error: "Choose a new password to finish account recovery.",
+    });
+    return;
+  }
+
   await createSession(req, res, username);
   sendJson(req, res, 200, { ok: true, user: publicUser(user) });
 }
@@ -400,6 +461,393 @@ async function handleRegister(req, res) {
   }
 }
 
+function recoveryContact() {
+  return { label: ADMIN_CONTACT_LABEL || "Contact your StudyQuest admin", url: ADMIN_CONTACT_URL || null };
+}
+
+async function requireBrowserAdmin(req, res) {
+  const user = await currentUser(req);
+  if (!user || user.username !== ADMIN_USERNAME || user.sync_device_id) {
+    sendJson(req, res, 403, { ok: false, error: "Admin access required." });
+    return null;
+  }
+  return user;
+}
+
+async function handleRecoveryConfig(req, res) {
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  sendJson(req, res, 200, { ok: true, contact: recoveryContact() });
+}
+
+async function handleRecoveryRequest(req, res) {
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  if (isRateLimited(clientKey(req, "recovery-request"), 5, 60 * 60 * 1000)) {
+    return sendJson(req, res, 429, { ok: false, error: "Too many recovery requests. Try again later." });
+  }
+
+  const body = await readJsonBody(req);
+  const username = normalizeUsername(body.username);
+  let requestId = recoveryCaseId();
+  if (USERNAME_PATTERN.test(username)) {
+    const existing = await pool.query(
+      `select id from password_recovery_requests
+       where username = $1 and status = 'pending'
+       order by created_at desc limit 1`,
+      [username]
+    );
+    if (existing.rowCount) {
+      requestId = existing.rows[0].id;
+    } else {
+      await pool.query(
+        `insert into password_recovery_requests (id, username, source)
+         values ($1, $2, 'user')
+         on conflict do nothing`,
+        [requestId, username]
+      );
+      const pending = await pool.query(
+        `select id from password_recovery_requests
+         where username = $1 and status = 'pending'
+         order by created_at desc limit 1`,
+        [username]
+      );
+      if (pending.rowCount) requestId = pending.rows[0].id;
+    }
+  }
+
+  sendJson(req, res, 200, {
+    ok: true,
+    requestId,
+    contact: recoveryContact(),
+    adminRecovery: username === ADMIN_USERNAME,
+    message: username === ADMIN_USERNAME
+      ? "Admin recovery must be completed by the Render owner using STUDYQUEST_ADMIN_PASSWORD."
+      : "If that account exists, the request is ready. Contact your StudyQuest admin and provide this case ID.",
+  });
+}
+
+async function handleRecoveryComplete(req, res) {
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const username = normalizeUsername(body.username);
+  const suppliedTemporaryPassword = String(body.temporaryPassword || "");
+  const newPassword = String(body.newPassword || "");
+  const validationError = validateCredentials(username, newPassword);
+  if (validationError) return sendJson(req, res, 400, { ok: false, error: validationError });
+  if (username === ADMIN_USERNAME) {
+    return sendJson(req, res, 403, { ok: false, error: "Admin recovery must be completed in Render." });
+  }
+  if (isRateLimited(clientKey(req, `recovery-complete:${username}`), 10, 15 * 60 * 1000)) {
+    return sendJson(req, res, 429, { ok: false, error: "Too many recovery attempts. Try again in 15 minutes." });
+  }
+
+  const client = await pool.connect();
+  let recoveredUser = null;
+  try {
+    await client.query("begin");
+    const result = await client.query("select * from accounts where username = $1 for update", [username]);
+    const account = result.rows[0];
+    const validTemporaryPassword = account
+      && account.password_change_required
+      && account.temporary_password_expires_at
+      && new Date(account.temporary_password_expires_at).getTime() > Date.now()
+      && verifyPassword(suppliedTemporaryPassword, account.password_record);
+    if (!validTemporaryPassword) {
+      await client.query("rollback");
+      return sendJson(req, res, 401, { ok: false, error: "Temporary password is invalid or expired." });
+    }
+
+    const updated = await client.query(
+      `update accounts
+       set password_record = $2::jsonb, password_change_required = false,
+           temporary_password_expires_at = null, updated_at = now()
+       where username = $1
+       returning *`,
+      [username, JSON.stringify(passwordRecord(newPassword))]
+    );
+    await client.query(
+      `update password_recovery_requests
+       set status = 'completed', completed_at = now()
+       where id = (
+         select id from password_recovery_requests
+         where username = $1 and status = 'approved'
+         order by resolved_at desc nulls last limit 1
+       )`,
+      [username]
+    );
+    await client.query("commit");
+    recoveredUser = updated.rows[0];
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await createSession(req, res, username);
+  sendJson(req, res, 200, { ok: true, user: publicUser(recoveredUser) });
+}
+
+async function expireApprovedRecoveryRequests(client = pool) {
+  await client.query(
+    `update password_recovery_requests
+     set status = 'expired', resolved_at = coalesce(resolved_at, now())
+     where status = 'approved' and expires_at < now()`
+  );
+}
+
+async function approveRecoveryRequest(client, requestId, adminNote) {
+  const requestResult = await client.query(
+    "select * from password_recovery_requests where id = $1 for update",
+    [requestId]
+  );
+  const request = requestResult.rows[0];
+  if (!request) return { error: "Recovery request not found.", status: 404 };
+  if (request.username === ADMIN_USERNAME) return { error: "Admin recovery must be completed in Render.", status: 403 };
+  if (request.status !== "pending") return { error: "Only pending recovery requests can be approved.", status: 409 };
+
+  const accountResult = await client.query("select * from accounts where username = $1 for update", [request.username]);
+  const account = accountResult.rows[0];
+  if (!account) return { error: "No account exists for this request.", status: 404 };
+
+  const plaintext = temporaryPassword();
+  const expiresAt = new Date(Date.now() + TEMP_PASSWORD_MAX_AGE_SECONDS * 1000);
+  await client.query(
+    `update accounts
+     set password_record = $2::jsonb, password_change_required = true,
+         temporary_password_expires_at = $3, updated_at = now()
+     where username = $1`,
+    [request.username, JSON.stringify(passwordRecord(plaintext)), expiresAt]
+  );
+  await client.query("delete from sessions where username = $1", [request.username]);
+  await client.query("update sync_devices set revoked_at = now() where username = $1 and revoked_at is null", [request.username]);
+  await client.query(
+    `update password_recovery_requests
+     set status = 'approved', admin_note = $2, resolved_at = now(), expires_at = $3
+     where id = $1`,
+    [requestId, adminNote || null, expiresAt]
+  );
+  return { request, plaintext, expiresAt };
+}
+
+async function handleAdminRecoveryRequests(req, res) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  await expireApprovedRecoveryRequests();
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  const result = await pool.query(
+    `select r.*, a.display_name, a.created_at as account_created_at,
+            a.username is not null as account_exists, a.state
+     from password_recovery_requests r
+     left join accounts a on a.username = r.username
+     order by case r.status when 'pending' then 0 when 'approved' then 1 else 2 end,
+              r.created_at desc`
+  );
+  const requests = result.rows.map((row) => ({
+    id: row.id,
+    username: row.username,
+    status: row.status,
+    source: row.source,
+    adminNote: row.admin_note,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+    completedAt: row.completed_at,
+    expiresAt: row.expires_at,
+    accountExists: !!row.account_exists,
+    displayName: row.display_name || null,
+    summary: row.account_exists ? stateSummary(row.state) : null,
+  }));
+  sendJson(req, res, 200, { ok: true, requests });
+}
+
+async function handleAdminRecoveryApprove(req, res, requestId) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await approveRecoveryRequest(client, requestId, String(body.note || "").trim().slice(0, 500));
+    if (result.error) {
+      await client.query("rollback");
+      return sendJson(req, res, result.status, { ok: false, error: result.error });
+    }
+    await client.query("commit");
+    sendJson(req, res, 200, {
+      ok: true,
+      requestId,
+      username: result.request.username,
+      temporaryPassword: result.plaintext,
+      expiresAt: result.expiresAt.toISOString(),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function handleAdminRecoveryDeny(req, res, requestId) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const result = await pool.query(
+    `update password_recovery_requests
+     set status = 'denied', admin_note = $2, resolved_at = now()
+     where id = $1 and status = 'pending'
+     returning id`,
+    [requestId, String(body.note || "").trim().slice(0, 500) || null]
+  );
+  if (!result.rowCount) return sendJson(req, res, 409, { ok: false, error: "That request is no longer pending." });
+  sendJson(req, res, 200, { ok: true });
+}
+
+async function handleAdminRecoveryManual(req, res) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const username = normalizeUsername(body.username);
+  const note = String(body.note || "").trim().slice(0, 500);
+  if (username === ADMIN_USERNAME) return sendJson(req, res, 403, { ok: false, error: "Admin recovery must be completed in Render." });
+  if (!USERNAME_PATTERN.test(username) || note.length < 3) {
+    return sendJson(req, res, 400, { ok: false, error: "Choose a valid username and record why the reset was requested." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const account = await client.query("select username from accounts where username = $1", [username]);
+    if (!account.rowCount) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok: false, error: "Account not found." });
+    }
+    let pending = await client.query(
+      "select id from password_recovery_requests where username = $1 and status = 'pending' order by created_at desc limit 1",
+      [username]
+    );
+    let requestId = pending.rows[0]?.id;
+    if (!requestId) {
+      requestId = recoveryCaseId();
+      await client.query(
+        `insert into password_recovery_requests (id, username, source, admin_note)
+         values ($1, $2, 'admin', $3)`,
+        [requestId, username, note]
+      );
+    }
+    const result = await approveRecoveryRequest(client, requestId, note);
+    if (result.error) {
+      await client.query("rollback");
+      return sendJson(req, res, result.status, { ok: false, error: result.error });
+    }
+    await client.query("commit");
+    sendJson(req, res, 200, {
+      ok: true,
+      requestId,
+      username,
+      temporaryPassword: result.plaintext,
+      expiresAt: result.expiresAt.toISOString(),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function handleAdminRecoverySnapshots(req, res, url) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  const username = normalizeUsername(url.searchParams.get("username"));
+  if (!USERNAME_PATTERN.test(username)) return sendJson(req, res, 400, { ok: false, error: "Choose an account." });
+  const account = await pool.query("select username, state, state_revision, state_updated_at from accounts where username = $1", [username]);
+  if (!account.rowCount) return sendJson(req, res, 404, { ok: false, error: "Account not found." });
+  const backups = await pool.query(
+    `select id, revision, reason, created_at, state
+     from state_backups where username = $1
+     order by created_at desc limit 60`,
+    [username]
+  );
+  sendJson(req, res, 200, {
+    ok: true,
+    username,
+    current: {
+      revision: Number(account.rows[0].state_revision || 0),
+      updatedAt: account.rows[0].state_updated_at,
+      summary: stateSummary(account.rows[0].state),
+    },
+    snapshots: backups.rows.map((row) => ({
+      id: String(row.id),
+      revision: Number(row.revision || 0),
+      reason: row.reason,
+      createdAt: row.created_at,
+      summary: stateSummary(row.state),
+    })),
+  });
+}
+
+async function handleAdminRecoverySnapshotRestore(req, res, snapshotId) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const username = normalizeUsername(body.username);
+  if (!USERNAME_PATTERN.test(username) || !/^\d+$/.test(snapshotId)) {
+    return sendJson(req, res, 400, { ok: false, error: "Invalid restore request." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const accountResult = await client.query("select * from accounts where username = $1 for update", [username]);
+    const account = accountResult.rows[0];
+    if (!account) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok: false, error: "Account not found." });
+    }
+    const snapshotResult = await client.query(
+      "select * from state_backups where id = $1 and username = $2",
+      [snapshotId, username]
+    );
+    const snapshot = snapshotResult.rows[0];
+    if (!snapshot) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok: false, error: "Snapshot not found for that account." });
+    }
+    let preRestoreBackupId = null;
+    if (account.state) {
+      const backup = await client.query(
+        `insert into state_backups (username, revision, state, reason)
+         values ($1, $2, $3::jsonb, 'pre_restore') returning id`,
+        [username, Number(account.state_revision || 0), JSON.stringify(account.state)]
+      );
+      preRestoreBackupId = String(backup.rows[0].id);
+    }
+    const restoredState = snapshot.state || null;
+    const stateBytes = Buffer.byteLength(JSON.stringify(restoredState));
+    const updated = await client.query(
+      `update accounts
+       set state = $2::jsonb, state_bytes = $3, state_revision = state_revision + 1,
+           state_updated_at = now(), updated_at = now()
+       where username = $1
+       returning state_revision, state_updated_at`,
+      [username, JSON.stringify(restoredState), stateBytes]
+    );
+    await client.query("commit");
+    sendJson(req, res, 200, {
+      ok: true,
+      username,
+      revision: Number(updated.rows[0].state_revision),
+      restoredAt: updated.rows[0].state_updated_at,
+      preRestoreBackupId,
+      summary: stateSummary(restoredState),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function handleMe(req, res) {
   const user = await currentUser(req);
   if (!user) {
@@ -456,6 +904,11 @@ async function handleState(req, res) {
   }
 
   send(req, res, 405, "Method not allowed");
+}
+
+function safeContactUrl(value) {
+  const url = String(value || "").trim();
+  return /^(?:https?:|mailto:)/i.test(url) ? url.slice(0, 500) : "";
 }
 
 async function createDailyStateBackup(client, row) {
@@ -724,6 +1177,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/recovery/config") {
+      await handleRecoveryConfig(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/recovery/requests") {
+      await handleRecoveryRequest(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/recovery/complete") {
+      await handleRecoveryComplete(req, res);
+      return;
+    }
+
     if (url.pathname === "/api/me") {
       await handleMe(req, res);
       return;
@@ -766,6 +1234,39 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/admin/users") {
       await handleAdminUsers(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/admin/recovery/requests") {
+      await handleAdminRecoveryRequests(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/admin/recovery/manual") {
+      await handleAdminRecoveryManual(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/admin/recovery/snapshots") {
+      await handleAdminRecoverySnapshots(req, res, url);
+      return;
+    }
+
+    const recoveryApproveMatch = url.pathname.match(/^\/api\/admin\/recovery\/requests\/([^/]+)\/approve$/);
+    if (recoveryApproveMatch) {
+      await handleAdminRecoveryApprove(req, res, decodeURIComponent(recoveryApproveMatch[1]));
+      return;
+    }
+
+    const recoveryDenyMatch = url.pathname.match(/^\/api\/admin\/recovery\/requests\/([^/]+)\/deny$/);
+    if (recoveryDenyMatch) {
+      await handleAdminRecoveryDeny(req, res, decodeURIComponent(recoveryDenyMatch[1]));
+      return;
+    }
+
+    const recoveryRestoreMatch = url.pathname.match(/^\/api\/admin\/recovery\/snapshots\/(\d+)\/restore$/);
+    if (recoveryRestoreMatch) {
+      await handleAdminRecoverySnapshotRestore(req, res, recoveryRestoreMatch[1]);
       return;
     }
 

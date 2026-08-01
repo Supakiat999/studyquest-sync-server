@@ -15,6 +15,10 @@ services:
         sync: false
       - key: STUDYQUEST_INVITE_CODE
         sync: false
+      - key: STUDYQUEST_ADMIN_CONTACT_LABEL
+        sync: false
+      - key: STUDYQUEST_ADMIN_CONTACT_URL
+        sync: false
       - key: STUDYQUEST_MAX_ACCOUNTS
         value: "5"
       - key: STUDYQUEST_MAX_STATE_BYTES

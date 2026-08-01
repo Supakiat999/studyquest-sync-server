@@ -99,6 +99,8 @@
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const error = new Error(data.error || data.message || "Request failed.");
+          error.code = data.code || "";
+          error.data = data;
           error.authServerUnavailable = response.status === 404;
           throw error;
         }
@@ -159,9 +161,48 @@
             <button type="submit">Login</button>
             <button type="button" class="secondary" id="sqCreateAccount">Create account</button>
           </div>
+          <button type="button" class="sq-text-action" id="sqForgotPassword">Forgot password?</button>
           <div class="sq-login-hint">Admin uses username admin. Friends need the invite code to create their own account.</div>
           <div class="sq-login-error" role="alert" aria-live="polite"></div>
         </form>
+        <div class="sq-auth-overlay" id="sqRecoveryOverlay" hidden>
+          <form class="sq-auth-dialog" id="sqRecoveryForm">
+            <div class="sq-auth-dialog-head">
+              <div>
+                <strong>Password Recovery</strong>
+                <span>Request help, then contact your StudyQuest admin directly.</span>
+              </div>
+              <button type="button" class="sq-icon-button" id="sqCloseRecovery" aria-label="Close password recovery">×</button>
+            </div>
+            <label for="sqRecoveryUsername">Username</label>
+            <input id="sqRecoveryUsername" type="text" autocomplete="username" required>
+            <div class="sq-recovery-result" id="sqRecoveryResult" hidden></div>
+            <div class="sq-auth-dialog-actions">
+              <button type="button" class="secondary" id="sqCancelRecovery">Cancel</button>
+              <button type="submit" id="sqSubmitRecovery">Create Request</button>
+            </div>
+          </form>
+        </div>
+        <div class="sq-auth-overlay" id="sqPasswordChangeOverlay" hidden>
+          <form class="sq-auth-dialog" id="sqPasswordChangeForm">
+            <div class="sq-auth-dialog-head">
+              <div>
+                <strong>Choose New Password</strong>
+                <span>Your temporary password was accepted. Create a permanent password to continue.</span>
+              </div>
+              <button type="button" class="sq-icon-button" id="sqCancelPasswordChange" aria-label="Cancel password change">×</button>
+            </div>
+            <label for="sqNewPassword">New password</label>
+            <input id="sqNewPassword" type="password" autocomplete="new-password" minlength="8" required>
+            <label for="sqConfirmNewPassword">Confirm new password</label>
+            <input id="sqConfirmNewPassword" type="password" autocomplete="new-password" minlength="8" required>
+            <div class="sq-login-error" id="sqPasswordChangeError" role="alert" aria-live="polite"></div>
+            <div class="sq-auth-dialog-actions">
+              <button type="button" class="secondary" id="sqBackToLogin">Back to Login</button>
+              <button type="submit">Save New Password</button>
+            </div>
+          </form>
+        </div>
       `;
       document.body.appendChild(gate);
 
@@ -170,7 +211,112 @@
       const passwordInput = gate.querySelector("#sqLoginPassword");
       const inviteInput = gate.querySelector("#sqInviteCode");
       const createButton = gate.querySelector("#sqCreateAccount");
+      const forgotButton = gate.querySelector("#sqForgotPassword");
       const error = gate.querySelector(".sq-login-error");
+      const recoveryOverlay = gate.querySelector("#sqRecoveryOverlay");
+      const recoveryForm = gate.querySelector("#sqRecoveryForm");
+      const recoveryUsername = gate.querySelector("#sqRecoveryUsername");
+      const recoveryResult = gate.querySelector("#sqRecoveryResult");
+      const passwordChangeOverlay = gate.querySelector("#sqPasswordChangeOverlay");
+      const passwordChangeForm = gate.querySelector("#sqPasswordChangeForm");
+      const passwordChangeError = gate.querySelector("#sqPasswordChangeError");
+      let pendingPasswordChange = null;
+
+      function closeRecovery() {
+        recoveryOverlay.hidden = true;
+        recoveryResult.hidden = true;
+        recoveryResult.innerHTML = "";
+      }
+
+      function openRecovery() {
+        recoveryUsername.value = usernameInput.value.trim();
+        recoveryResult.hidden = true;
+        recoveryResult.innerHTML = "";
+        recoveryOverlay.hidden = false;
+        setTimeout(() => recoveryUsername.focus(), 0);
+      }
+
+      function closePasswordChange() {
+        pendingPasswordChange = null;
+        passwordChangeForm.reset();
+        passwordChangeError.textContent = "";
+        passwordChangeOverlay.hidden = true;
+        passwordInput.value = "";
+        passwordInput.focus();
+      }
+
+      function openPasswordChange(username, temporaryPassword) {
+        pendingPasswordChange = { username, temporaryPassword };
+        passwordChangeForm.reset();
+        passwordChangeError.textContent = "";
+        passwordChangeOverlay.hidden = false;
+        setTimeout(() => gate.querySelector("#sqNewPassword").focus(), 0);
+      }
+
+      forgotButton.addEventListener("click", openRecovery);
+      gate.querySelector("#sqCloseRecovery").addEventListener("click", closeRecovery);
+      gate.querySelector("#sqCancelRecovery").addEventListener("click", closeRecovery);
+      gate.querySelector("#sqCancelPasswordChange").addEventListener("click", closePasswordChange);
+      gate.querySelector("#sqBackToLogin").addEventListener("click", closePasswordChange);
+
+      recoveryOverlay.addEventListener("click", event => {
+        if (event.target === recoveryOverlay) closeRecovery();
+      });
+
+      recoveryForm.addEventListener("submit", async event => {
+        event.preventDefault();
+        const submitButton = gate.querySelector("#sqSubmitRecovery");
+        submitButton.disabled = true;
+        recoveryUsername.disabled = true;
+        recoveryResult.hidden = true;
+        try {
+          const data = await requestAuth("/api/recovery/requests", { username: recoveryUsername.value.trim() });
+          const contact = data.contact || {};
+          const contactMarkup = contact.url
+            ? `<a href="${escapeHtml(contact.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(contact.label || "Contact admin")}</a>`
+            : `<strong>${escapeHtml(contact.label || "Contact your StudyQuest admin")}</strong>`;
+          recoveryResult.innerHTML = `
+            <span class="sq-recovery-status">Request ready</span>
+            <strong class="sq-case-id">${escapeHtml(data.requestId || "")}</strong>
+            <p>${escapeHtml(data.message || "Contact your StudyQuest admin and provide this case ID.")}</p>
+            <p>${contactMarkup}</p>
+            <small>No password or StudyQuest data was exposed or changed by this request.</small>`;
+          recoveryResult.hidden = false;
+          submitButton.textContent = "Request Again";
+        } catch (recoveryError) {
+          recoveryResult.innerHTML = `<span class="sq-recovery-error">${escapeHtml(recoveryError.message || "Could not create a recovery request.")}</span>`;
+          recoveryResult.hidden = false;
+        } finally {
+          submitButton.disabled = false;
+          recoveryUsername.disabled = false;
+        }
+      });
+
+      passwordChangeForm.addEventListener("submit", async event => {
+        event.preventDefault();
+        passwordChangeError.textContent = "";
+        const newPassword = gate.querySelector("#sqNewPassword").value;
+        const confirmation = gate.querySelector("#sqConfirmNewPassword").value;
+        if (!pendingPasswordChange) return closePasswordChange();
+        if (newPassword !== confirmation) {
+          passwordChangeError.textContent = "Passwords do not match.";
+          return;
+        }
+        const controls = passwordChangeForm.querySelectorAll("button, input");
+        controls.forEach(control => control.disabled = true);
+        try {
+          const data = await requestAuth("/api/recovery/complete", {
+            username: pendingPasswordChange.username,
+            temporaryPassword: pendingPasswordChange.temporaryPassword,
+            newPassword,
+          });
+          pendingPasswordChange = null;
+          unlock(data.user);
+        } catch (changeError) {
+          passwordChangeError.textContent = changeError.message || "Could not finish password recovery.";
+          controls.forEach(control => control.disabled = false);
+        }
+      });
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -185,6 +331,10 @@
               unlock(data.user);
               return;
             } catch (serverError) {
+              if (serverError.code === "PASSWORD_CHANGE_REQUIRED") {
+                openPasswordChange(username, password);
+                return;
+              }
               if (serverError.authServerUnavailable && await isLegacyAdmin(username, password)) {
                 unlock({ username: "admin", legacy: true });
                 return;
@@ -253,9 +403,54 @@
   }
   .sq-login-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .sq-login-card button.secondary { background: #252a45; color: #e8eaf6; }
+  .sq-login-card .sq-text-action {
+    height: auto; width: max-content; justify-self: center; padding: 4px 8px; background: transparent;
+    color: #9aa3d9; font-size: 12px;
+  }
+  .sq-login-card .sq-text-action:hover { color: #fff; }
   .sq-login-card button:disabled, .sq-login-card input:disabled { opacity: .65; cursor: wait; }
   .sq-login-hint { color: #9aa3d9; font-size: 12px; line-height: 1.35; }
   .sq-login-error { min-height: 18px; color: #f76a6a; font-size: 12px; font-weight: 800; }
+  .sq-auth-overlay[hidden] { display: none !important; }
+  .sq-auth-overlay {
+    position: fixed; inset: 0; z-index: 100001; display: grid; place-items: center; padding: 16px;
+    background: rgba(7,9,18,.86); overflow: auto;
+  }
+  .sq-auth-dialog {
+    width: min(94vw, 460px); max-height: calc(100dvh - 32px); overflow: auto; display: grid; gap: 12px;
+    padding: 20px; border: 1px solid #30385c; border-radius: 10px; background: #13162a;
+    box-shadow: 0 22px 70px rgba(0,0,0,.52); color: #e8eaf6;
+  }
+  .sq-auth-dialog-head { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: start; }
+  .sq-auth-dialog-head strong { display: block; font-size: 19px; }
+  .sq-auth-dialog-head span { display: block; margin-top: 4px; color: #9aa3d9; font-size: 12px; line-height: 1.45; }
+  .sq-auth-dialog label { color: #7986cb; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+  .sq-auth-dialog input {
+    width: 100%; min-height: 44px; box-sizing: border-box; border: 1px solid #30385c; border-radius: 7px;
+    background: #1a1f38; color: #e8eaf6; padding: 0 12px; font: inherit; outline: none;
+  }
+  .sq-auth-dialog input:focus { border-color: #7c6af7; }
+  .sq-auth-dialog button {
+    min-height: 42px; border: 0; border-radius: 7px; background: #7c6af7; color: #fff;
+    padding: 0 14px; font-weight: 800; cursor: pointer;
+  }
+  .sq-auth-dialog button.secondary { background: #252a45; }
+  .sq-auth-dialog .sq-icon-button { min-width: 38px; min-height: 38px; padding: 0; background: #252a45; font-size: 18px; }
+  .sq-auth-dialog-actions { position: sticky; bottom: -20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 10px; background: #13162a; }
+  .sq-recovery-result { border: 1px solid #30385c; border-radius: 8px; background: #1a1f38; padding: 13px; }
+  .sq-recovery-result p { margin: 8px 0 0; color: #b2b8df; font-size: 12px; line-height: 1.5; }
+  .sq-recovery-result a { color: #a99ef9; }
+  .sq-recovery-result small { display: block; margin-top: 9px; color: #7986cb; line-height: 1.4; }
+  .sq-recovery-status { display: block; color: #6af7b0; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+  .sq-case-id { display: block; margin-top: 5px; color: #fff; font-family: 'Space Mono', monospace; font-size: 20px; overflow-wrap: anywhere; }
+  .sq-recovery-error { color: #f76a6a; font-size: 12px; font-weight: 800; }
+  @media (max-width: 520px) {
+    #studyquestLoginGate { padding: 12px; }
+    .sq-login-card { width: min(96vw, 380px); padding: 18px; }
+    .sq-auth-overlay { padding: 8px; }
+    .sq-auth-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 16px; }
+    .sq-auth-dialog-actions { bottom: -16px; }
+  }
   #studyquestAccountBadge {
     position: fixed; right: 14px; bottom: 14px; z-index: 9999; display: flex; gap: 10px; align-items: center;
     padding: 8px 10px; border: 1px solid #252a45; border-radius: 999px; background: rgba(19,22,42,.94);

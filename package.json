@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node scripts/check-html.js public/claudever9.html public/claudever13.html",
+    "check": "node --check server.js && node scripts/check-html.js public/claudever9.html public/claudever13.html && node scripts/check-recovery.js",
     "export:admin-state": "node scripts/export-admin-state.js",
     "import:admin-state": "node scripts/import-admin-state.js"
   },

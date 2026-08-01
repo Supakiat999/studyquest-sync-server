@@ -362,8 +362,48 @@
     color: var(--green);
     letter-spacing: 0;
   }
+  .recovery-status-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .recovery-status-pending { color: var(--gold); border-color: rgba(247,192,106,.35); background: rgba(247,192,106,.09); }
+  .recovery-status-approved { color: var(--green); border-color: rgba(106,247,176,.32); background: rgba(106,247,176,.08); }
+  .recovery-status-completed { color: var(--accent); border-color: rgba(124,106,247,.35); background: rgba(124,106,247,.09); }
+  .recovery-status-denied,
+  .recovery-status-expired { color: var(--text-muted); }
+  .account-recovery-form {
+    display: grid;
+    grid-template-columns: minmax(150px, .8fr) minmax(220px, 1.5fr) auto;
+    gap: 8px;
+    align-items: end;
+  }
+  .account-recovery-form label { display: grid; gap: 5px; min-width: 0; }
+  .account-recovery-form label > span { color: var(--text-muted); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+  .recovery-secret {
+    border: 1px solid rgba(106,247,176,.35);
+    border-radius: 8px;
+    background: rgba(106,247,176,.07);
+    padding: 12px;
+  }
+  .recovery-secret-code {
+    margin-top: 5px;
+    color: var(--green);
+    font-family: 'Space Mono', monospace;
+    font-size: 19px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
   @media (max-width: 620px) {
     .sync-conflict-grid { grid-template-columns: 1fr; }
+    .account-recovery-form { grid-template-columns: 1fr; }
   }
   .priority-chip,
   .kind-chip,
@@ -5582,14 +5622,14 @@
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;">
       <div>
         <div class="modal-title" style="margin-bottom:4px;">Recovery Center</div>
-        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">Backups, undo history, save health, and recent app errors for local v13 testing.</div>
+        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">Account recovery, backups, sync health, undo history, and recent app errors.</div>
       </div>
       <button class="task-modal-close" type="button" onclick="closeModal('recoveryCenterModal')" title="Close Recovery Center" aria-label="Close Recovery Center">×</button>
     </div>
     <div id="recoveryCenterBody"></div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeModal('recoveryCenterModal')">Close</button>
-      <button class="btn btn-primary" onclick="renderRecoveryCenter()">Refresh</button>
+      <button class="btn btn-primary" onclick="refreshRecoveryCenter()">Refresh</button>
     </div>
   </div>
 </div>
@@ -5825,6 +5865,16 @@ let liveSync = {
   deviceName: null,
   release: null,
   message: '',
+};
+let accountRecovery = {
+  loading: false,
+  error: '',
+  requests: [],
+  users: [],
+  selectedUsername: '',
+  snapshots: [],
+  currentSnapshot: null,
+  temporaryCredential: null,
 };
 
 function safeReadJson(key, fallback = null) {
@@ -6424,6 +6474,13 @@ function openRecoveryCenter() {
   renderRecoveryCenter();
   openModal('recoveryCenterModal');
   refreshLiveSyncStatus();
+  refreshAccountRecoveryAdmin();
+}
+
+function refreshRecoveryCenter() {
+  renderRecoveryCenter();
+  refreshLiveSyncStatus();
+  refreshAccountRecoveryAdmin();
 }
 
 function openStableApp() {
@@ -6655,6 +6712,276 @@ function copyErrorDetails() {
     .catch(() => showToast('Could not copy error details.', '#f76a6a'));
 }
 
+function recoverySummaryText(summary) {
+  if (!summary) return 'No account data summary';
+  return `${Number(summary.tasks || 0)} tasks · ${Number(summary.notes || 0)} notes · ${Number(summary.files || 0)} files · ${Number(summary.grades || 0)} grades · ${Number(summary.trips || 0)} trips`;
+}
+
+async function adminRecoveryFetch(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    ...options,
+    headers: options.body ? { 'Content-Type': 'application/json', ...(options.headers || {}) } : options.headers,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    handleHostedAuthExpired();
+    throw new Error('Admin login required.');
+  }
+  if (!response.ok) throw new Error(result.error || 'Recovery request failed.');
+  return result;
+}
+
+async function loadAccountRecoverySnapshots(username, options = {}) {
+  if (!isHostedAppHost() || !username) return;
+  accountRecovery.selectedUsername = username;
+  if (!options.silent) {
+    accountRecovery.snapshots = [];
+    accountRecovery.currentSnapshot = null;
+    renderRecoveryCenter();
+  }
+  try {
+    const result = await adminRecoveryFetch(`/api/admin/recovery/snapshots?username=${encodeURIComponent(username)}`);
+    accountRecovery.snapshots = Array.isArray(result.snapshots) ? result.snapshots : [];
+    accountRecovery.currentSnapshot = result.current || null;
+  } catch (error) {
+    accountRecovery.error = String(error?.message || error);
+  }
+  renderRecoveryCenter();
+}
+
+async function refreshAccountRecoveryAdmin() {
+  if (!isHostedAppHost() || accountRecovery.loading) return;
+  accountRecovery.loading = true;
+  accountRecovery.error = '';
+  renderRecoveryCenter();
+  try {
+    const [requestResult, userResult] = await Promise.all([
+      adminRecoveryFetch('/api/admin/recovery/requests'),
+      adminRecoveryFetch('/api/admin/users'),
+    ]);
+    accountRecovery.requests = Array.isArray(requestResult.requests) ? requestResult.requests : [];
+    accountRecovery.users = Array.isArray(userResult.users) ? userResult.users : [];
+    if (!accountRecovery.users.some(user => user.username === accountRecovery.selectedUsername)) {
+      accountRecovery.selectedUsername = accountRecovery.users[0]?.username || '';
+      accountRecovery.snapshots = [];
+      accountRecovery.currentSnapshot = null;
+    }
+    if (accountRecovery.selectedUsername) {
+      const snapshots = await adminRecoveryFetch(`/api/admin/recovery/snapshots?username=${encodeURIComponent(accountRecovery.selectedUsername)}`);
+      accountRecovery.snapshots = Array.isArray(snapshots.snapshots) ? snapshots.snapshots : [];
+      accountRecovery.currentSnapshot = snapshots.current || null;
+    }
+  } catch (error) {
+    accountRecovery.error = String(error?.message || error);
+  } finally {
+    accountRecovery.loading = false;
+    renderRecoveryCenter();
+  }
+}
+
+function recoveryAuditNote() {
+  return String(document.getElementById('accountRecoveryAuditNote')?.value || '').trim();
+}
+
+function approveAccountRecovery(requestId) {
+  const request = accountRecovery.requests.find(item => item.id === requestId);
+  const note = recoveryAuditNote();
+  if (!request) return;
+  if (note.length < 3) return showToast('Record how you verified the user first.', '#f7c06a');
+  showAppConfirm({
+    title: `Reset ${request.username}?`,
+    message: 'This changes credentials only. Tasks, grades, notes, trips, files, revisions, and backups remain untouched. Existing sessions and paired devices will be revoked.',
+    confirmText: 'Generate Temporary Password',
+    onConfirm: async () => {
+      try {
+        const result = await adminRecoveryFetch(`/api/admin/recovery/requests/${encodeURIComponent(requestId)}/approve`, {
+          method: 'POST',
+          body: JSON.stringify({ note }),
+        });
+        accountRecovery.temporaryCredential = {
+          requestId,
+          username: result.username,
+          password: result.temporaryPassword,
+          expiresAt: result.expiresAt,
+        };
+        showToast('Temporary password generated. It is shown once.', '#6af7b0');
+        await refreshAccountRecoveryAdmin();
+      } catch (error) {
+        showToast(String(error?.message || error), '#f76a6a');
+      }
+    },
+  });
+}
+
+function denyAccountRecovery(requestId) {
+  const request = accountRecovery.requests.find(item => item.id === requestId);
+  const note = recoveryAuditNote();
+  if (!request) return;
+  if (note.length < 3) return showToast('Record why the request is denied first.', '#f7c06a');
+  showAppConfirm({
+    title: `Deny ${request.username}'s request?`,
+    message: 'The account and all saved data remain unchanged.',
+    confirmText: 'Deny Request',
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await adminRecoveryFetch(`/api/admin/recovery/requests/${encodeURIComponent(requestId)}/deny`, {
+          method: 'POST',
+          body: JSON.stringify({ note }),
+        });
+        showToast('Recovery request denied. Account data was unchanged.', '#6af7b0');
+        await refreshAccountRecoveryAdmin();
+      } catch (error) {
+        showToast(String(error?.message || error), '#f76a6a');
+      }
+    },
+  });
+}
+
+function startManualAccountRecovery() {
+  const username = String(document.getElementById('manualRecoveryUsername')?.value || '').trim();
+  const note = String(document.getElementById('manualRecoveryNote')?.value || '').trim();
+  if (!username || note.length < 3) return showToast('Choose a user and record why the reset was requested.', '#f7c06a');
+  showAppConfirm({
+    title: `Start recovery for ${username}?`,
+    message: 'A temporary password will replace the old credential and revoke existing sessions. StudyQuest account data will not be changed.',
+    confirmText: 'Generate Temporary Password',
+    onConfirm: async () => {
+      try {
+        const result = await adminRecoveryFetch('/api/admin/recovery/manual', {
+          method: 'POST',
+          body: JSON.stringify({ username, note }),
+        });
+        accountRecovery.temporaryCredential = {
+          requestId: result.requestId,
+          username: result.username,
+          password: result.temporaryPassword,
+          expiresAt: result.expiresAt,
+        };
+        showToast('Manual recovery created. Temporary password is shown once.', '#6af7b0');
+        await refreshAccountRecoveryAdmin();
+      } catch (error) {
+        showToast(String(error?.message || error), '#f76a6a');
+      }
+    },
+  });
+}
+
+function copyTemporaryRecoveryPassword() {
+  const password = accountRecovery.temporaryCredential?.password;
+  if (!password) return;
+  navigator.clipboard?.writeText(password)
+    .then(() => showToast('Temporary password copied.', '#6af7b0'))
+    .catch(() => showToast('Could not copy the temporary password.', '#f76a6a'));
+}
+
+function dismissTemporaryRecoveryPassword() {
+  accountRecovery.temporaryCredential = null;
+  renderRecoveryCenter();
+}
+
+function restoreAccountSnapshot(snapshotId) {
+  const username = accountRecovery.selectedUsername;
+  const snapshot = accountRecovery.snapshots.find(item => String(item.id) === String(snapshotId));
+  if (!username || !snapshot) return;
+  showAppConfirm({
+    title: `Restore ${username}'s snapshot?`,
+    message: `Restore the ${formatRecoveryDate(snapshot.createdAt)} snapshot (${recoverySummaryText(snapshot.summary)})? The current cloud state will first be saved as a pre-restore backup. Credentials are not changed.`,
+    confirmText: 'Restore Snapshot',
+    onConfirm: async () => {
+      try {
+        const result = await adminRecoveryFetch(`/api/admin/recovery/snapshots/${encodeURIComponent(snapshotId)}/restore`, {
+          method: 'POST',
+          body: JSON.stringify({ username }),
+        });
+        showToast(`Restored ${username}. Revision ${result.revision}.`, '#6af7b0');
+        await loadAccountRecoverySnapshots(username, { silent: true });
+      } catch (error) {
+        showToast(String(error?.message || error), '#f76a6a');
+      }
+    },
+  });
+}
+
+function renderAccountRecoveryAdmin() {
+  if (!isHostedAppHost()) return '';
+  const snapshotUserOptions = accountRecovery.users
+    .map(user => `<option value="${escapeHtml(user.username)}" ${user.username === accountRecovery.selectedUsername ? 'selected' : ''}>${escapeHtml(user.display_name || user.username)}</option>`)
+    .join('');
+  const manualUserOptions = accountRecovery.users
+    .filter(user => user.username !== 'admin')
+    .map(user => `<option value="${escapeHtml(user.username)}">${escapeHtml(user.display_name || user.username)}</option>`)
+    .join('');
+  const requests = accountRecovery.requests.slice(0, 50);
+  const credential = accountRecovery.temporaryCredential;
+  return `
+    <div class="recovery-section">
+      <div class="recovery-section-title">Password Recovery Requests</div>
+      <div class="recovery-empty">Verify each person directly before approval. Resetting a password never changes their StudyQuest data. Admin password recovery remains in Render.</div>
+      ${credential ? `
+        <div class="recovery-secret" style="margin-top:10px;">
+          <div class="recovery-label">Show once · ${escapeHtml(credential.username)} · expires ${escapeHtml(formatRecoveryDate(credential.expiresAt))}</div>
+          <div class="recovery-secret-code">${escapeHtml(credential.password)}</div>
+          <div class="recovery-actions" style="margin-top:10px;">
+            <button class="btn btn-primary btn-sm" onclick="copyTemporaryRecoveryPassword()">Copy Temporary Password</button>
+            <button class="btn btn-ghost btn-sm" onclick="dismissTemporaryRecoveryPassword()">Done</button>
+          </div>
+        </div>` : ''}
+      <label style="display:grid;gap:5px;margin-top:10px;">
+        <span class="recovery-label">Verification / denial note</span>
+        <input class="form-input" id="accountRecoveryAuditNote" placeholder="How identity was verified, or why this is denied">
+      </label>
+      <div class="recovery-list" style="max-height:300px;margin-top:10px;">
+        ${accountRecovery.loading ? '<div class="recovery-empty">Loading recovery requests...</div>' : requests.length ? requests.map(request => `
+          <div class="recovery-row" style="align-items:start;">
+            <div>
+              <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+                <div class="recovery-row-title">${escapeHtml(request.username)}</div>
+                <span class="recovery-status-chip recovery-status-${escapeHtml(request.status)}">${escapeHtml(request.status)}</span>
+                ${request.source === 'admin' ? '<span class="recovery-status-chip">Manual</span>' : ''}
+              </div>
+              <div class="recovery-row-meta" style="white-space:normal;">${escapeHtml(request.id)} · ${escapeHtml(formatRecoveryDate(request.createdAt))}</div>
+              <div class="recovery-row-meta" style="white-space:normal;">${request.accountExists ? escapeHtml(recoverySummaryText(request.summary)) : 'No matching account'}${request.expiresAt ? ' · expires ' + escapeHtml(formatRecoveryDate(request.expiresAt)) : ''}</div>
+              ${request.adminNote ? `<div class="recovery-row-meta" style="white-space:normal;">Audit: ${escapeHtml(request.adminNote)}</div>` : ''}
+            </div>
+            <div class="recovery-actions">
+              ${request.status === 'pending' && request.accountExists && request.username !== 'admin' ? `<button class="btn btn-primary btn-sm" onclick="approveAccountRecovery('${escapeHtml(request.id)}')">Approve</button>` : ''}
+              ${request.status === 'pending' ? `<button class="btn btn-ghost btn-sm" onclick="denyAccountRecovery('${escapeHtml(request.id)}')">Deny</button>` : ''}
+            </div>
+          </div>`).join('') : '<div class="recovery-empty">No password recovery requests yet.</div>'}
+      </div>
+      ${accountRecovery.error ? `<div class="recovery-row-meta" style="white-space:normal;color:var(--red);margin-top:8px;">${escapeHtml(accountRecovery.error)}</div>` : ''}
+    </div>
+    <div class="recovery-section">
+      <div class="recovery-section-title">Manual User Reset</div>
+      <div class="account-recovery-form">
+        <label><span>Account</span><select class="form-input" id="manualRecoveryUsername">${manualUserOptions}</select></label>
+        <label><span>Audit note</span><input class="form-input" id="manualRecoveryNote" placeholder="User contacted me directly; identity verified by..."></label>
+        <button class="btn btn-primary btn-sm" onclick="startManualAccountRecovery()" ${manualUserOptions ? '' : 'disabled'}>Generate Temporary Password</button>
+      </div>
+    </div>
+    <div class="recovery-section">
+      <div class="recovery-section-title">Cloud Account Snapshots</div>
+      <div class="account-recovery-form" style="grid-template-columns:minmax(180px,.8fr) minmax(0,1.5fr) auto;">
+        <label><span>Account</span><select class="form-input" onchange="loadAccountRecoverySnapshots(this.value)">${snapshotUserOptions}</select></label>
+        <div class="recovery-empty">${accountRecovery.currentSnapshot ? `Current revision ${Number(accountRecovery.currentSnapshot.revision || 0)} · ${escapeHtml(recoverySummaryText(accountRecovery.currentSnapshot.summary))}` : 'Choose an account to inspect its 30-day recovery history.'}</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadAccountRecoverySnapshots(accountRecovery.selectedUsername)" ${accountRecovery.selectedUsername ? '' : 'disabled'}>Refresh</button>
+      </div>
+      <div class="recovery-list" style="max-height:260px;margin-top:10px;">
+        ${accountRecovery.snapshots.length ? accountRecovery.snapshots.map(snapshot => `
+          <div class="recovery-row">
+            <div>
+              <div class="recovery-row-title">${escapeHtml(snapshot.reason || 'backup')} · revision ${Number(snapshot.revision || 0)}</div>
+              <div class="recovery-row-meta" style="white-space:normal;">${escapeHtml(formatRecoveryDate(snapshot.createdAt))} · ${escapeHtml(recoverySummaryText(snapshot.summary))}</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="restoreAccountSnapshot('${escapeHtml(String(snapshot.id))}')">Restore</button>
+          </div>`).join('') : '<div class="recovery-empty">No server snapshots are available for this account yet.</div>'}
+      </div>
+    </div>`;
+}
+
 function renderRecoveryCenter() {
   const body = document.getElementById('recoveryCenterBody');
   if (!body) return;
@@ -6675,6 +7002,7 @@ function renderRecoveryCenter() {
       <div class="recovery-card"><div class="recovery-label">Current Data</div><div class="recovery-value">${escapeHtml(stateSummary(state))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live Sync</div><div class="recovery-value">${escapeHtml(liveStatus)}</div></div>
     </div>
+    ${renderAccountRecoveryAdmin()}
     <div class="recovery-section">
       <div class="recovery-section-title">Live Admin Sync</div>
       ${isHostedAppHost() ? `

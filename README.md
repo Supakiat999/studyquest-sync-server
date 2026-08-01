@@ -40,6 +40,8 @@ Deployment behavior:
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention.
 - `/api/version` reports the tested v13 release hash used by the daily publisher.
+- Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
+- Admin can preview and restore 30-day account snapshots. Every restore creates a `pre_restore` backup and increments the cloud revision; credentials are not changed.
 - The admin account password is synced from the private `STUDYQUEST_ADMIN_PASSWORD` environment variable on startup. If the admin login stops working, update that Render environment variable and redeploy/restart the service.
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
@@ -101,6 +103,8 @@ DATABASE_URL=<Neon PostgreSQL connection string>
 NODE_ENV=production
 STUDYQUEST_ADMIN_PASSWORD=<strong private admin password>
 STUDYQUEST_INVITE_CODE=<private invite code for friends>
+STUDYQUEST_ADMIN_CONTACT_LABEL=<public contact label shown during recovery>
+STUDYQUEST_ADMIN_CONTACT_URL=<optional mailto or https contact link>
 STUDYQUEST_MAX_ACCOUNTS=5
 STUDYQUEST_MAX_STATE_BYTES=1048576
 PGSSLMODE=require
@@ -134,6 +138,14 @@ password: <STUDYQUEST_ADMIN_PASSWORD>
 ```
 
 Friends can create accounts only with the invite code.
+
+## Password Recovery
+
+Users select `Forgot password?`, submit their username, and contact admin with the displayed case ID. Public responses do not reveal whether an account exists. Admin approves or denies cases in hosted v13 Recovery Center after personal verification.
+
+Approval replaces only the password record, requires a permanent password change, expires after 24 hours, and revokes existing sessions and paired device tokens. Tasks, grades, notes, files, trips, checklists, state revisions, and backups are not cleared. The generated temporary password is returned once and is never stored as plaintext.
+
+The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_PASSWORD` in Render and redeploy instead.
 
 ## Migrating Current Admin Data
 
