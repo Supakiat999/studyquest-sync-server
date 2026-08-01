@@ -51,6 +51,12 @@
 
     function unlock(user = { username: "admin", legacy: true }) {
       window.__STUDYQUEST_AUTH_USER__ = user;
+      const wantsStable = new URLSearchParams(window.location.search).get("stable") === "1";
+      if (!user.legacy && user.username === "admin" && !wantsStable) {
+        window.location.replace("/v13");
+        return;
+      }
+      document.documentElement.dataset.studyquestAccount = user.username === "admin" ? "admin" : "user";
       if (user.legacy) {
         try { sessionStorage.setItem(LEGACY_SESSION_KEY, "1"); } catch (error) {}
       }
@@ -222,6 +228,8 @@
 </script>
 <style>
   html.studyquest-locked body > *:not(#studyquestLoginGate) { display: none !important; }
+  #v13BetaHeaderButton { display: none; }
+  html[data-studyquest-account="admin"] #v13BetaHeaderButton { display: inline-flex; }
   #studyquestLoginGate {
     position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center;
     padding: 24px; background: #0d0f1a; color: #e8eaf6; font-family: 'Syne', system-ui, sans-serif;
@@ -2119,7 +2127,7 @@
         </div>
       </div>
       <button class="btn btn-ghost" onclick="openQuickCapture()" title="Quick add task (Q)">Quick Capture</button>
-      <button class="btn btn-ghost" onclick="openV13BetaModal()" title="Try the v13 beta with a backup prompt">v13 Beta</button>
+      <button class="btn btn-ghost" id="v13BetaHeaderButton" onclick="openV13BetaModal()" title="Open the admin-only v13">v13 Beta</button>
       <button class="btn btn-primary" onclick="openCreateTask()">+ New Task</button>
       <button class="btn btn-ghost logout-header-btn" onclick="studyquestLogout()" title="Sign out of this StudyQuest account">Logout</button>
       <button class="profile-btn" id="profileBtn" onclick="openProfileSettings()" title="Profile and settings">SQ</button>
@@ -3223,11 +3231,26 @@ function defaultState() {
 }
 
 const STORAGE_KEY = 'studyquest_v3';
-const SERVER_STATE_ENDPOINT = '/api/state';
+const SERVER_STATE_ENDPOINT = '/api/v2/state';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 let serverSaveTimer = null;
 let saveStatusClearTimer = null;
 let lastServerSaveStartedAt = 0;
+let serverStateRevision = null;
+
+function serverRevisionKey() {
+  return `${currentStorageKey()}_server_revision`;
+}
+
+function readServerRevision() {
+  const value = Number(localStorage.getItem(serverRevisionKey()));
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function storeServerRevision(value) {
+  serverStateRevision = Number(value || 0);
+  localStorage.setItem(serverRevisionKey(), String(serverStateRevision));
+}
 
 function canUseServerStorage() {
   return window.location.protocol === 'http:' || window.location.protocol === 'https:';
@@ -3454,14 +3477,24 @@ async function saveStateToServer(options = {}) {
   serverSaveTimer = null;
   lastServerSaveStartedAt = Date.now();
   try {
+    const baseRevision = serverStateRevision ?? readServerRevision() ?? 0;
     const res = await fetch(SERVER_STATE_ENDPOINT, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state),
+      body: JSON.stringify({ state, baseRevision, deviceId: 'stable-app' }),
       keepalive,
     });
-    if (!res.ok) throw new Error('Server save failed');
+    const result = await res.json().catch(() => ({}));
+    if (res.status === 409 && result.error === 'STATE_CONFLICT') {
+      if (!silent) {
+        setSaveStatus('error', 'Sync choice needed');
+        showToast('Another version changed your account. Your browser copy was kept. Open admin v13 Recovery Center to choose safely.', '#f76a6a');
+      }
+      return false;
+    }
+    if (!res.ok) throw new Error(result.error || 'Server save failed');
+    storeServerRevision(result.revision);
     if (!silent) setSaveStatus('saved', 'Saved');
     return true;
   } catch (e) {
@@ -3480,8 +3513,9 @@ function bestEffortSaveBeforePageExit() {
   if (!canUseServerStorage()) return;
   if (!state || Date.now() - lastServerSaveStartedAt < 300) return;
   try {
-    const body = JSON.stringify(state);
-    localStorage.setItem(currentStorageKey(), body);
+    const stateBody = JSON.stringify(state);
+    const body = JSON.stringify({ state, baseRevision: serverStateRevision ?? readServerRevision() ?? 0, deviceId: 'stable-app-exit' });
+    localStorage.setItem(currentStorageKey(), stateBody);
     if (body.length < 60000 && navigator.sendBeacon) {
       const blob = new Blob([body], { type: 'application/json' });
       if (navigator.sendBeacon(SERVER_STATE_ENDPOINT, blob)) return;
@@ -3527,7 +3561,9 @@ async function syncStateFromServer() {
     const res = await fetch(SERVER_STATE_ENDPOINT, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('Server state request failed');
     const serverRaw = await res.json();
-    const serverState = serverRaw ? normalizeState(serverRaw) : null;
+    if (!serverRaw?.ok) throw new Error(serverRaw?.error || 'Server state request failed');
+    storeServerRevision(serverRaw.revision);
+    const serverState = serverRaw.state ? normalizeState(serverRaw.state) : null;
     const serverHasData = hasUserData(serverState);
     const localHasData = hasUserData(state);
 

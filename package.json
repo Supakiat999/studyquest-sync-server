@@ -8,8 +8,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node scripts/apply-hosted-patch.js && node scripts/save-reliability-patch.js && node scripts/v13-beta-patch.js && node scripts/route-alias-patch.js && node server.js",
-    "check": "node --check server.js",
+    "start": "node server.js",
+    "check": "node --check server.js && node scripts/check-html.js public/claudever9.html public/claudever13.html",
     "export:admin-state": "node scripts/export-admin-state.js",
     "import:admin-state": "node scripts/import-admin-state.js"
   },

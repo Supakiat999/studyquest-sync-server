@@ -18,7 +18,7 @@ Backup/root link:
 https://studyquest-sync-server.onrender.com/
 ```
 
-Experimental v13 beta:
+Admin-only v13:
 
 ```text
 https://studyquest-sync-server.onrender.com/v13
@@ -30,12 +30,16 @@ Current Render service:
 studyquest-sync-server
 ```
 
-Deployment notes from June 21, 2026:
+Deployment behavior:
 
 - Render shows this web service as `Node Free`.
-- The `/app.html` route is enabled by commit `ca06691389394c9a9105d0718587fc3dc68773af`, which runs `scripts/route-alias-patch.js` before `server.js` starts.
-- The `/v13` and `/claudever13.html` routes serve the experimental v13 beta. The main beta header shows a `v13 Beta` button with an export-backup prompt before opening v13.
-- v13 shares the same account state as the main beta, so users should export a backup before testing. Hosted v13 redirects logged-out users back to `/app.html` instead of silently saving local/default data.
+- `/v13` and `/claudever13.html` require the `admin` account. Other users are redirected to the stable app and never receive the daily v13 file.
+- Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
+- The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
+- `/api/v2/state` uses revisions and returns `409 STATE_CONFLICT` instead of silently replacing a newer account save.
+- One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
+- One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention.
+- `/api/version` reports the tested v13 release hash used by the daily publisher.
 - The admin account password is synced from the private `STUDYQUEST_ADMIN_PASSWORD` environment variable on startup. If the admin login stops working, update that Render environment variable and redeploy/restart the service.
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
@@ -72,6 +76,9 @@ Do not upload the local files from the parent folder such as `studyquest-account
 - Invite-code required account creation.
 - Basic login/register rate limiting.
 - Admin-only user summary at `/api/admin/users`.
+- Admin-only v13 route and one-time local-device pairing.
+- Versioned state writes with explicit conflict responses.
+- Thirty days of daily account-state recovery snapshots.
 
 ## Render + Neon Setup
 

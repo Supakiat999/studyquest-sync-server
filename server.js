@@ -8,6 +8,7 @@ const PORT = Number(process.env.PORT || 3001);
 const ROOT = __dirname;
 const HTML_PATH = path.join(ROOT, "public", "claudever9.html");
 const V13_HTML_PATH = path.join(ROOT, "public", "claudever13.html");
+const V13_VERSION_PATH = path.join(ROOT, "public", "v13-version.json");
 const SESSION_COOKIE = "sq_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const ADMIN_USERNAME = "admin";
@@ -57,7 +58,7 @@ function payloadTooLargeError(maxBytes) {
 function send(req, res, status, body, headers = {}) {
   const baseHeaders = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type",
+    "access-control-allow-headers": "content-type,authorization",
     "access-control-allow-credentials": "true",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -212,6 +213,7 @@ function publicUser(row) {
   return {
     username: row.username,
     displayName: row.display_name || row.username,
+    isAdmin: row.username === ADMIN_USERNAME,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -230,6 +232,8 @@ function validateCredentials(username, password) {
 async function ensureSchema() {
   await pool.query(fs.readFileSync(path.join(ROOT, "schema.sql"), "utf8"));
   await pool.query("delete from sessions where expires_at < now()");
+  await pool.query("delete from sync_pairing_codes where expires_at < now() or used_at is not null");
+  await pool.query("delete from state_backups where created_at < now() - interval '30 days'");
 
   const admin = await pool.query("select username, password_record from accounts where username = $1", [ADMIN_USERNAME]);
   if (!admin.rowCount) {
@@ -255,11 +259,32 @@ async function ensureSchema() {
 }
 
 async function currentUser(req) {
+  const authorization = String(req.headers.authorization || "");
+  if (authorization.startsWith("Bearer ")) {
+    const deviceToken = authorization.slice(7).trim();
+    if (!deviceToken) return null;
+    const deviceResult = await pool.query(
+      `select a.username, a.display_name, a.password_record, a.state, a.state_bytes,
+              a.state_revision, a.state_updated_at, a.created_at, a.updated_at,
+              d.id as sync_device_id, d.device_name as sync_device_name
+       from sync_devices d
+       join accounts a on a.username = d.username
+       where d.token_hash = $1 and d.revoked_at is null`,
+      [tokenHash(deviceToken)]
+    );
+    const deviceUser = deviceResult.rows[0] || null;
+    if (deviceUser) {
+      await pool.query("update sync_devices set last_used_at = now() where id = $1", [deviceUser.sync_device_id]);
+    }
+    return deviceUser;
+  }
+
   const token = parseCookies(req)[SESSION_COOKIE];
   if (!token) return null;
 
   const result = await pool.query(
-    `select a.username, a.display_name, a.password_record, a.state, a.state_bytes, a.created_at, a.updated_at
+    `select a.username, a.display_name, a.password_record, a.state, a.state_bytes,
+            a.state_revision, a.state_updated_at, a.created_at, a.updated_at
      from sessions s
      join accounts a on a.username = s.username
      where s.token_hash = $1 and s.expires_at > now()`,
@@ -397,6 +422,10 @@ async function handleState(req, res) {
     sendJson(req, res, 401, { ok: false, error: "AUTH_REQUIRED" });
     return;
   }
+  if (user.sync_device_id) {
+    sendJson(req, res, 403, { ok: false, error: "VERSIONED_STATE_REQUIRED" });
+    return;
+  }
 
   if (req.method === "GET") {
     sendJson(req, res, 200, user.state || null);
@@ -410,22 +439,237 @@ async function handleState(req, res) {
       sendJson(req, res, 413, { ok: false, error: `Saved state is too large. Limit is ${MAX_STATE_BYTES} bytes.` });
       return;
     }
-    await pool.query(
+    const result = await pool.query(
       `update accounts
-       set state = $2::jsonb, state_bytes = $3, updated_at = now()
-       where username = $1`,
+       set state = $2::jsonb, state_bytes = $3, state_revision = state_revision + 1,
+           state_updated_at = now(), updated_at = now()
+       where username = $1
+       returning state_revision, state_updated_at`,
       [user.username, JSON.stringify(state && typeof state === "object" ? state : null), stateBytes]
     );
-    sendJson(req, res, 200, { ok: true });
+    sendJson(req, res, 200, {
+      ok: true,
+      revision: Number(result.rows[0]?.state_revision || 0),
+      savedAt: result.rows[0]?.state_updated_at || new Date().toISOString()
+    });
     return;
   }
 
   send(req, res, 405, "Method not allowed");
 }
 
+async function createDailyStateBackup(client, row) {
+  if (!row?.state) return;
+  const existing = await client.query(
+    `select 1 from state_backups
+     where username = $1 and reason = 'daily'
+       and (created_at at time zone 'Asia/Bangkok')::date = (now() at time zone 'Asia/Bangkok')::date
+     limit 1`,
+    [row.username]
+  );
+  if (!existing.rowCount) {
+    await client.query(
+      `insert into state_backups (username, revision, state, reason)
+       values ($1, $2, $3::jsonb, 'daily')`,
+      [row.username, Number(row.state_revision || 0), JSON.stringify(row.state)]
+    );
+  }
+  await client.query(
+    "delete from state_backups where username = $1 and created_at < now() - interval '30 days'",
+    [row.username]
+  );
+}
+
+async function handleVersionedState(req, res) {
+  const user = await currentUser(req);
+  if (!user) {
+    sendJson(req, res, 401, { ok: false, error: "AUTH_REQUIRED" });
+    return;
+  }
+
+  if (req.method === "GET") {
+    sendJson(req, res, 200, {
+      ok: true,
+      state: user.state || null,
+      revision: Number(user.state_revision || 0),
+      updatedAt: user.state_updated_at || user.updated_at || null,
+    });
+    return;
+  }
+
+  if (req.method !== "POST") {
+    send(req, res, 405, "Method not allowed");
+    return;
+  }
+
+  const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_AUTH_BODY_BYTES);
+  const incomingState = body?.state;
+  const baseRevision = body?.baseRevision;
+  if (!incomingState || typeof incomingState !== "object" || !Array.isArray(incomingState.tasks)) {
+    sendJson(req, res, 400, { ok: false, error: "INVALID_STATE" });
+    return;
+  }
+  if (!Number.isInteger(baseRevision) || baseRevision < 0) {
+    sendJson(req, res, 400, { ok: false, error: "BASE_REVISION_REQUIRED" });
+    return;
+  }
+  const stateBytes = Buffer.byteLength(JSON.stringify(incomingState));
+  if (stateBytes > MAX_STATE_BYTES) {
+    sendJson(req, res, 413, { ok: false, error: `Saved state is too large. Limit is ${MAX_STATE_BYTES} bytes.` });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const current = await client.query(
+      `select username, state, state_revision, state_updated_at, updated_at
+       from accounts where username = $1 for update`,
+      [user.username]
+    );
+    const row = current.rows[0];
+    const currentRevision = Number(row?.state_revision || 0);
+    if (!row) {
+      await client.query("rollback");
+      sendJson(req, res, 404, { ok: false, error: "ACCOUNT_NOT_FOUND" });
+      return;
+    }
+    if (baseRevision !== currentRevision) {
+      await client.query("rollback");
+      sendJson(req, res, 409, {
+        ok: false,
+        error: "STATE_CONFLICT",
+        state: row.state || null,
+        revision: currentRevision,
+        updatedAt: row.state_updated_at || row.updated_at || null,
+      });
+      return;
+    }
+
+    await createDailyStateBackup(client, row);
+    const saved = await client.query(
+      `update accounts
+       set state = $2::jsonb, state_bytes = $3, state_revision = state_revision + 1,
+           state_updated_at = now(), updated_at = now()
+       where username = $1
+       returning state_revision, state_updated_at`,
+      [user.username, JSON.stringify(incomingState), stateBytes]
+    );
+    await client.query("commit");
+    sendJson(req, res, 200, {
+      ok: true,
+      revision: Number(saved.rows[0].state_revision),
+      savedAt: saved.rows[0].state_updated_at,
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function randomPairingCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 8; i += 1) code += alphabet[crypto.randomInt(0, alphabet.length)];
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+async function handleAdminPairingCode(req, res) {
+  const user = await currentUser(req);
+  if (!user) return sendJson(req, res, 401, { ok: false, error: "AUTH_REQUIRED" });
+  if (user.username !== ADMIN_USERNAME || user.sync_device_id) {
+    return sendJson(req, res, 403, { ok: false, error: "ADMIN_BROWSER_SESSION_REQUIRED" });
+  }
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const deviceName = String(body.deviceName || "Local v13").trim().slice(0, 80) || "Local v13";
+  const code = randomPairingCode();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await pool.query("delete from sync_pairing_codes where username = $1 or expires_at < now() or used_at is not null", [user.username]);
+  await pool.query(
+    `insert into sync_pairing_codes (code_hash, username, device_name, expires_at)
+     values ($1, $2, $3, $4)`,
+    [tokenHash(code), user.username, deviceName, expiresAt]
+  );
+  sendJson(req, res, 200, { ok: true, code, expiresAt: expiresAt.toISOString() });
+}
+
+async function handlePairDevice(req, res) {
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  if (isRateLimited(clientKey(req, "device-pair"), 20, 15 * 60 * 1000)) {
+    return sendJson(req, res, 429, { ok: false, error: "Too many pairing attempts. Try again later." });
+  }
+  const body = await readJsonBody(req);
+  const code = String(body.code || "").trim().toUpperCase();
+  const requestedName = String(body.deviceName || "Local v13").trim().slice(0, 80) || "Local v13";
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const pairing = await client.query(
+      `select code_hash, username, device_name from sync_pairing_codes
+       where code_hash = $1 and expires_at > now() and used_at is null
+       for update`,
+      [tokenHash(code)]
+    );
+    const row = pairing.rows[0];
+    if (!row || row.username !== ADMIN_USERNAME) {
+      await client.query("rollback");
+      sendJson(req, res, 401, { ok: false, error: "Pairing code is invalid or expired." });
+      return;
+    }
+    const token = crypto.randomBytes(32).toString("base64url");
+    const deviceId = crypto.randomUUID();
+    await client.query("update sync_pairing_codes set used_at = now() where code_hash = $1", [row.code_hash]);
+    await client.query(
+      `insert into sync_devices (id, token_hash, username, device_name)
+       values ($1, $2, $3, $4)`,
+      [deviceId, tokenHash(token), row.username, requestedName || row.device_name]
+    );
+    const account = await client.query("select * from accounts where username = $1", [row.username]);
+    await client.query("commit");
+    sendJson(req, res, 200, { ok: true, token, deviceId, user: publicUser(account.rows[0]) });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function handleRevokeSelf(req, res) {
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const user = await currentUser(req);
+  if (!user?.sync_device_id) return sendJson(req, res, 401, { ok: false, error: "DEVICE_AUTH_REQUIRED" });
+  await pool.query("update sync_devices set revoked_at = now() where id = $1", [user.sync_device_id]);
+  sendJson(req, res, 200, { ok: true });
+}
+
+async function handleAdminSyncDevices(req, res) {
+  const user = await currentUser(req);
+  if (!user || user.username !== ADMIN_USERNAME || user.sync_device_id) {
+    return sendJson(req, res, 403, { ok: false, error: "Admin access required." });
+  }
+  if (req.method === "GET") {
+    const devices = await pool.query(
+      `select id, device_name, created_at, last_used_at, revoked_at
+       from sync_devices where username = $1 order by created_at desc`,
+      [ADMIN_USERNAME]
+    );
+    return sendJson(req, res, 200, { ok: true, devices: devices.rows });
+  }
+  if (req.method === "POST") {
+    const body = await readJsonBody(req);
+    await pool.query("update sync_devices set revoked_at = now() where id = $1 and username = $2", [String(body.deviceId || ""), ADMIN_USERNAME]);
+    return sendJson(req, res, 200, { ok: true });
+  }
+  send(req, res, 405, "Method not allowed");
+}
+
 async function handleAdminUsers(req, res) {
   const user = await currentUser(req);
-  if (!user || user.username !== ADMIN_USERNAME) {
+  if (!user || user.username !== ADMIN_USERNAME || user.sync_device_id) {
     sendJson(req, res, 403, { ok: false, error: "Admin access required." });
     return;
   }
@@ -452,6 +696,15 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
     if (url.pathname === "/v13" || url.pathname === "/claudever13.html") {
+      const user = await currentUser(req);
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?next=v13" });
+        return;
+      }
+      if (user.username !== ADMIN_USERNAME) {
+        send(req, res, 302, "Admin v13 only", { location: "/app.html?stable=1" });
+        return;
+      }
       send(req, res, 200, fs.readFileSync(V13_HTML_PATH), { "content-type": "text/html; charset=utf-8" });
       return;
     }
@@ -486,8 +739,40 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/v2/state") {
+      await handleVersionedState(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/admin/pairing-code") {
+      await handleAdminPairingCode(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/sync/pair") {
+      await handlePairDevice(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/sync/revoke-self") {
+      await handleRevokeSelf(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/admin/sync-devices") {
+      await handleAdminSyncDevices(req, res);
+      return;
+    }
+
     if (url.pathname === "/api/admin/users") {
       await handleAdminUsers(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/version") {
+      let version = { version: 13, hash: null, releasedAt: null };
+      try { version = JSON.parse(fs.readFileSync(V13_VERSION_PATH, "utf8")); } catch {}
+      sendJson(req, res, 200, { ok: true, ...version });
       return;
     }
 
