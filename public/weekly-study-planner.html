@@ -205,7 +205,8 @@
     const inViewDate=s=>s>=VIEW_MIN&&s<=VIEW_MAX;
     const isExamOnlyWeek=week=>EXAM_ONLY_WEEK_STARTS.includes(week);
     const isTemplateSeedEvent=e=>e?.origin==='template'||(!e?.origin&&!!e?.templateId&&!e?.examId);
-    const fixedExamEventsForWeek=week=>state.exams.filter(x=>!x.tba&&mondayOf(x.date)===week).map(x=>({id:`exam_${x.id}`,date:x.date,start:x.start,end:x.end,title:x.title,kind:'exam',course:x.course,room:'',notes:x.time,locked:true,protected:true,auto:false,origin:'exam',examId:x.id}));
+    const buildFixedExamEvents=(week,exams)=>exams.filter(x=>!x.tba&&mondayOf(x.date)===week).map(x=>({id:`exam_${x.id}`,date:x.date,start:x.start,end:x.end,title:x.title,kind:'exam',course:x.course,room:'',notes:x.time,locked:true,protected:true,auto:false,origin:'exam',examId:x.id}));
+    const fixedExamEventsForWeek=week=>buildFixedExamEvents(week,state.exams);
     const dayIndexFor=(week,date)=>Math.round((parseDate(date)-parseDate(week))/86400000);
     const escapeHtml=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
     const duration=e=>Math.max(0,e.end-e.start);
@@ -237,8 +238,8 @@
       {id:'mid-telecom',date:'2026-09-23',start:780,end:960,course:'telecom',title:'Telecommunications midterm',type:'Midterm',time:'13:00–16:00'},
       {id:'mid-arch',date:'2026-09-24',start:510,end:690,course:'arch',title:'Computer Architecture midterm',type:'Midterm',time:'08:30–11:30'},
       {id:'mid-net',date:'2026-09-25',start:780,end:960,course:'net',title:'Netcentric Architecture midterm',type:'Midterm',time:'13:00–16:00'},
-      {id:'final-eis',date:'2026-11-24',course:'eis',title:'Enterprise Information Systems final',type:'Final',time:'Morning or afternoon — TBA',tba:true},
-      {id:'final-econ',date:'2026-11-24',course:'econ',title:'Engineering Economy final',type:'Final',time:'Morning or afternoon — TBA',tba:true},
+      {id:'final-eis',date:'2026-11-24',start:510,end:690,course:'eis',title:'Enterprise Information Systems final',type:'Final',time:'08:30–11:30',tba:false},
+      {id:'final-econ',date:'2026-11-24',start:780,end:960,course:'econ',title:'Engineering Economy final',type:'Final',time:'13:00–16:00',tba:false},
       {id:'final-ent',date:'2026-11-26',start:510,end:690,course:'ent',title:'High-Tech Entrepreneurship final',type:'Final',time:'08:30–11:30'},
       {id:'final-net',date:'2026-11-27',start:780,end:960,course:'net',title:'Netcentric Architecture final',type:'Final',time:'13:00–16:00'},
       {id:'final-telecom',date:'2026-12-02',start:780,end:960,course:'telecom',title:'Telecommunications final',type:'Final',time:'13:00–16:00'},
@@ -253,17 +254,19 @@
       {course:'arch',title:'Computer Architecture assessment',text:'Other assessment has not yet been confirmed.'},
       {course:'net',title:'Netcentric coding / labs',text:'Coding or lab work may be announced.'}
     ];
-    function freshState(){return{version:VERSION,settings:{termStart:'2026-08-03',termEnd:'2026-12-06',availability:{1:{start:1310,end:1390},3:{start:1170,end:1320}},emergencyCatchup:false},template:buildTemplate(),weeks:{},exams:EXAMS,assessmentNotes:ASSESSMENT_NOTES}}
+    function freshState(){return{version:VERSION,routineRecoveryApplied:true,settings:{termStart:'2026-08-03',termEnd:'2026-12-06',availability:{1:{start:1310,end:1390},3:{start:1170,end:1320}},emergencyCatchup:false},template:buildTemplate(),weeks:{},exams:EXAMS,assessmentNotes:ASSESSMENT_NOTES}}
     function validState(s){return s&&[1,VERSION].includes(Number(s.version))&&s.settings&&Array.isArray(s.template)&&s.weeks&&typeof s.weeks==='object'&&Array.isArray(s.exams)}
+    function mergeCanonicalExams(saved){const list=Array.isArray(saved)?saved:[],byId=new Map(list.filter(x=>x&&x.id).map(x=>[x.id,x])),known=new Set(EXAMS.map(x=>x.id));return[...EXAMS.map(x=>({...byId.get(x.id),...x})),...list.filter(x=>x&& !known.has(x.id))]}
     function migrateState(s){
-      s.version=VERSION;
+      s.version=VERSION;s.exams=mergeCanonicalExams(s.exams);
       s.settings=s.settings||{};s.settings.availability=s.settings.availability||{1:{start:1310,end:1390},3:{start:1170,end:1320}};s.settings.emergencyCatchup=!!s.settings.emergencyCatchup;
       const start=clampDate(s.settings.termStart||'2026-08-03'),end=clampDate(s.settings.termEnd||'2026-12-06');
       s.settings.termStart=start;s.settings.termEnd=end;
       if(start>end){s.settings.termStart='2026-08-03';s.settings.termEnd='2026-12-06'}
+      if(!s.routineRecoveryApplied){Object.entries(s.weeks||{}).forEach(([week,raw])=>{const w=raw&&typeof raw==='object'?raw:null;if(!w||isExamOnlyWeek(week)||(w.events||[]).length)return;const recovered=[];s.template.forEach(x=>{const date=addDays(week,x.day);if(date<s.settings.termStart||date>s.settings.termEnd||!inViewDate(date))return;recovered.push({...x,id:uid(),date,templateId:x.templateId||x.id,origin:'template',auto:false})});w.events=recovered});s.routineRecoveryApplied=true}
       const lists=[s.template,...Object.values(s.weeks||{}).map(w=>w.events||[])];
       lists.forEach(list=>list.forEach(e=>{if(e.kind==='sleep'&&e.start===START&&e.end<=465){e.start=0;e.title='Sleep · overnight'}if(!e.origin)e.origin=e.examId?'exam':e.templateId?'template':'manual'}));
-      Object.entries(s.weeks||{}).forEach(([week,w])=>{w.events=(w.events||[]).filter(e=>inViewDate(e.date)&&(!isExamOnlyWeek(week)||!isTemplateSeedEvent(e)))});
+      Object.entries(s.weeks||{}).forEach(([week,raw])=>{const w=raw&&typeof raw==='object'?raw:(s.weeks[week]={events:[],readingTargets:{...DEFAULT_TARGETS}}),cleaned=(w.events||[]).filter(e=>inViewDate(e.date)&&(!isExamOnlyWeek(week)||!isTemplateSeedEvent(e)));w.events=isExamOnlyWeek(week)?[...cleaned.filter(e=>!e.examId),...buildFixedExamEvents(week,s.exams)]:cleaned});
       return s;
     }
     function loadState(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return validState(s)?migrateState(s):freshState()}catch{return freshState()}}
@@ -272,7 +275,7 @@
     selectedWeek=initialWeek();mobileDay=Math.max(0,Math.min(6,dayIndexFor(selectedWeek,clampDate(today()))));
     function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
     save();
-    function normalizeExamWeek(week){if(!isExamOnlyWeek(week)||!state.weeks[week])return;const before=state.weeks[week].events||[],after=before.filter(e=>inViewDate(e.date)&&!isTemplateSeedEvent(e));if(after.length!==before.length){state.weeks[week].events=after;save()}}
+    function normalizeExamWeek(week){if(!isExamOnlyWeek(week)||!state.weeks[week])return;const before=state.weeks[week].events||[],cleaned=before.filter(e=>inViewDate(e.date)&&!isTemplateSeedEvent(e)&&!e.examId),after=[...cleaned,...fixedExamEventsForWeek(week)];if(JSON.stringify(before)!==JSON.stringify(after)){state.weeks[week].events=after;save()}}
     function generateWeek(week){
       if(state.weeks[week]){normalizeExamWeek(week);return state.weeks[week]}
       const events=[];
