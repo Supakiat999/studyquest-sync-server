@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f0e8">
+  <title>Weekly Study Planner · Full</title>
+  <meta name="description" content="A flexible weekly study calendar with protected recovery time, adaptive reading targets, and exam planning.">
+  <style>
+    :root {
+      --ink:#18201e;--muted:#6e7772;--paper:#f4f0e8;--panel:#fffdf8;--line:#d9d4c9;
+      --green:#1d594d;--green-2:#dceae4;--orange:#d66a3d;--red:#bb4b49;--blue:#315f87;
+      --hour:48px;--radius:18px;--shadow:0 16px 42px rgba(29,38,34,.09);
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth}
+    body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.45}
+    button,input,select,textarea{font:inherit} button{cursor:pointer}
+    .app-header{position:sticky;top:0;z-index:100;background:rgba(244,240,232,.94);backdrop-filter:blur(18px);border-bottom:1px solid rgba(24,32,30,.1)}
+    .header-inner{max-width:1800px;margin:auto;padding:14px 22px;display:grid;grid-template-columns:minmax(240px,1fr) auto minmax(240px,1fr);align-items:center;gap:18px}
+    .brand{display:flex;align-items:center;gap:12px;min-width:0}.brand-mark{width:42px;height:42px;border-radius:14px;background:var(--green);color:white;display:grid;place-items:center;font-weight:900;letter-spacing:-1px;box-shadow:0 7px 18px rgba(29,89,77,.22)}
+    .brand h1{font-family:Georgia,"Times New Roman",serif;font-size:20px;margin:0;line-height:1}.brand p{font-size:11px;color:var(--muted);margin:5px 0 0;text-transform:uppercase;letter-spacing:.12em;font-weight:750}
+    .week-nav{display:flex;align-items:center;gap:7px}.week-title{min-width:190px;text-align:center}.week-title strong{font-family:Georgia,"Times New Roman",serif;font-size:18px}.week-title span{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+    .header-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap}
+    a.btn{text-decoration:none;display:inline-flex;align-items:center}
+    .btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:10px;padding:8px 11px;font-weight:720;font-size:12px;transition:.15s ease;white-space:nowrap}.btn:hover{border-color:#aaa49a;transform:translateY(-1px)}.btn:active{transform:none}.btn-primary{background:var(--green);border-color:var(--green);color:white}.btn-warn{color:var(--red)}.icon-btn{width:36px;height:36px;padding:0;display:grid;place-items:center;font-size:17px}
+    .subbar{max-width:1800px;margin:auto;padding:9px 22px 11px;display:flex;align-items:center;gap:9px;overflow:auto}.metric{background:rgba(255,253,248,.75);border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:11px;color:var(--muted);white-space:nowrap}.metric strong{color:var(--ink);margin-left:4px}.metric.alert{border-color:#e6b1aa;background:#fff4f2;color:var(--red)}
+    .workspace{max-width:1800px;margin:0 auto;padding:18px 22px 34px;display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px}
+    .calendar-card,.side-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}.calendar-card{min-width:0;overflow:hidden}
+    .calendar-toolbar{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.toolbar-note{font-size:12px;color:var(--muted)}.toolbar-actions{display:flex;gap:7px;flex-wrap:wrap}
+    .day-mobile-tabs{display:none;padding:8px;border-bottom:1px solid var(--line);gap:5px;overflow:auto}.day-mobile-tabs button{min-width:58px;border:1px solid var(--line);border-radius:9px;background:white;padding:7px;color:var(--muted);font-size:11px;font-weight:750}.day-mobile-tabs button.active{background:var(--green);color:white;border-color:var(--green)}
+    .calendar-scroll{overflow:auto;max-height:calc(100vh - 225px);min-height:590px;position:relative}.week-grid{display:grid;grid-template-columns:68px repeat(7,minmax(142px,1fr));min-width:1062px;position:relative}.week-grid.mobile{min-width:0;grid-template-columns:58px minmax(260px,1fr)}
+    .corner,.day-head{height:68px;position:sticky;top:0;z-index:35;background:var(--panel);border-bottom:1px solid var(--line)}.corner{left:0;z-index:45;border-right:1px solid var(--line)}
+    .day-head{padding:10px 9px;border-right:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start}.day-head.today{background:#edf5f0}.day-head strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.08em}.day-head span{font-family:Georgia,"Times New Roman",serif;font-size:24px;line-height:1.1}.day-head button{border:0;background:transparent;color:var(--muted);font-size:18px;padding:1px 4px;border-radius:6px}.day-head button:hover{background:var(--green-2);color:var(--green)}
+    .time-axis{position:sticky;left:0;z-index:25;height:888px;background:var(--panel);border-right:1px solid var(--line)}.time-label{position:absolute;right:9px;transform:translateY(-7px);font-size:10px;color:#8a8f8b;font-variant-numeric:tabular-nums}
+    .day-column{position:relative;height:888px;border-right:1px solid var(--line);background:repeating-linear-gradient(to bottom,transparent 0,transparent 23px,rgba(24,32,30,.075) 23px,rgba(24,32,30,.075) 24px)}.day-column::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(to bottom,transparent 0,transparent 47px,rgba(24,32,30,.105) 47px,rgba(24,32,30,.105) 48px);pointer-events:none}.day-column.today{background-color:#f7fbf8}.day-column.drop-active{background-color:#eaf5ef}
+    .now-line{position:absolute;left:0;right:0;height:2px;background:var(--orange);z-index:16;pointer-events:none}.now-line::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--orange);position:absolute;left:-3px;top:-2px}
+    .event{position:absolute;left:4px;right:4px;border:1px solid color-mix(in srgb,var(--event-color) 55%, #fff);border-left:4px solid var(--event-color);border-radius:8px;background:color-mix(in srgb,var(--event-color) 13%, #fff);padding:5px 6px 4px;overflow:hidden;z-index:10;box-shadow:0 2px 5px rgba(25,32,29,.07);color:var(--ink);touch-action:none;user-select:none}.event:hover,.event:focus{z-index:20;outline:2px solid color-mix(in srgb,var(--event-color) 65%, white);outline-offset:1px}.event.movable{cursor:grab}.event.movable:active{cursor:grabbing}.event.protected{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--event-color) 9%,#fff),color-mix(in srgb,var(--event-color) 9%,#fff) 8px,color-mix(in srgb,var(--event-color) 15%,#fff) 8px,color-mix(in srgb,var(--event-color) 15%,#fff) 16px)}.event.free{z-index:2;opacity:.58;border-style:dashed}.event.auto::after{content:"AUTO";position:absolute;right:4px;top:4px;font-size:7px;font-weight:900;letter-spacing:.08em;color:var(--event-color)}.event.conflict{box-shadow:0 0 0 2px var(--red)}
+    .event-title{font-size:10.5px;font-weight:820;line-height:1.18;padding-right:8px;white-space:normal}.event-time{font-size:9px;margin-top:2px;color:#4e5853;font-variant-numeric:tabular-nums}.event-room{font-size:8.5px;color:#69716d;margin-top:1px}.event-icons{position:absolute;right:4px;bottom:2px;font-size:8px;opacity:.72}.resize-handle{position:absolute;left:2px;right:2px;height:7px;z-index:3;cursor:ns-resize}.resize-handle.top{top:0}.resize-handle.bottom{bottom:0}.event.locked .resize-handle{display:none}
+    .drag-ghost{position:fixed;z-index:1000;pointer-events:none;opacity:.9;border-radius:8px;border:2px solid var(--green);background:#e8f2ed;padding:6px;box-shadow:0 18px 45px rgba(0,0,0,.2);font-size:11px;font-weight:800}.event.drag-source{opacity:.2}
+    .side-rail{display:flex;flex-direction:column;gap:14px;min-width:0}.side-card{padding:15px}.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.card-head h2{font-family:Georgia,"Times New Roman",serif;font-size:19px;margin:0}.card-head p{font-size:11px;color:var(--muted);margin:3px 0 0}.tag{font-size:9px;border-radius:999px;padding:4px 7px;background:var(--green-2);color:var(--green);font-weight:850;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+    .reading-list{display:flex;flex-direction:column;gap:8px}.reading-row{display:grid;grid-template-columns:10px minmax(0,1fr) 62px;gap:8px;align-items:center}.course-dot{width:9px;height:9px;border-radius:50%;background:var(--course)}.reading-name{font-size:11px;font-weight:750;min-width:0}.reading-name span{display:block;font-size:9px;color:var(--muted);font-weight:550}.minute-input{width:62px;border:1px solid var(--line);border-radius:8px;background:white;padding:6px 5px;font-size:11px;text-align:right}.progress-track{grid-column:2/4;height:4px;background:#e8e4dc;border-radius:99px;overflow:hidden;margin-top:-4px}.progress-fill{height:100%;background:var(--course);border-radius:99px;max-width:100%}
+    .button-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.button-row .btn{flex:1}.catchup{margin-top:10px;border-radius:10px;padding:10px;background:#fff5e7;border:1px solid #ecd4af;font-size:11px;color:#735531}.catchup.good{background:#edf7f1;border-color:#c7dfd1;color:var(--green)}
+    .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px}.switch{position:relative;width:38px;height:22px;flex:0 0 auto}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;inset:0;background:#ccc7bd;border-radius:99px;transition:.2s}.slider::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:white;border-radius:50%;transition:.2s;box-shadow:0 1px 3px #999}.switch input:checked+.slider{background:var(--green)}.switch input:checked+.slider::before{transform:translateX(16px)}
+    .assessment-list{display:flex;flex-direction:column;gap:8px;max-height:330px;overflow:auto}.assessment{display:grid;grid-template-columns:48px 1fr;gap:9px;border-top:1px solid var(--line);padding-top:8px}.assessment:first-child{border-top:0;padding-top:0}.date-tile{border-radius:9px;background:#f0ece4;text-align:center;padding:5px 3px;height:45px}.date-tile strong{display:block;font-family:Georgia,"Times New Roman",serif;font-size:17px;line-height:1}.date-tile span{font-size:8px;text-transform:uppercase;color:var(--muted);letter-spacing:.08em}.assessment h3{font-size:11px;margin:0 0 2px}.assessment p{font-size:9.5px;color:var(--muted);margin:0}.assessment.tba .date-tile{background:#fff2df;color:#875322}
+    .legend{display:flex;gap:8px;flex-wrap:wrap;font-size:9px;color:var(--muted)}.legend span{display:flex;align-items:center;gap:4px}.legend i{width:9px;height:9px;border-radius:3px;display:inline-block}.legend .stripe{background:repeating-linear-gradient(135deg,#dae1dd,#dae1dd 3px,#eef1ef 3px,#eef1ef 6px)}
+    dialog{border:0;border-radius:18px;padding:0;background:var(--panel);color:var(--ink);box-shadow:0 28px 90px rgba(15,20,18,.28);width:min(600px,calc(100vw - 28px));max-height:90vh}dialog::backdrop{background:rgba(16,23,20,.44);backdrop-filter:blur(3px)}.modal-head{padding:17px 19px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.modal-head h2{font-family:Georgia,"Times New Roman",serif;margin:0;font-size:21px}.close-btn{border:0;background:transparent;font-size:22px;color:var(--muted)}.modal-body{padding:17px 19px;overflow:auto;max-height:calc(90vh - 125px)}.modal-foot{padding:12px 19px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}.modal-foot>div{display:flex;gap:7px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{display:flex;flex-direction:column;gap:5px}.field.full{grid-column:1/-1}.field label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:800}.field input,.field select,.field textarea{border:1px solid var(--line);border-radius:9px;background:white;color:var(--ink);padding:9px 10px;font-size:12px}.field textarea{min-height:74px;resize:vertical}.check-row{display:flex;gap:15px;flex-wrap:wrap;padding:5px 0}.check-row label{font-size:11px;display:flex;align-items:center;gap:6px}.form-help{font-size:10px;color:var(--muted);margin:0}.template-list{display:flex;flex-direction:column;gap:10px}.template-day h3{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:12px 0 5px}.template-item{display:grid;grid-template-columns:76px minmax(0,1fr) auto;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:7px 9px}.template-item time{font-size:10px;font-variant-numeric:tabular-nums;color:var(--muted)}.template-item strong{font-size:11px}.template-item button{border:0;background:transparent;color:var(--green);font-size:11px;font-weight:800}
+    .settings-section{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}.settings-section:first-child{border-top:0;padding-top:0;margin-top:0}.settings-section h3{font-size:13px;margin:0 0 10px}.availability-row{display:grid;grid-template-columns:95px 1fr 1fr;gap:8px;align-items:center;margin-top:8px;font-size:11px}.availability-row input{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px}
+    .toast{position:fixed;right:22px;bottom:22px;z-index:1500;background:#17251f;color:white;border-radius:11px;padding:10px 13px;font-size:12px;box-shadow:0 14px 40px rgba(0,0,0,.25);opacity:0;transform:translateY(10px);pointer-events:none;transition:.2s}.toast.show{opacity:1;transform:none}.empty-note{text-align:center;color:var(--muted);font-size:12px;padding:30px}
+    @media(max-width:1180px){.workspace{grid-template-columns:1fr}.side-rail{display:grid;grid-template-columns:1fr 1fr}.assessment-card{grid-column:1/-1}.calendar-scroll{max-height:690px}}
+    @media(max-width:860px){.header-inner{grid-template-columns:1fr auto}.week-nav{grid-column:1/-1;grid-row:2;justify-content:center}.header-actions{justify-content:flex-end}.brand p{display:none}.workspace{padding:12px}.subbar{padding-inline:12px}.side-rail{grid-template-columns:1fr}.assessment-card{grid-column:auto}.calendar-scroll{max-height:650px}.day-mobile-tabs{display:flex}.calendar-toolbar{align-items:flex-start}.toolbar-note{max-width:290px}.week-grid{min-width:0}.week-title{min-width:170px}.desktop-only{display:none}}
+    @media(max-width:560px){.header-inner{padding:11px 12px}.brand h1{font-size:17px}.brand-mark{width:37px;height:37px}.header-actions #backupBtn{display:none}.week-title strong{font-size:16px}.workspace{padding:8px}.calendar-card,.side-card{border-radius:13px}.calendar-toolbar{padding:10px}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.modal-foot{flex-direction:column-reverse}.modal-foot>div{width:100%}.modal-foot .btn{flex:1}.availability-row{grid-template-columns:75px 1fr 1fr}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand"><div class="brand-mark">WP</div><div><h1>Weekly Study Planner</h1><p>Protect energy. Place the work.</p></div></div>
+      <div class="week-nav">
+        <button class="btn icon-btn" id="prevWeek" aria-label="Previous week">‹</button>
+        <button class="btn" id="todayBtn">Today</button>
+        <div class="week-title"><strong id="weekLabel">Week</strong><span id="termLabel">Bangkok time · Monday start</span></div>
+        <button class="btn icon-btn" id="nextWeek" aria-label="Next week">›</button>
+      </div>
+      <div class="header-actions">
+        <a class="btn version-link" href="weekly-study-planner.html">Lite version</a>
+        <button class="btn desktop-only" id="backupBtn">Backup</button>
+        <button class="btn" id="settingsBtn">Settings</button>
+        <button class="btn btn-primary" id="addBtn">+ Add event</button>
+      </div>
+    </div>
+    <div class="subbar" id="metrics"></div>
+  </header>
+
+  <main class="workspace">
+    <section class="calendar-card" aria-label="Weekly calendar">
+      <div class="calendar-toolbar">
+        <div class="toolbar-note"><strong id="weekTone">A deliberate week</strong><br><span id="weekAssessment">Drag movable work. Protected time stays guarded.</span></div>
+        <div class="toolbar-actions">
+          <input id="weekPicker" type="date" class="btn" aria-label="Choose week">
+          <button class="btn" id="templateBtn">Default template</button>
+          <button class="btn" id="duplicateWeekBtn">Duplicate week</button>
+          <button class="btn btn-warn" id="resetWeekBtn">Reset week</button>
+        </div>
+      </div>
+      <div class="day-mobile-tabs" id="mobileDayTabs" aria-label="Choose day"></div>
+      <div class="calendar-scroll" id="calendarScroll">
+        <div class="week-grid" id="weekGrid"></div>
+      </div>
+    </section>
+
+    <aside class="side-rail">
+      <section class="side-card">
+        <div class="card-head"><div><h2>Reading balance</h2><p>Targets belong to this week only.</p></div><span class="tag">Adaptive</span></div>
+        <div class="reading-list" id="readingList"></div>
+        <div class="catchup" id="catchupBox"></div>
+        <div class="button-row"><button class="btn btn-primary" id="fillReadingBtn">Fill remaining</button><button class="btn" id="rebuildReadingBtn">Rebuild auto</button></div>
+        <div class="toggle-row"><div><strong>Emergency Saturday</strong><br><span style="color:var(--muted)">Allow 10:00–12:00 only when needed.</span></div><label class="switch"><input type="checkbox" id="emergencyToggle"><span class="slider"></span></label></div>
+      </section>
+
+      <section class="side-card assessment-card">
+        <div class="card-head"><div><h2>Assessments</h2><p>Confirmed dates and open questions.</p></div><button class="btn" id="assessmentToggle">Show all</button></div>
+        <div class="assessment-list" id="assessmentList"></div>
+      </section>
+
+      <section class="side-card">
+        <div class="card-head"><div><h2>Planner key</h2><p>What the calendar protects.</p></div></div>
+        <div class="legend"><span><i style="background:var(--green)"></i>Class/study</span><span><i class="stripe"></i>Protected</span><span><i style="border:1px dashed #888;background:#eee"></i>Free/available</span><span>🔒 fixed</span><span>↕ movable</span></div>
+      </section>
+    </aside>
+  </main>
+
+  <dialog id="eventDialog">
+    <form id="eventForm" method="dialog">
+      <div class="modal-head"><h2 id="eventDialogTitle">Add event</h2><button type="button" class="close-btn" data-close="eventDialog" aria-label="Close">×</button></div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field full"><label for="eventTitle">Activity</label><input id="eventTitle" required maxlength="120" placeholder="Reading, class, meeting…"></div>
+          <div class="field"><label for="eventDate">Date</label><input id="eventDate" type="date" required></div>
+          <div class="field"><label for="eventCourse">Course</label><select id="eventCourse"></select></div>
+          <div class="field"><label for="eventStart">Start</label><input id="eventStart" type="time" step="300" required></div>
+          <div class="field"><label for="eventEnd">End</label><input id="eventEnd" type="text" inputmode="numeric" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]|24:00" placeholder="24:00" required></div>
+          <div class="field"><label for="eventKind">Type</label><select id="eventKind"><option value="study">Study / reading</option><option value="class">Class</option><option value="exam">Exam</option><option value="personal">Personal</option><option value="meal">Meal</option><option value="travel">Travel</option><option value="recovery">Recovery</option><option value="free">Free / availability</option><option value="sleep">Sleep</option><option value="break">Break</option></select></div>
+          <div class="field"><label for="eventRoom">Room / location</label><input id="eventRoom" maxlength="80" placeholder="ENG2 210"></div>
+          <div class="field full"><label for="eventNotes">Notes</label><textarea id="eventNotes" maxlength="800" placeholder="Optional details for this week"></textarea></div>
+          <div class="field full"><div class="check-row"><label><input type="checkbox" id="eventLocked"> Fixed / locked</label><label><input type="checkbox" id="eventProtected"> Protected from auto-planning</label><label id="templateUpdateWrap"><input type="checkbox" id="eventUpdateTemplate"> Also update default template</label></div><p class="form-help" id="eventHelp">Ordinary edits affect only this week. Updating the template affects newly created or reset weeks.</p></div>
+        </div>
+      </div>
+      <div class="modal-foot"><div><button type="button" class="btn btn-warn" id="deleteEventBtn">Delete</button><button type="button" class="btn" id="duplicateEventBtn">Duplicate</button></div><div><button type="button" class="btn" data-close="eventDialog">Cancel</button><button class="btn btn-primary" value="save">Save event</button></div></div>
+    </form>
+  </dialog>
+
+  <dialog id="templateDialog">
+    <div class="modal-head"><h2>Default weekly template</h2><button class="close-btn" data-close="templateDialog" aria-label="Close">×</button></div>
+    <div class="modal-body"><p class="form-help">Template edits do not overwrite weeks you already customized. Reset a week to apply the latest template.</p><div class="button-row"><button class="btn btn-primary" id="addTemplateBtn">+ Add template activity</button></div><div class="template-list" id="templateList"></div></div>
+    <div class="modal-foot"><div></div><div><button class="btn" data-close="templateDialog">Done</button></div></div>
+  </dialog>
+
+  <dialog id="settingsDialog">
+    <form id="settingsForm" method="dialog">
+      <div class="modal-head"><h2>Planner settings</h2><button type="button" class="close-btn" data-close="settingsDialog" aria-label="Close">×</button></div>
+      <div class="modal-body">
+        <section class="settings-section"><h3>Term dates</h3><div class="form-grid"><div class="field"><label for="termStart">Starts</label><input type="date" id="termStart"></div><div class="field"><label for="termEnd">Ends</label><input type="date" id="termEnd"></div></div></section>
+        <section class="settings-section"><h3>Extra reading availability</h3><p class="form-help">The assistant uses only these windows after counting your existing study blocks. Monday, Wednesday, Friday evening, and Sunday remain protected.</p><div class="availability-row"><strong>Tuesday</strong><input type="time" id="tueAvailStart" step="300"><input type="time" id="tueAvailEnd" step="300"></div><div class="availability-row"><strong>Thursday</strong><input type="time" id="thuAvailStart" step="300"><input type="time" id="thuAvailEnd" step="300"></div></section>
+        <section class="settings-section"><h3>Data</h3><div class="button-row"><button type="button" class="btn" id="exportBtn">Export JSON</button><button type="button" class="btn" id="importBtn">Import JSON</button><input type="file" id="importFile" accept="application/json,.json" hidden></div><p class="form-help">Your planner saves automatically in this browser. Export a backup before large changes.</p></section>
+      </div>
+      <div class="modal-foot"><div></div><div><button type="button" class="btn" data-close="settingsDialog">Cancel</button><button class="btn btn-primary" value="save">Save settings</button></div></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+  (() => {
+    'use strict';
+    const STORAGE_KEY='weekly_study_planner_v1', VERSION=1, START=330, END=1440, PPM=.8, SNAP=5;
+    const DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const COURSES={
+      ui:{short:'UI Design',name:'2190443 User Interface Design',color:'#7a63b8'},
+      econ:{short:'Engineering Economy',name:'2184301 Engineering Economy and Applications',color:'#d57638'},
+      eis:{short:'EIS',name:'2190415 Enterprise Information Systems',color:'#218477'},
+      ent:{short:'Entrepreneurship',name:'2143423 High Technology Entrepreneurship',color:'#bd567e'},
+      telecom:{short:'Telecommunications',name:'2182372 Principles of Telecommunications',color:'#c94e58'},
+      arch:{short:'Computer Architecture',name:'2190250 Computer Architecture and Organization',color:'#3473aa'},
+      net:{short:'Netcentric',name:'2190472 Netcentric Architecture',color:'#16806b'},
+      ta:{short:'TA work',name:'TA work',color:'#6f7781'},
+      personal:{short:'Personal',name:'Personal / routine',color:'#7b847f'}
+    };
+    const DEFAULT_TARGETS={ui:40,econ:140,eis:140,ent:90,telecom:150,arch:150,net:150};
+    const PRIORITY=['telecom','arch','net','econ','eis','ent','ui'];
+    const uid=()=>`${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
+    const pad=n=>String(n).padStart(2,'0');
+    const toMinutes=t=>{const [h,m]=(t||'00:00').split(':').map(Number);return h*60+m};
+    const toTime=m=>Number(m)===1440?'24:00':`${pad(Math.floor(Math.max(0,Math.min(1439,m))/60))}:${pad(Math.max(0,Math.min(1439,m))%60)}`;
+    const snap=m=>Math.round(m/SNAP)*SNAP;
+    const parseDate=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d,12)};
+    const dateKey=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const addDays=(s,n)=>{const d=parseDate(s);d.setDate(d.getDate()+n);return dateKey(d)};
+    const mondayOf=s=>{const d=parseDate(s),day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return dateKey(d)};
+    const today=()=>dateKey(new Date());
+    const dayIndexFor=(week,date)=>Math.round((parseDate(date)-parseDate(week))/86400000);
+    const escapeHtml=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    const duration=e=>Math.max(0,e.end-e.start);
+    const fmtDuration=m=>m>=60?`${Math.floor(m/60)}h${m%60?` ${m%60}m`:''}`:`${m}m`;
+    const fmtDate=s=>parseDate(s).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+    const fmtWeek=w=>{const e=addDays(w,6),a=parseDate(w),b=parseDate(e);return a.getMonth()===b.getMonth()?`${a.getDate()}–${b.getDate()} ${b.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}`:`${a.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} – ${b.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}`};
+
+    function tpl(day,start,end,title,kind='personal',course='personal',opts={}){return{id:uid(),day,start:toMinutes(start),end:toMinutes(end),title,kind,course,room:opts.room||'',notes:opts.notes||'',locked:opts.locked??['class','sleep','meal','travel','recovery','exam'].includes(kind),protected:opts.protected??['sleep','meal','travel','recovery'].includes(kind),templateId:uid()}}
+    function buildTemplate(){
+      const t=[]; const add=(...args)=>t.push(tpl(...args));
+      for(let d=0;d<=5;d++) add(d,'00:00','07:45','Sleep · overnight','sleep','personal',{protected:true});
+      add(6,'00:00','05:45','Sleep · overnight','sleep','personal',{protected:true});
+      add(0,'07:45','08:45','Shower, breakfast and packing');add(0,'08:45','09:00','Travel','travel');add(0,'09:00','12:00','User Interface Design class','class','ui',{room:'ENG2 210'});add(0,'12:00','13:00','Lunch break','meal');add(0,'13:00','16:00','Engineering Economy class','class','econ',{room:'ENG2 305'});add(0,'16:00','16:20','Travel home','travel');add(0,'16:20','18:20','Recovery / free time','recovery');add(0,'18:20','19:20','Dinner','meal');add(0,'19:20','20:00','UI homework / project','study','ui',{locked:false,protected:false});add(0,'20:00','21:10','Engineering Economy study','study','econ',{locked:false,protected:false});add(0,'21:10','21:20','Break','break');add(0,'21:20','22:30','Engineering Economy study','study','econ',{locked:false,protected:false});add(0,'22:30','23:45','Free and wind down','free','personal',{locked:false,protected:true});add(0,'23:45','24:00','Sleep','sleep','personal',{protected:true});
+      add(1,'07:45','08:45','Morning preparation');add(1,'08:45','09:00','Travel','travel');add(1,'09:00','11:30','TA work','class','ta',{room:'TBA'});add(1,'11:30','12:00','Free buffer','free','personal',{locked:false,protected:false});add(1,'12:00','13:00','Lunch break','meal');add(1,'13:00','16:00','Enterprise Information Systems class','class','eis',{room:'ENG3 305'});add(1,'16:00','16:20','Travel home','travel');add(1,'16:20','18:20','Recovery / free time','recovery');add(1,'18:20','19:20','Dinner','meal');add(1,'19:20','20:30','EIS reading','study','eis',{locked:false,protected:false});add(1,'20:30','20:40','Break','break');add(1,'20:40','21:50','EIS reading','study','eis',{locked:false,protected:false});add(1,'21:50','23:45','Free time','free','personal',{locked:false,protected:false});add(1,'23:45','24:00','Sleep','sleep','personal',{protected:true});
+      add(2,'07:45','08:45','Morning preparation');add(2,'08:45','09:00','Travel','travel');add(2,'09:00','12:00','High-Tech Entrepreneurship class','class','ent',{room:'ENG2 303/1'});add(2,'12:00','13:00','Lunch break','meal');add(2,'13:00','16:00','Principles of Telecommunications class','class','telecom',{room:'ENG2 302'});add(2,'16:00','16:20','Travel home','travel');add(2,'16:20','18:20','Recovery / free time','recovery');add(2,'18:20','19:20','Dinner','meal');add(2,'19:20','20:50','Entrepreneurship reading','study','ent',{locked:false,protected:false});add(2,'20:50','22:05','Telecommunications study','study','telecom',{locked:false,protected:false});add(2,'22:05','22:35','Break','break');add(2,'22:35','23:20','Telecommunications study','study','telecom',{locked:false,protected:false});add(2,'23:20','23:45','Wind down','free','personal',{locked:false,protected:true});add(2,'23:45','24:00','Sleep','sleep','personal',{protected:true});
+      add(3,'07:45','08:45','Morning preparation');add(3,'08:45','09:00','Travel','travel');add(3,'09:00','12:00','Computer Architecture class','class','arch',{room:'ENG3 420'});add(3,'12:00','13:00','Lunch break','meal');add(3,'13:00','13:30','Remaining Telecom study','study','telecom',{locked:false,protected:false});add(3,'13:30','14:45','Computer Architecture study','study','arch',{locked:false,protected:false});add(3,'14:45','15:15','Break','break');add(3,'15:15','16:30','Computer Architecture study','study','arch',{locked:false,protected:false});add(3,'16:30','18:30','Travel and recovery','recovery');add(3,'18:30','19:30','Dinner','meal');add(3,'19:30','23:45','Free evening','free','personal',{locked:false,protected:false});add(3,'23:45','24:00','Sleep','sleep','personal',{protected:true});
+      add(4,'07:45','08:45','Morning preparation');add(4,'08:45','09:00','Travel','travel');add(4,'09:00','12:00','Netcentric Architecture class','class','net',{room:'ENG3 409'});add(4,'12:00','13:00','Lunch break','meal');add(4,'13:00','14:15','Netcentric study / coding','study','net',{locked:false,protected:false});add(4,'14:15','14:45','Break','break');add(4,'14:45','16:00','Netcentric study / coding','study','net',{locked:false,protected:false});add(4,'16:00','23:45','Travel, recovery and free evening','free','personal',{locked:false,protected:true});add(4,'23:45','24:00','Sleep','sleep','personal',{protected:true});
+      add(5,'07:45','08:45','Wake up, breakfast and shower');add(5,'08:45','21:45','Protected recovery / family day','free','personal',{locked:false,protected:true});add(5,'10:00','12:00','Emergency catch-up window','free','personal',{locked:false,protected:true,notes:'Use only when necessary.'});add(5,'21:45','24:00','Sleep early','sleep','personal',{protected:true});
+      add(6,'05:45','06:15','Light breakfast and preparation');add(6,'06:15','06:30','Travel','travel');add(6,'06:30','09:30','Running / time with Porjai','personal','personal',{locked:true,protected:true});add(6,'09:30','09:45','Travel home','travel');add(6,'09:45','10:45','Shower and brunch','meal');add(6,'10:45','23:45','Free and family time','free','personal',{locked:false,protected:true});add(6,'23:45','24:00','Sleep','sleep','personal',{protected:true});
+      return t;
+    }
+    const EXAMS=[
+      {id:'mid-econ',date:'2026-09-22',start:780,end:960,course:'econ',title:'Engineering Economy midterm',type:'Midterm',time:'13:00–16:00'},
+      {id:'mid-telecom',date:'2026-09-23',start:780,end:960,course:'telecom',title:'Telecommunications midterm',type:'Midterm',time:'13:00–16:00'},
+      {id:'mid-arch',date:'2026-09-24',start:510,end:690,course:'arch',title:'Computer Architecture midterm',type:'Midterm',time:'08:30–11:30'},
+      {id:'mid-net',date:'2026-09-25',start:780,end:960,course:'net',title:'Netcentric Architecture midterm',type:'Midterm',time:'13:00–16:00'},
+      {id:'final-eis',date:'2026-11-24',course:'eis',title:'Enterprise Information Systems final',type:'Final',time:'Morning or afternoon — TBA',tba:true},
+      {id:'final-econ',date:'2026-11-24',course:'econ',title:'Engineering Economy final',type:'Final',time:'Morning or afternoon — TBA',tba:true},
+      {id:'final-ent',date:'2026-11-26',start:510,end:690,course:'ent',title:'High-Tech Entrepreneurship final',type:'Final',time:'08:30–11:30'},
+      {id:'final-net',date:'2026-11-27',start:780,end:960,course:'net',title:'Netcentric Architecture final',type:'Final',time:'13:00–16:00'},
+      {id:'final-telecom',date:'2026-12-02',start:780,end:960,course:'telecom',title:'Telecommunications final',type:'Final',time:'13:00–16:00'},
+      {id:'final-arch',date:'2026-12-03',start:510,end:690,course:'arch',title:'Computer Architecture final',type:'Final',time:'08:30–11:30'}
+    ];
+    const ASSESSMENT_NOTES=[
+      {course:'ui',title:'UI Design',text:'No formal midterm or final. Homework and project work expected.'},
+      {course:'eis',title:'EIS quiz + group project',text:'Quiz before or after midterm week; exact date and time TBA.'},
+      {course:'ent',title:'Entrepreneurship project work',text:'No midterm. Project or presentation work likely.'},
+      {course:'econ',title:'Engineering Economy assessment',text:'Calculations and assignments may be announced.'},
+      {course:'telecom',title:'Telecom continuous assessment',text:'Other assessment has not yet been confirmed.'},
+      {course:'arch',title:'Computer Architecture assessment',text:'Other assessment has not yet been confirmed.'},
+      {course:'net',title:'Netcentric coding / labs',text:'Coding or lab work may be announced.'}
+    ];
+    function freshState(){return{version:VERSION,settings:{termStart:'2026-08-03',termEnd:'2026-12-06',availability:{1:{start:1310,end:1390},3:{start:1170,end:1320}},emergencyCatchup:false},template:buildTemplate(),weeks:{},exams:EXAMS,assessmentNotes:ASSESSMENT_NOTES}}
+    function validState(s){return s&&s.version===VERSION&&s.settings&&Array.isArray(s.template)&&s.weeks&&typeof s.weeks==='object'&&Array.isArray(s.exams)}
+    function migrateState(s){const lists=[s.template,...Object.values(s.weeks||{}).map(w=>w.events||[])];lists.forEach(list=>list.forEach(e=>{if(e.kind==='sleep'&&e.start===START&&e.end<=465){e.start=0;e.title='Sleep · overnight'}}));return s}
+    function loadState(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return validState(s)?migrateState(s):freshState()}catch{return freshState()}}
+    let state=loadState(), selectedWeek=initialWeek(), mobileDay=Math.max(0,Math.min(6,dayIndexFor(initialWeek(),today()))), editingId=null, editingTemplateId=null, templateMode=false, showAllAssessments=false, dragState=null, toastTimer=null;
+    save();
+    function initialWeek(){const t=today();if(t<state?.settings?.termStart||!state)return '2026-08-03';if(t>state.settings.termEnd)return mondayOf(state.settings.termEnd);return mondayOf(t)}
+    function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
+    function generateWeek(week){
+      if(state.weeks[week])return state.weeks[week];
+      const events=[];
+      state.template.forEach(x=>{const date=addDays(week,x.day);if(date<state.settings.termStart||date>state.settings.termEnd)return;events.push({...x,id:uid(),date,templateId:x.templateId||x.id,auto:false})});
+      state.exams.filter(x=>!x.tba&&mondayOf(x.date)===week).forEach(x=>events.push({id:`exam_${x.id}`,date:x.date,start:x.start,end:x.end,title:x.title,kind:'exam',course:x.course,room:'',notes:x.time,locked:true,protected:true,auto:false,examId:x.id}));
+      state.weeks[week]={events,readingTargets:{...DEFAULT_TARGETS},createdAt:Date.now()};save();return state.weeks[week];
+    }
+    const currentWeek=()=>generateWeek(selectedWeek);
+    function eventColor(e){return COURSES[e.course]?.color||({sleep:'#53645e',meal:'#b4864d',travel:'#6f7781',recovery:'#648377',break:'#8b8a81',free:'#949a96',exam:'#b54042'}[e.kind]||'#6f7781')}
+    function isBlocking(e){return e.kind!=='free'}
+    function overlaps(a,b){return a.date===b.date&&isBlocking(a)&&isBlocking(b)&&a.start<b.end&&b.start<a.end}
+    function conflictIds(events){const ids=new Set();for(let i=0;i<events.length;i++)for(let j=i+1;j<events.length;j++)if(overlaps(events[i],events[j])){ids.add(events[i].id);ids.add(events[j].id)}return ids}
+    function plannedFor(course){return currentWeek().events.filter(e=>e.course===course&&e.kind==='study').reduce((n,e)=>n+duration(e),0)}
+    function workload(){const es=currentWeek().events;return{classes:es.filter(e=>e.kind==='class').reduce((n,e)=>n+duration(e),0),study:es.filter(e=>e.kind==='study').reduce((n,e)=>n+duration(e),0),protected:es.filter(e=>e.protected&&e.kind!=='free').reduce((n,e)=>n+duration(e),0),conflicts:conflictIds(es).size}}
+
+    function render(){renderHeader();renderCalendar();renderReading();renderAssessments();}
+    function renderHeader(){
+      document.getElementById('weekLabel').textContent=fmtWeek(selectedWeek);document.getElementById('weekPicker').value=selectedWeek;
+      document.getElementById('termLabel').textContent=`Term ${fmtDate(state.settings.termStart)} – ${fmtDate(state.settings.termEnd)} · Bangkok`;
+      const w=workload(),target=Object.values(currentWeek().readingTargets).reduce((a,b)=>a+Number(b||0),0),planned=Object.keys(currentWeek().readingTargets).reduce((n,c)=>n+Math.min(plannedFor(c),Number(currentWeek().readingTargets[c]||0)),0);
+      document.getElementById('metrics').innerHTML=`<span class="metric">Class <strong>${fmtDuration(w.classes)}</strong></span><span class="metric">Study planned <strong>${fmtDuration(w.study)}</strong></span><span class="metric">Reading target <strong>${fmtDuration(target)}</strong></span><span class="metric">Target covered <strong>${Math.round(planned/Math.max(1,target)*100)}%</strong></span><span class="metric">Protected <strong>${fmtDuration(w.protected)}</strong></span><span class="metric ${w.conflicts?'alert':''}">Conflicts <strong>${w.conflicts}</strong></span>`;
+      const tones=[['Monday','Very harsh — do not add more.'],['Tuesday','Busy but manageable.'],['Wednesday','Harshest day — protect the wind-down.'],['Thursday','Moderate, with room for careful catch-up.'],['Friday','Balanced — keep the evening free.'],['Saturday','Protected recovery day.'],['Sunday','Porjai and personal day.']];
+      const exams=state.exams.filter(x=>mondayOf(x.date)===selectedWeek);document.getElementById('weekTone').textContent=exams.length?`${exams.length} assessment${exams.length>1?'s':''} this week`:tones[Math.max(0,Math.min(6,mobileDay))][0]+' focus';
+      document.getElementById('weekAssessment').textContent=exams.length?exams.map(x=>`${x.title} · ${x.time}`).join(' • '):tones[Math.max(0,Math.min(6,mobileDay))][1];
+    }
+    function renderCalendar(){
+      const mobile=matchMedia('(max-width: 860px)').matches, grid=document.getElementById('weekGrid'), week=currentWeek(), conflicts=conflictIds(week.events), visibleDays=mobile?[mobileDay]:[0,1,2,3,4,5,6];
+      grid.className='week-grid'+(mobile?' mobile':'');
+      let html='<div class="corner"></div>';
+      visibleDays.forEach(d=>{const date=addDays(selectedWeek,d);html+=`<div class="day-head ${date===today()?'today':''}" data-day-index="${d}"><div><strong>${DAYS[d]}</strong><span>${parseDate(date).getDate()}</span></div><button data-add-day="${d}" aria-label="Add event on ${DAYS[d]}">+</button></div>`});
+      html+='<div class="time-axis">';for(let m=START;m<=END;m+=60)html+=`<div class="time-label" style="top:${(m-START)*PPM}px">${toTime(m)}</div>`;html+='</div>';
+      visibleDays.forEach(d=>{const date=addDays(selectedWeek,d),dayEvents=week.events.filter(e=>e.date===date&&e.end>START&&e.start<END).sort((a,b)=>a.start-b.start||a.end-b.end);html+=`<div class="day-column ${date===today()?'today':''}" data-day-index="${d}" data-date="${date}">`;
+        const now=new Date(),nowM=now.getHours()*60+now.getMinutes();if(date===today()&&nowM>=START&&nowM<=END)html+=`<div class="now-line" style="top:${(nowM-START)*PPM}px"></div>`;
+        dayEvents.forEach(e=>{const top=(Math.max(START,e.start)-START)*PPM,height=Math.max(14,(Math.min(END,e.end)-Math.max(START,e.start))*PPM),color=eventColor(e),compact=height<32,timeLabel=e.start<START?`Overnight · until ${toTime(e.end)}`:`${toTime(e.start)}–${toTime(e.end)}`,ariaTime=e.start<START?`overnight until ${toTime(e.end)}`:`${toTime(e.start)} to ${toTime(e.end)}`;html+=`<div class="event ${e.locked?'locked':'movable'} ${e.protected?'protected':''} ${e.kind==='free'?'free':''} ${e.auto?'auto':''} ${conflicts.has(e.id)?'conflict':''}" data-event-id="${e.id}" tabindex="0" role="button" aria-label="${escapeHtml(e.title)}, ${ariaTime}" style="top:${top}px;height:${height}px;--event-color:${color}"><span class="resize-handle top" data-resize="top"></span><div class="event-title">${escapeHtml(e.title)}</div>${compact?'':`<div class="event-time">${timeLabel}</div>${e.room?`<div class="event-room">${escapeHtml(e.room)}</div>`:''}`}<div class="event-icons">${e.locked?'🔒':''}${e.protected?' ◈':''}</div><span class="resize-handle bottom" data-resize="bottom"></span></div>`});
+        html+='</div>';});grid.innerHTML=html;renderMobileTabs();bindCalendarEvents();
+      requestAnimationFrame(()=>{const sc=document.getElementById('calendarScroll');if(!sc.dataset.initialized){sc.scrollTop=(420-START)*PPM;sc.dataset.initialized='1'}});
+    }
+    function renderMobileTabs(){document.getElementById('mobileDayTabs').innerHTML=DAYS.map((d,i)=>`<button class="${i===mobileDay?'active':''}" data-mobile-day="${i}">${d.slice(0,3)}<br>${parseDate(addDays(selectedWeek,i)).getDate()}</button>`).join('');document.querySelectorAll('[data-mobile-day]').forEach(b=>b.onclick=()=>{mobileDay=Number(b.dataset.mobileDay);render()})}
+    function bindCalendarEvents(){
+      document.querySelectorAll('[data-add-day]').forEach(b=>b.onclick=()=>openAdd(Number(b.dataset.addDay),540));
+      document.querySelectorAll('.day-column').forEach(col=>{col.ondblclick=e=>{if(e.target!==col)return;const r=col.getBoundingClientRect(),m=snap(START+(e.clientY-r.top)/PPM);openAdd(Number(col.dataset.dayIndex),Math.max(START,Math.min(END-30,m)))}});
+      document.querySelectorAll('.event').forEach(card=>{card.onclick=e=>{if(card.dataset.suppress==='1'){card.dataset.suppress='0';return}if(!e.target.dataset.resize)openEdit(card.dataset.eventId)};card.onpointerdown=startPointer;card.onkeydown=eventKeydown});
+    }
+    function renderReading(){
+      const week=currentWeek();document.getElementById('readingList').innerHTML=Object.keys(DEFAULT_TARGETS).map(c=>{const planned=plannedFor(c),target=Number(week.readingTargets[c]||0),pct=Math.min(100,Math.round(planned/Math.max(1,target)*100));return`<div class="reading-row" style="--course:${COURSES[c].color}"><i class="course-dot"></i><div class="reading-name">${COURSES[c].short}<span>${fmtDuration(planned)} planned · ${planned>=target?'covered':fmtDuration(target-planned)+' left'}</span></div><input class="minute-input" type="number" min="0" max="900" step="5" value="${target}" data-target="${c}" aria-label="${COURSES[c].short} reading target in minutes"><div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div></div>`}).join('');
+      document.querySelectorAll('[data-target]').forEach(i=>{i.oninput=()=>{week.readingTargets[i.dataset.target]=Math.max(0,Number(i.value)||0);save()};i.onchange=()=>render()});
+      const remaining=Object.keys(week.readingTargets).reduce((n,c)=>n+Math.max(0,Number(week.readingTargets[c])-plannedFor(c)),0),box=document.getElementById('catchupBox');box.className='catchup'+(remaining?'':' good');box.innerHTML=remaining?`<strong>${fmtDuration(remaining)} still unplaced</strong><br>Fill safe Tuesday/Thursday gaps, or enable Saturday only if necessary.`:'<strong>Reading targets are covered.</strong><br>Your protected time remains intact.';
+      document.getElementById('emergencyToggle').checked=!!state.settings.emergencyCatchup;
+    }
+    function renderAssessments(){
+      const all=[...state.exams].sort((a,b)=>a.date.localeCompare(b.date)),now=today();let items=showAllAssessments?all:all.filter(x=>x.date>=now).slice(0,5);if(!items.length)items=all.slice(-5);
+      let html=items.map(x=>{const d=parseDate(x.date);return`<div class="assessment ${x.tba?'tba':''}"><div class="date-tile"><span>${d.toLocaleDateString('en-GB',{month:'short'})}</span><strong>${d.getDate()}</strong></div><div><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.type)} · ${escapeHtml(x.time)}${x.tba?' · coordinated, not a confirmed clash':''}</p></div></div>`}).join('');
+      if(showAllAssessments)html+=state.assessmentNotes.map(x=>`<div class="assessment tba"><div class="date-tile"><span>Open</span><strong>?</strong></div><div><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.text)}</p></div></div>`).join('');document.getElementById('assessmentList').innerHTML=html;document.getElementById('assessmentToggle').textContent=showAllAssessments?'Upcoming':'Show all';
+    }
+
+    function openAdd(day=mobileDay,start=540){templateMode=false;editingId=null;editingTemplateId=null;setEventForm({date:addDays(selectedWeek,day),start,end:Math.min(END,start+60),title:'',kind:'study',course:'personal',room:'',notes:'',locked:false,protected:false});document.getElementById('eventDialogTitle').textContent='Add event';document.getElementById('deleteEventBtn').hidden=true;document.getElementById('duplicateEventBtn').hidden=true;document.getElementById('templateUpdateWrap').hidden=false;document.getElementById('eventDialog').showModal();setTimeout(()=>document.getElementById('eventTitle').focus(),0)}
+    function openEdit(id){const e=currentWeek().events.find(x=>x.id===id);if(!e)return;templateMode=false;editingId=id;editingTemplateId=null;setEventForm(e);document.getElementById('eventDialogTitle').textContent='Edit event';document.getElementById('deleteEventBtn').hidden=false;document.getElementById('duplicateEventBtn').hidden=false;document.getElementById('templateUpdateWrap').hidden=!e.templateId;document.getElementById('eventDialog').showModal()}
+    function openTemplateEvent(id){const e=state.template.find(x=>x.id===id);if(!e)return;templateMode=true;editingTemplateId=id;editingId=null;setEventForm({...e,date:addDays(selectedWeek,e.day)});document.getElementById('eventDialogTitle').textContent='Edit template activity';document.getElementById('deleteEventBtn').hidden=false;document.getElementById('duplicateEventBtn').hidden=false;document.getElementById('templateUpdateWrap').hidden=true;document.getElementById('eventDialog').showModal()}
+    function openAddTemplate(){templateMode=true;editingTemplateId=null;editingId=null;setEventForm({date:selectedWeek,start:540,end:600,title:'',kind:'study',course:'personal',room:'',notes:'',locked:false,protected:false});document.getElementById('eventDialogTitle').textContent='Add template activity';document.getElementById('deleteEventBtn').hidden=true;document.getElementById('duplicateEventBtn').hidden=true;document.getElementById('templateUpdateWrap').hidden=true;document.getElementById('eventDialog').showModal()}
+    function setEventForm(e){document.getElementById('eventTitle').value=e.title||'';document.getElementById('eventDate').value=e.date||selectedWeek;document.getElementById('eventStart').value=toTime(e.start);document.getElementById('eventEnd').value=toTime(e.end);document.getElementById('eventCourse').value=e.course||'personal';document.getElementById('eventKind').value=e.kind||'study';document.getElementById('eventRoom').value=e.room||'';document.getElementById('eventNotes').value=e.notes||'';document.getElementById('eventLocked').checked=!!e.locked;document.getElementById('eventProtected').checked=!!e.protected;document.getElementById('eventUpdateTemplate').checked=false}
+    function formEvent(){const date=document.getElementById('eventDate').value,start=toMinutes(document.getElementById('eventStart').value),end=toMinutes(document.getElementById('eventEnd').value),kind=document.getElementById('eventKind').value;if(!date||!document.getElementById('eventTitle').value.trim())throw Error('Add an activity name and date.');if(end<=start)throw Error('End time must be after start time.');if((start<START&&kind!=='sleep')||end>END)throw Error(kind==='sleep'?'Use a time between 00:00 and 24:00.':'Use a time between 05:30 and 24:00.');return{date,start,end,title:document.getElementById('eventTitle').value.trim(),course:document.getElementById('eventCourse').value,kind,room:document.getElementById('eventRoom').value.trim(),notes:document.getElementById('eventNotes').value.trim(),locked:document.getElementById('eventLocked').checked,protected:document.getElementById('eventProtected').checked,auto:false}}
+    function saveEvent(e){
+      if(templateMode){const day=Math.max(0,Math.min(6,dayIndexFor(selectedWeek,e.date))),existing=state.template.find(x=>x.id===editingTemplateId);if(existing)Object.assign(existing,e,{day,date:undefined});else state.template.push({...e,id:uid(),templateId:uid(),day,date:undefined});save();renderTemplateList();document.getElementById('eventDialog').close();toast('Default template updated');return}
+      const week=currentWeek(),existing=week.events.find(x=>x.id===editingId);if(existing)Object.assign(existing,e);else week.events.push({...e,id:uid(),templateId:null});
+      if(document.getElementById('eventUpdateTemplate').checked){const source=existing||week.events.at(-1),te=state.template.find(x=>x.templateId===source.templateId);if(te)Object.assign(te,{...e,day:dayIndexFor(selectedWeek,e.date),date:undefined,id:te.id,templateId:te.templateId})}
+      save();document.getElementById('eventDialog').close();render();toast('Week saved');
+    }
+    function deleteEditing(){if(templateMode){if(!editingTemplateId)return;if(confirm('Remove this activity from the default template? Existing weeks will not change.')){state.template=state.template.filter(x=>x.id!==editingTemplateId);save();document.getElementById('eventDialog').close();renderTemplateList()}}else if(editingId&&confirm('Delete this event from this week?')){currentWeek().events=currentWeek().events.filter(x=>x.id!==editingId);save();document.getElementById('eventDialog').close();render();toast('Event deleted')}}
+    function duplicateEditing(){try{const e=formEvent();if(templateMode){state.template.push({...e,id:uid(),templateId:uid(),day:Math.max(0,Math.min(6,dayIndexFor(selectedWeek,e.date))),date:undefined,title:`${e.title} copy`});save();renderTemplateList()}else{currentWeek().events.push({...e,id:uid(),templateId:null,title:`${e.title} copy`,start:Math.min(END-15,e.start+15),end:Math.min(END,e.end+15)});save();render()}document.getElementById('eventDialog').close();toast('Duplicate created')}catch(err){toast(err.message,true)}}
+
+    function startPointer(ev){const card=ev.currentTarget,id=card.dataset.eventId,e=currentWeek().events.find(x=>x.id===id);if(!e||e.locked||ev.button!==0)return;const resize=ev.target.dataset.resize||null,rect=card.getBoundingClientRect();dragState={id,event:e,mode:resize||'move',x:ev.clientX,y:ev.clientY,origStart:e.start,origEnd:e.end,origDate:e.date,card,moved:false,ghost:null,rect};card.setPointerCapture?.(ev.pointerId);window.addEventListener('pointermove',movePointer);window.addEventListener('pointerup',endPointer,{once:true});ev.preventDefault()}
+    function movePointer(ev){if(!dragState)return;const d=dragState,dy=ev.clientY-d.y;if(Math.abs(dy)<3&&Math.abs(ev.clientX-d.x)<3)return;d.moved=true;d.card.dataset.suppress='1';if(d.mode==='move'){if(!d.ghost){d.ghost=document.createElement('div');d.ghost.className='drag-ghost';d.ghost.textContent=d.event.title;d.ghost.style.width=`${d.rect.width}px`;d.ghost.style.height=`${Math.max(24,d.rect.height)}px`;document.body.appendChild(d.ghost);d.card.classList.add('drag-source')}d.ghost.style.left=`${ev.clientX-(d.x-d.rect.left)}px`;d.ghost.style.top=`${ev.clientY-(d.y-d.rect.top)}px`;document.querySelectorAll('.day-column').forEach(c=>c.classList.toggle('drop-active',pointIn(ev.clientX,ev.clientY,c.getBoundingClientRect())))}else{const delta=snap(dy/PPM);if(d.mode==='top'){const ns=Math.min(d.origEnd-15,Math.max(START,d.origStart+delta));d.card.style.top=`${(ns-START)*PPM}px`;d.card.style.height=`${(d.origEnd-ns)*PPM}px`}else{const ne=Math.max(d.origStart+15,Math.min(END,d.origEnd+delta));d.card.style.height=`${(ne-d.origStart)*PPM}px`}}}
+    function endPointer(ev){const d=dragState;dragState=null;window.removeEventListener('pointermove',movePointer);document.querySelectorAll('.day-column').forEach(c=>c.classList.remove('drop-active'));if(!d.moved){renderCalendar();return}if(d.mode==='move'){const col=[...document.querySelectorAll('.day-column')].find(c=>pointIn(ev.clientX,ev.clientY,c.getBoundingClientRect()));if(col){const day=Number(col.dataset.dayIndex),delta=snap((ev.clientY-d.y)/PPM),len=d.origEnd-d.origStart;let ns=Math.max(START,Math.min(END-len,d.origStart+delta));d.event.start=ns;d.event.end=ns+len;d.event.date=addDays(selectedWeek,day)}}else{const delta=snap((ev.clientY-d.y)/PPM);if(d.mode==='top')d.event.start=Math.min(d.origEnd-15,Math.max(START,d.origStart+delta));else d.event.end=Math.max(d.origStart+15,Math.min(END,d.origEnd+delta))}d.ghost?.remove();d.card.classList.remove('drag-source');save();render();toast('Event moved')}
+    function pointIn(x,y,r){return x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom}
+    function eventKeydown(ev){const e=currentWeek().events.find(x=>x.id===ev.currentTarget.dataset.eventId);if(!e)return;if(ev.key==='Enter'){openEdit(e.id);return}if(e.locked)return;let changed=false;if(ev.key==='ArrowUp'){if(ev.shiftKey)e.end=Math.max(e.start+15,e.end-SNAP);else if(e.start>=START+SNAP){e.start-=SNAP;e.end-=SNAP}changed=true}if(ev.key==='ArrowDown'){if(ev.shiftKey)e.end=Math.min(END,e.end+SNAP);else if(e.end<=END-SNAP){e.start+=SNAP;e.end+=SNAP}changed=true}if(ev.key==='ArrowLeft'||ev.key==='ArrowRight'){const d=dayIndexFor(selectedWeek,e.date)+(ev.key==='ArrowLeft'?-1:1);if(d>=0&&d<=6)e.date=addDays(selectedWeek,d);changed=true}if(changed){ev.preventDefault();save();render()}}
+
+    function autoPlace(rebuild=false){
+      const week=currentWeek();if(rebuild)week.events=week.events.filter(e=>!e.auto);let placed=0;
+      for(const course of PRIORITY){let remaining=Math.max(0,Number(week.readingTargets[course]||0)-plannedFor(course));while(remaining>=15){const slot=findSlot(Math.min(remaining,remaining>=60?60:remaining),week.events);if(!slot)break;const len=Math.min(remaining,slot.end-slot.start,60);if(len<15)break;week.events.push({id:uid(),date:slot.date,start:slot.start,end:slot.start+len,title:`${COURSES[course].short} reading`,kind:'study',course,room:'',notes:'Auto-placed to meet this week’s target.',locked:false,protected:false,auto:true,templateId:null});remaining-=len;placed+=len}}
+      save();render();toast(placed?`${fmtDuration(placed)} of reading placed`:'No safe open window found',!placed)
+    }
+    function findSlot(requested,events){const windows=[];Object.entries(state.settings.availability).forEach(([day,w])=>windows.push({date:addDays(selectedWeek,Number(day)),start:Number(w.start),end:Number(w.end)}));if(state.settings.emergencyCatchup)windows.push({date:addDays(selectedWeek,5),start:600,end:720});for(const w of windows){for(let s=w.start;s+15<=w.end;s+=SNAP){const maxEnd=Math.min(w.end,s+requested),blockers=events.filter(e=>e.date===w.date&&isBlocking(e)&&e.start<maxEnd&&s<e.end);if(!blockers.length)return{date:w.date,start:s,end:maxEnd};const jump=Math.max(...blockers.map(e=>e.end));s=Math.max(s,jump-SNAP)}}return null}
+
+    function renderTemplateList(){const root=document.getElementById('templateList');root.innerHTML=DAYS.map((day,i)=>{const es=state.template.filter(e=>e.day===i).sort((a,b)=>a.start-b.start);return`<section class="template-day"><h3>${day}</h3>${es.map(e=>`<div class="template-item"><time>${toTime(e.start)}–${toTime(e.end)}</time><strong>${escapeHtml(e.title)}</strong><button data-template-edit="${e.id}">Edit</button></div>`).join('')}</section>`}).join('');root.querySelectorAll('[data-template-edit]').forEach(b=>b.onclick=()=>openTemplateEvent(b.dataset.templateEdit))}
+    function resetWeek(){if(!confirm('Reset this week from the latest default template? All manual changes in this week will be replaced.'))return;delete state.weeks[selectedWeek];generateWeek(selectedWeek);save();render();toast('Week reset from template')}
+    function duplicateWeek(){const raw=prompt('Copy this week to a week containing this date:',addDays(selectedWeek,7));if(!raw)return;const target=mondayOf(raw);if(target===selectedWeek){toast('Choose a different week',true);return}if(state.weeks[target]&&!confirm(`Replace the saved week of ${fmtDate(target)}?`))return;state.weeks[target]={events:currentWeek().events.map(e=>({...e,id:uid(),date:addDays(target,dayIndexFor(selectedWeek,e.date))})),readingTargets:{...currentWeek().readingTargets},createdAt:Date.now()};save();selectedWeek=target;render();toast('Week duplicated')}
+    function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`weekly-study-planner-${today()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Backup exported')}
+    async function importData(file){try{const incoming=JSON.parse(await file.text());if(!validState(incoming))throw Error('This is not a valid Weekly Study Planner backup.');if(!confirm('Replace the planner with this backup?'))return;state=incoming;save();selectedWeek=initialWeek();render();document.getElementById('settingsDialog').close();toast('Backup restored')}catch(err){toast(err.message||'Could not import backup',true)}finally{document.getElementById('importFile').value=''}}
+    function openSettings(){const s=state.settings;document.getElementById('termStart').value=s.termStart;document.getElementById('termEnd').value=s.termEnd;document.getElementById('tueAvailStart').value=toTime(s.availability[1].start);document.getElementById('tueAvailEnd').value=toTime(s.availability[1].end);document.getElementById('thuAvailStart').value=toTime(s.availability[3].start);document.getElementById('thuAvailEnd').value=toTime(s.availability[3].end);document.getElementById('settingsDialog').showModal()}
+    function saveSettings(){const start=document.getElementById('termStart').value,end=document.getElementById('termEnd').value;if(!start||!end||start>end){toast('Choose a valid term date range',true);return false}const ts=toMinutes(document.getElementById('tueAvailStart').value),te=toMinutes(document.getElementById('tueAvailEnd').value),hs=toMinutes(document.getElementById('thuAvailStart').value),he=toMinutes(document.getElementById('thuAvailEnd').value);if(te<=ts||he<=hs){toast('Availability end times must be later than start times',true);return false}Object.assign(state.settings,{termStart:start,termEnd:end,availability:{1:{start:ts,end:te},3:{start:hs,end:he}}});save();render();toast('Settings saved');return true}
+    function toast(msg,error=false){const t=document.getElementById('toast');t.textContent=msg;t.style.background=error?'#8e3434':'#17251f';t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2500)}
+
+    document.getElementById('eventCourse').innerHTML=Object.entries(COURSES).map(([id,c])=>`<option value="${id}">${escapeHtml(c.name)}</option>`).join('');
+    document.getElementById('prevWeek').onclick=()=>{selectedWeek=addDays(selectedWeek,-7);render()};document.getElementById('nextWeek').onclick=()=>{selectedWeek=addDays(selectedWeek,7);render()};document.getElementById('todayBtn').onclick=()=>{selectedWeek=initialWeek();mobileDay=Math.max(0,Math.min(6,dayIndexFor(selectedWeek,today())));render()};document.getElementById('weekPicker').onchange=e=>{if(e.target.value){selectedWeek=mondayOf(e.target.value);mobileDay=Math.max(0,Math.min(6,dayIndexFor(selectedWeek,e.target.value)));render()}};
+    document.getElementById('addBtn').onclick=()=>openAdd();document.getElementById('templateBtn').onclick=()=>{renderTemplateList();document.getElementById('templateDialog').showModal()};document.getElementById('addTemplateBtn').onclick=openAddTemplate;document.getElementById('duplicateWeekBtn').onclick=duplicateWeek;document.getElementById('resetWeekBtn').onclick=resetWeek;document.getElementById('settingsBtn').onclick=openSettings;document.getElementById('backupBtn').onclick=openSettings;
+    document.getElementById('eventForm').onsubmit=e=>{e.preventDefault();try{saveEvent(formEvent())}catch(err){toast(err.message,true)}};document.getElementById('deleteEventBtn').onclick=deleteEditing;document.getElementById('duplicateEventBtn').onclick=duplicateEditing;
+    document.getElementById('settingsForm').onsubmit=e=>{e.preventDefault();if(saveSettings())document.getElementById('settingsDialog').close()};document.getElementById('exportBtn').onclick=exportData;document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();document.getElementById('importFile').onchange=e=>e.target.files[0]&&importData(e.target.files[0]);
+    document.getElementById('fillReadingBtn').onclick=()=>autoPlace(false);document.getElementById('rebuildReadingBtn').onclick=()=>{if(confirm('Remove only auto-placed reading blocks and build them again?'))autoPlace(true)};document.getElementById('emergencyToggle').onchange=e=>{state.settings.emergencyCatchup=e.target.checked;save();render();toast(e.target.checked?'Saturday catch-up enabled':'Saturday protected again')};document.getElementById('assessmentToggle').onclick=()=>{showAllAssessments=!showAllAssessments;renderAssessments()};
+    document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.close).close());window.addEventListener('resize',()=>{clearTimeout(window.__plannerResize);window.__plannerResize=setTimeout(renderCalendar,120)});
+    document.addEventListener('keydown',e=>{if(e.key==='n'&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)&&!document.querySelector('dialog[open]'))openAdd();if(e.key==='Escape')document.querySelectorAll('dialog[open]').forEach(d=>d.close())});
+    render();
+  })();
+  </script>
+</body>
+</html>
+

@@ -9,6 +9,8 @@ const ROOT = __dirname;
 const HTML_PATH = path.join(ROOT, "public", "claudever9.html");
 const V13_HTML_PATH = path.join(ROOT, "public", "claudever13.html");
 const V13_VERSION_PATH = path.join(ROOT, "public", "v13-version.json");
+const WEEKLY_STUDY_PLANNER_LITE_PATH = path.join(ROOT, "public", "weekly-study-planner.html");
+const WEEKLY_STUDY_PLANNER_FULL_PATH = path.join(ROOT, "public", "weekly-study-planner-full.html");
 const SESSION_COOKIE = "sq_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const ADMIN_USERNAME = "admin";
@@ -1159,6 +1161,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       send(req, res, 200, fs.readFileSync(V13_HTML_PATH), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
+    if (url.pathname === "/weekly-study-planner" || url.pathname === "/weekly-study-planner.html" || url.pathname === "/weekly-study-planner-lite.html") {
+      send(req, res, 200, fs.readFileSync(WEEKLY_STUDY_PLANNER_LITE_PATH), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
+    if (url.pathname === "/weekly-study-planner/full" || url.pathname === "/weekly-study-planner-full.html") {
+      send(req, res, 200, fs.readFileSync(WEEKLY_STUDY_PLANNER_FULL_PATH), { "content-type": "text/html; charset=utf-8" });
       return;
     }
 
