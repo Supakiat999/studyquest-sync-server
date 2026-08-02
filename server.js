@@ -1290,7 +1290,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/heartbeat" || url.pathname === "/api/health") {
-      sendJson(req, res, 200, { ok: true, auth: true, db: "postgres" });
+      sendJson(req, res, 200, { ok: true, auth: true, db: "postgres", serverTime: new Date().toISOString() });
       return;
     }
 
