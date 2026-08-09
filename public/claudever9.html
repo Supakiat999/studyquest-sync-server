@@ -1946,6 +1946,25 @@
   .wt-sem-pill { padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;margin-bottom:4px; }
   .wt-sem-pill.active { background:var(--accent);border-color:var(--accent);color:#fff; }
   .wt-add-week-row td { background:var(--surface); text-align:center; }
+  .wt-program-setup {
+    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px; align-items:center;
+    padding:20px; border:1px solid var(--border); border-radius:8px; background:var(--surface);
+  }
+  .wt-program-setup h3 { margin:0 0 6px; font-size:17px; }
+  .wt-program-setup p { margin:0; color:var(--text-muted); font-size:12px; line-height:1.55; max-width:640px; }
+  .wt-program-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .wt-program-badge {
+    display:inline-flex; align-items:center; gap:6px; min-height:31px; padding:5px 9px;
+    border:1px solid var(--border); border-radius:6px; background:transparent; color:var(--text-dim);
+    cursor:pointer; font-family:'Syne',sans-serif; font-size:11px; font-weight:800;
+  }
+  .wt-semester-select { width:auto; min-width:170px; max-width:260px; height:32px; padding:5px 28px 5px 9px; font-size:11px; }
+  .wt-program-preview { padding:10px 12px; border:1px solid var(--border); border-radius:6px; background:var(--surface2); color:var(--text-muted); font-size:11px; line-height:1.5; }
+  @media (max-width:640px) {
+    .wt-program-setup { grid-template-columns:1fr; }
+    .wt-program-setup .btn { width:100%; }
+    .wt-semester-select { width:100%; max-width:none; }
+  }
 
   /* Day color coding */
   .day-mon { background:rgba(247,192,106,0.08); }
@@ -3030,6 +3049,27 @@
   </div>
 </div>
 
+<!-- WEEKLY PROGRAM MODAL -->
+<div class="modal-overlay" id="weeklyProgramModal">
+  <div class="modal" style="max-width:500px;">
+    <div class="modal-title" id="weeklyProgramModalTitle">Set Up Weekly</div>
+    <div id="weeklyProgramModalCopy" style="font-size:12px;color:var(--text-muted);line-height:1.55;margin-bottom:16px;">Choose the department or program for this StudyQuest account.</div>
+    <div class="form-group">
+      <label>Department or program</label>
+      <select class="form-input" id="weeklyProgramSelect" onchange="updateWeeklyProgramChoice()"></select>
+    </div>
+    <div class="form-group" id="weeklyCustomProgramGroup" style="display:none;">
+      <label>Program name</label>
+      <input class="form-input" id="weeklyCustomProgramName" placeholder="e.g. Computer Engineering" type="text">
+    </div>
+    <div class="wt-program-preview" id="weeklyProgramPreview"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" type="button" onclick="closeModal('weeklyProgramModal')">Cancel</button>
+      <button class="btn btn-primary" type="button" onclick="saveWeeklyProgramSetup()">Save Program</button>
+    </div>
+  </div>
+</div>
+
 <!-- GRADE CUTOFF MODAL -->
 <div class="modal-overlay" id="cutoffModal">
   <div class="modal" style="max-width:480px;">
@@ -3421,6 +3461,9 @@ function defaultState() {
     archivedCurriculumIds: [],
     activeCurriculumId: 'ice',
     activeSemesterByCurriculum: {},
+    tracker: { weeks: [], programConfigured: false, programId: '', programName: '' },
+    trackerSemesters: [],
+    activeSemTracker: '',
     updatedAt: 0,
   };
 }
@@ -3549,6 +3592,11 @@ function normalizeState(saved) {
     archivedCurriculumIds: Array.isArray(s.archivedCurriculumIds) ? s.archivedCurriculumIds : def.archivedCurriculumIds,
     activeCurriculumId: typeof s.activeCurriculumId === 'string' ? s.activeCurriculumId : def.activeCurriculumId,
     activeSemesterByCurriculum: s.activeSemesterByCurriculum && typeof s.activeSemesterByCurriculum === 'object' ? s.activeSemesterByCurriculum : def.activeSemesterByCurriculum,
+    tracker: s.tracker && typeof s.tracker === 'object'
+      ? { ...def.tracker, ...s.tracker, weeks: Array.isArray(s.tracker.weeks) ? s.tracker.weeks : [] }
+      : def.tracker,
+    trackerSemesters: Array.isArray(s.trackerSemesters) ? s.trackerSemesters : def.trackerSemesters,
+    activeSemTracker: typeof s.activeSemTracker === 'string' ? s.activeSemTracker : def.activeSemTracker,
     updatedAt: Number(s.updatedAt || 0),
   };
   return normalizeNotesOrdering(normalized);
@@ -3573,6 +3621,7 @@ function hasUserData(s) {
     (Array.isArray(s.archivedCurriculumIds) && s.archivedCurriculumIds.length) ||
     hasObjectEntries(s.activeSemesterByCurriculum) ||
     (s.tracker && Array.isArray(s.tracker.weeks) && s.tracker.weeks.length) ||
+    (s.tracker?.programConfigured === true && Array.isArray(s.trackerSemesters) && s.trackerSemesters.some(sem => Array.isArray(sem?.subjects) && sem.subjects.length)) ||
     hasObjectEntries(s.studyTime) ||
     hasObjectEntries(s.xpByDay) ||
     hasObjectEntries(s.completedByDay) ||
@@ -3899,7 +3948,7 @@ function saveProfileSettings() {
   const role = document.getElementById('profileRole')?.value.trim() || 'Academic Adventurer';
   const initials = cleanProfileInitials(document.getElementById('profileInitials')?.value, name);
   if (!saveDegreeEnrollmentSettings()) return;
-  state.profile = { displayName: name, role, initials };
+  state.profile = { ...state.profile, displayName: name, role, initials };
   saveState();
   renderProfileButton();
   renderGrades();
@@ -12016,6 +12065,184 @@ function getDefaultTrackerSemesters() {
   });
 }
 
+const WT_PROGRAM_MIGRATION_VERSION = 1;
+
+function wtProgramCatalog() {
+  return getCurricula().map(curriculum => ({
+    id: curriculum.id,
+    name: curriculum.name,
+    curriculum,
+  }));
+}
+
+function wtProgramById(programId) {
+  return wtProgramCatalog().find(program => program.id === programId) || null;
+}
+
+function wtTemplateSignature(semesters = []) {
+  return semesters.map(semester => ({
+    id: String(semester.id || semester.sem || ''),
+    subjects: (semester.subjects || []).map(subject => `${String(subject.code || '')}|${String(subject.subject || subject.name || '')}`),
+  }));
+}
+
+function wtCurriculumSignature(curriculum) {
+  return wtTemplateSignature((curriculum?.semesters || []).map(semester => ({
+    id: normalizeSemId(semester),
+    subjects: (semester.subjects || []).map(subject => ({ code:subject.code, subject:compactSubjectName(subject.name) })),
+  })));
+}
+
+function wtMatchesCurriculumTemplate(semesters, curriculum) {
+  if (!Array.isArray(semesters) || !semesters.length || !curriculum) return false;
+  return JSON.stringify(wtTemplateSignature(semesters)) === JSON.stringify(wtCurriculumSignature(curriculum));
+}
+
+function wtMatchesLegacyIceTemplate(semesters = state.trackerSemesters || []) {
+  if (!Array.isArray(semesters) || !semesters.length) return false;
+  return JSON.stringify(wtTemplateSignature(semesters)) === JSON.stringify(wtTemplateSignature(getDefaultTrackerSemesters()));
+}
+
+function wtFindMatchingProgram(semesters = state.trackerSemesters || []) {
+  if (wtMatchesLegacyIceTemplate(semesters)) return wtProgramById('ice');
+  const exact = wtProgramCatalog().find(program => wtMatchesCurriculumTemplate(semesters, program.curriculum));
+  if (exact) return exact;
+  const semesterIds = semesters.map(semester => String(semester.id || '')).filter(Boolean);
+  return wtProgramCatalog().find(program => {
+    const programIds = new Set((program.curriculum.semesters || []).map(normalizeSemId));
+    return semesterIds.length >= 2 && semesterIds.every(id => programIds.has(id));
+  }) || null;
+}
+
+function wtLooksLikeUntouchedIceSetup() {
+  const semesters = Array.isArray(state.trackerSemesters) ? state.trackerSemesters : [];
+  return !semesters.length || wtMatchesLegacyIceTemplate(semesters);
+}
+
+function wtHasMeaningfulTrackerSetup() {
+  const weeks = Array.isArray(state.tracker?.weeks) ? state.tracker.weeks : [];
+  return weeks.length > 0 || !wtLooksLikeUntouchedIceSetup();
+}
+
+function ensureWeeklyProgramMetadata() {
+  if (!state.tracker || typeof state.tracker !== 'object') state.tracker = { weeks: [] };
+  if (!Array.isArray(state.tracker.weeks)) state.tracker.weeks = [];
+  let changed = false;
+  if (state.tracker.programConfigured !== true && wtHasMeaningfulTrackerSetup()) {
+    const matched = wtFindMatchingProgram();
+    state.tracker.programConfigured = true;
+    state.tracker.programId = matched?.id || 'custom';
+    state.tracker.programName = matched?.name || state.profile?.department || 'Custom Program';
+    state.tracker.programConfiguredAt = new Date().toISOString();
+    if (!state.profile?.department) state.profile = { ...state.profile, department:state.tracker.programName };
+    changed = true;
+  } else if (state.tracker.programConfigured !== true) {
+    if (state.tracker.programConfigured !== false) { state.tracker.programConfigured = false; changed = true; }
+    if (state.tracker.programId) { state.tracker.programId = ''; changed = true; }
+    if (state.tracker.programName) { state.tracker.programName = ''; changed = true; }
+  }
+  if (Number(state.tracker.programMigrationVersion || 0) !== WT_PROGRAM_MIGRATION_VERSION) {
+    state.tracker.programMigrationVersion = WT_PROGRAM_MIGRATION_VERSION;
+    changed = true;
+  }
+  return changed;
+}
+
+function wtBuildProgramSemesters(curriculum) {
+  return (curriculum?.semesters || []).map(semester => ({
+    id: normalizeSemId(semester),
+    name: normalizeSemLabel(semester),
+    subjects: (semester.subjects || []).map((subject,index) => {
+      const day = WT_DAY_ROTATION[index % WT_DAY_ROTATION.length];
+      return {
+        day: day.day,
+        dayClass: day.dayClass,
+        subject: compactSubjectName(subject.name),
+        code: subject.code,
+      };
+    }),
+  }));
+}
+
+function wtCurrentProgramName() {
+  return String(state.tracker?.programName || state.profile?.department || 'My Program');
+}
+
+function wtSaveProgramBackup(reason) {
+  try {
+    localStorage.setItem(`${currentStorageKey()}_weekly_program_backup`, JSON.stringify({
+      reason,
+      createdAt: new Date().toISOString(),
+      state,
+    }));
+  } catch (error) {
+    console.warn('Could not create Weekly setup backup', error);
+  }
+}
+
+let wtProgramModalMode = 'setup';
+
+function openWeeklyProgramSettings(mode = 'setup') {
+  wtProgramModalMode = mode;
+  ensureWeeklyProgramMetadata();
+  const configured = state.tracker?.programConfigured === true;
+  const select = document.getElementById('weeklyProgramSelect');
+  const programs = wtProgramCatalog();
+  const selectedId = configured ? state.tracker.programId : (state.activeCurriculumId || programs[0]?.id || 'custom');
+  select.innerHTML = programs.map(program => `<option value="${escapeHtml(program.id)}" ${program.id===selectedId?'selected':''}>${escapeHtml(program.name)}</option>`).join('') + '<option value="custom">Other / build my own</option>';
+  if (![...select.options].some(option => option.value === selectedId)) select.value = 'custom';
+  document.getElementById('weeklyCustomProgramName').value = configured && !wtProgramById(state.tracker.programId) ? wtCurrentProgramName() : '';
+  document.getElementById('weeklyProgramModalTitle').textContent = configured ? 'Weekly Program' : 'Set Up Weekly';
+  document.getElementById('weeklyProgramModalCopy').textContent = configured
+    ? 'This program belongs only to this account. Existing semesters, weeks, notes, and checks will be kept.'
+    : 'Choose this account\'s department or program. Its course names will be prepared only for this user.';
+  updateWeeklyProgramChoice();
+  openModal('weeklyProgramModal');
+}
+
+function updateWeeklyProgramChoice() {
+  const programId = document.getElementById('weeklyProgramSelect')?.value || 'custom';
+  const program = wtProgramById(programId);
+  const customGroup = document.getElementById('weeklyCustomProgramGroup');
+  const preview = document.getElementById('weeklyProgramPreview');
+  if (customGroup) customGroup.style.display = program ? 'none' : 'block';
+  if (!preview) return;
+  if (state.tracker?.programConfigured && wtProgramModalMode !== 'setup') {
+    preview.textContent = 'Existing course lists stay unchanged. Use Edit Subjects to add or remove courses for each semester.';
+  } else if (program) {
+    const courseCount = (program.curriculum.semesters || []).reduce((sum,semester) => sum + (semester.subjects || []).length, 0);
+    preview.textContent = `${program.curriculum.semesters.length} semesters and ${courseCount} course names will be prepared. You can adjust every semester in Edit Subjects.`;
+  } else {
+    preview.textContent = 'A blank Current Semester will be created so you can add only your own courses.';
+  }
+}
+
+function saveWeeklyProgramSetup() {
+  const programId = document.getElementById('weeklyProgramSelect')?.value || 'custom';
+  const program = wtProgramById(programId);
+  const customName = String(document.getElementById('weeklyCustomProgramName')?.value || '').trim();
+  if (!program && !customName) { showToast('Enter your program name', '#f7c06a'); return; }
+  const programName = program?.name || customName;
+  const firstSetup = state.tracker?.programConfigured !== true;
+  wtSaveProgramBackup(firstSetup ? 'Before Weekly program setup' : 'Before Weekly program label change');
+  if (firstSetup) {
+    state.trackerSemesters = program
+      ? wtBuildProgramSemesters(program.curriculum)
+      : [{ id:'sem_' + uid(), name:'Current Semester', subjects:[] }];
+    state.activeSemTracker = state.trackerSemesters[0]?.id || '';
+  }
+  state.tracker.programConfigured = true;
+  state.tracker.programId = program?.id || 'custom';
+  state.tracker.programName = programName;
+  state.tracker.programConfiguredAt = new Date().toISOString();
+  state.profile = { ...state.profile, department:programName };
+  ensureTrackerSemesters();
+  saveState();
+  closeModal('weeklyProgramModal');
+  renderWeekly();
+  showToast(firstSetup ? `${programName} Weekly tracker ready` : `Weekly program set to ${programName}`, '#6af7b0');
+}
+
 let wtWeekPage = 0;
 const WT_PAGE_SIZE = 4;
 
@@ -12044,7 +12271,7 @@ function addTrackerWeek() {
     note: '', event: ''
   }));
   weeks.push({ id, label: `Week ${nextNum}`, date: nextDate, isBreak: false, rows });
-  state.tracker = { weeks };
+  state.tracker = { ...state.tracker, weeks };
   saveState();
   wtWeekPage = Math.floor((weeks.filter(w=>!w.isBreak).length-1) / WT_PAGE_SIZE);
   renderWeekly();
@@ -12053,7 +12280,7 @@ function addTrackerWeek() {
 function addBreakWeek() {
   const weeks = getTrackerWeeks();
   weeks.push({ id: uid(), label: 'BREAK', date: '', isBreak: true, rows: [] });
-  state.tracker = { weeks };
+  state.tracker = { ...state.tracker, weeks };
   saveState();
   renderWeekly();
 }
@@ -12159,8 +12386,8 @@ function setWTWeekEvent(weekId, val) {
 
 function prevWeekGroup() { if (wtWeekPage > 0) { wtWeekPage--; renderWeekly(); } }
 function nextWeekGroup() {
-  const semId = state.activeSemTracker || 'Y3-S1';
-  const total = state.tracker.weeks.filter(w => (w.semesterId || 'Y3-S1') === semId).length;
+  const semId = state.activeSemTracker || state.trackerSemesters?.[0]?.id || '';
+  const total = state.tracker.weeks.filter(w => (w.semesterId || semId) === semId).length;
   if ((wtWeekPage+1) * WT_PAGE_SIZE < total) { wtWeekPage++; renderWeekly(); }
 }
 
@@ -12175,15 +12402,28 @@ function renderWeekly() {
   const container = document.getElementById('weeklyTrackerTable');
   if (!container) return;
   if (!state.tracker) state.tracker = { weeks: [] };
+  ensureWeeklyProgramMetadata();
+  if (state.tracker.programConfigured !== true) {
+    const lbl = document.getElementById('weekGroupLabel');
+    if (lbl) lbl.textContent = 'Set up Weekly';
+    container.innerHTML = `<div class="wt-program-setup">
+      <div>
+        <h3>Choose this account's program</h3>
+        <p>Weekly course lists are private to each StudyQuest account. Select a department template, or start with a blank semester and add courses through Edit Subjects.</p>
+      </div>
+      <button class="btn btn-primary" type="button" onclick="openWeeklyProgramSettings('setup')">Choose Program</button>
+    </div>`;
+    return;
+  }
   ensureTrackerSemesters();
   const allWeeks = state.tracker.weeks;
-  const semId = state.activeSemTracker || 'Y3-S1';
-  const weeks = allWeeks.filter(w => (w.semesterId || 'Y3-S1') === semId);
+  const semId = state.activeSemTracker || state.trackerSemesters?.[0]?.id || '';
+  const weeks = allWeeks.filter(w => (w.semesterId || semId) === semId);
   const semSubjects = getActiveSemSubjects();
   const semName = (state.trackerSemesters||[]).find(s=>s.id===semId)?.name || 'Current Semester';
-  const semPills = (state.trackerSemesters||[]).map(s =>
-    `<button class="wt-sem-pill ${s.id===semId?'active':''}" onclick="switchSemTracker('${s.id}')">${s.name}</button>`
-  ).join(' ');
+  const semOptions = (state.trackerSemesters||[]).map(s =>
+    `<option value="${escapeHtml(s.id)}" ${s.id===semId?'selected':''}>${escapeHtml(s.name)}</option>`
+  ).join('');
   const pageWeeks = weeks.slice(wtWeekPage * WT_PAGE_SIZE, (wtWeekPage+1) * WT_PAGE_SIZE);
   const lbl = document.getElementById('weekGroupLabel');
   if (lbl) lbl.textContent = semName;
@@ -12191,10 +12431,10 @@ function renderWeekly() {
     { key:'classNote', label:'Class Note' },
     { key:'hw', label:'HW / Exercise' },
     { key:'summary', label:'Summary' },
-    { key:'finalCheck', label:'Final ✓' },
   ];
-  let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
-    ${semPills}
+  let html = `<div class="wt-program-toolbar">
+    <button class="wt-program-badge" type="button" onclick="openWeeklyProgramSettings('settings')" title="Change this account's Weekly program label">Program: ${escapeHtml(wtCurrentProgramName())}</button>
+    <select class="form-input wt-semester-select" aria-label="Weekly semester" onchange="switchSemTracker(this.value)">${semOptions}</select>
     <button onclick="addTrackerSemester()" style="padding:4px 10px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);cursor:pointer;font-family:Syne,sans-serif;font-size:11px;font-weight:700;">+ New Semester</button>
     <button onclick="editTrackerSemSubjects('${semId}')" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-family:Syne,sans-serif;font-size:11px;font-weight:700;">Edit Subjects</button>
   </div>`;
@@ -12209,7 +12449,7 @@ function renderWeekly() {
   </tr></thead><tbody>`;
   pageWeeks.forEach(week => {
     if (week.isBreak) {
-      html += `<tr class="wt-break-row"><td colspan="9">BREAK &nbsp;<input value="${week.event||''}" placeholder="note..." onchange="setWTWeekEvent('${week.id}',this.value)" style="background:transparent;border:none;color:#fff;font-family:'Syne',sans-serif;font-size:11px;outline:none;opacity:0.85;"><button onclick="deleteTrackerWeek('${week.id}')" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:12px;margin-left:8px;">x</button></td></tr>`;
+      html += `<tr class="wt-break-row"><td colspan="${CHECKS.length + 5}">BREAK &nbsp;<input value="${week.event||''}" placeholder="note..." onchange="setWTWeekEvent('${week.id}',this.value)" style="background:transparent;border:none;color:#fff;font-family:'Syne',sans-serif;font-size:11px;outline:none;opacity:0.85;"><button onclick="deleteTrackerWeek('${week.id}')" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:12px;margin-left:8px;">x</button></td></tr>`;
       return;
     }
     const rows = week.rows && week.rows.length ? week.rows : semSubjects.map(s=>({day:s.day,subject:s.subject,dayClass:s.dayClass,noClass:false,checks:{classNote:false,hw:false,summary:false,finalCheck:false},note:''}));
@@ -12260,13 +12500,27 @@ function renderWeekly() {
 
 function addTrackerWeek() {
   if (!state.tracker) state.tracker = { weeks: [] };
+  ensureWeeklyProgramMetadata();
+  if (state.tracker.programConfigured !== true) {
+    openWeeklyProgramSettings('setup');
+    return;
+  }
   ensureTrackerSemesters();
-  const semId = state.activeSemTracker || 'Y3-S1';
+  const semId = state.activeSemTracker || state.trackerSemesters?.[0]?.id || '';
+  if (!semId) {
+    showToast('Add a semester before adding a week', '#f7c06a');
+    return;
+  }
   const semSubjects = getActiveSemSubjects();
-  const semWeeks = state.tracker.weeks.filter(w => (w.semesterId || 'Y3-S1')===semId && !w.isBreak);
+  if (!semSubjects.length) {
+    showToast('Add at least one course in Edit Subjects first', '#f7c06a');
+    editTrackerSemSubjects(semId);
+    return;
+  }
+  const semWeeks = state.tracker.weeks.filter(w => (w.semesterId || semId)===semId && !w.isBreak);
   const nextNum = semWeeks.length + 1;
   let nextDate = today();
-  const allSemW = state.tracker.weeks.filter(w => (w.semesterId || 'Y3-S1')===semId);
+  const allSemW = state.tracker.weeks.filter(w => (w.semesterId || semId)===semId);
   if (allSemW.length > 0 && allSemW[allSemW.length-1].date) {
     const d = new Date(allSemW[allSemW.length-1].date+'T00:00:00');
     d.setDate(d.getDate()+7);
@@ -12285,7 +12539,7 @@ function addBreakAfter(weekId) {
   if (idx < 0) return;
   const semId = weeks[idx].semesterId || 'sem_default';
   weeks.splice(idx + 1, 0, { id: uid(), label: 'BREAK', date: '', isBreak: true, rows: [], semesterId: semId });
-  state.tracker = { weeks };
+  state.tracker = { ...state.tracker, weeks };
   saveState();
   renderWeekly();
 }
@@ -12633,31 +12887,71 @@ function deleteCustomSubject(semKey, subId) {
 // WEEKLY TRACKER - SEMESTER SUPPORT
 // ════════════════════════════════════════════════════════
 function ensureTrackerSemesters() {
-  if (!state.tracker) state.tracker = { weeks: [] };
-  const defaults = getDefaultTrackerSemesters();
-  const existing = Array.isArray(state.trackerSemesters) ? state.trackerSemesters : [];
-  const byId = new Map(defaults.map(s => [s.id, { ...s, subjects: s.subjects.map(x => ({ ...x })) }]));
+  if (!state.tracker || typeof state.tracker !== 'object') state.tracker = { weeks: [] };
+  if (!Array.isArray(state.tracker.weeks)) state.tracker.weeks = [];
+  ensureWeeklyProgramMetadata();
+  if (state.tracker.programConfigured !== true) return;
 
-  existing.forEach(sem => {
-    if (!sem || !sem.id) return;
-    const subjects = Array.isArray(sem.subjects) && sem.subjects.length ? sem.subjects : (byId.get(sem.id)?.subjects || WT_SUBJECTS_BY_DAY);
-    byId.set(sem.id, { ...sem, subjects: subjects.map(s => ({ ...s })) });
+  let semesters = Array.isArray(state.trackerSemesters)
+    ? state.trackerSemesters.filter(semester => semester && semester.id).map(semester => ({
+        ...semester,
+        subjects: Array.isArray(semester.subjects) ? semester.subjects.map(subject => ({ ...subject })) : [],
+      }))
+    : [];
+
+  if (!semesters.length && state.tracker.weeks.length) {
+    const bySemester = new Map();
+    state.tracker.weeks.forEach(week => {
+      const semesterId = String(week.semesterId || 'sem_default');
+      if (!bySemester.has(semesterId)) bySemester.set(semesterId, []);
+      bySemester.get(semesterId).push(week);
+      if (!week.semesterId) week.semesterId = semesterId;
+    });
+    semesters = Array.from(bySemester.entries()).map(([id, weeks]) => {
+      const sourceWeek = weeks.find(week => !week.isBreak && Array.isArray(week.rows) && week.rows.length);
+      return {
+        id,
+        name: id === 'sem_default' ? 'Current Semester' : id,
+        subjects: (sourceWeek?.rows || []).map(row => ({
+          day: row.day || 'Mon',
+          subject: row.subject || 'Untitled Course',
+          dayClass: row.dayClass || 'day-mon',
+          code: row.code || '',
+        })),
+      };
+    });
+  }
+
+  if (!semesters.length) {
+    const program = wtProgramById(state.tracker.programId);
+    semesters = program
+      ? wtBuildProgramSemesters(program.curriculum)
+      : [{ id:'sem_' + uid(), name:'Current Semester', subjects:[] }];
+  }
+
+  state.tracker.weeks.forEach(week => {
+    const semesterId = String(week.semesterId || 'sem_default');
+    if (semesters.some(semester => semester.id === semesterId)) return;
+    const sourceRows = !week.isBreak && Array.isArray(week.rows) ? week.rows : [];
+    semesters.push({
+      id: semesterId,
+      name: semesterId === 'sem_default' ? 'Current Semester' : semesterId,
+      subjects: sourceRows.map(row => ({
+        day: row.day || 'Mon',
+        subject: row.subject || 'Untitled Course',
+        dayClass: row.dayClass || 'day-mon',
+        code: row.code || '',
+      })),
+    });
   });
 
-  const oldWeeks = state.tracker.weeks || [];
-  const oldDefaultHasData = oldWeeks.some(w => !w.semesterId || w.semesterId === 'sem_default');
-  if (!oldDefaultHasData) byId.delete('sem_default');
-  if (oldDefaultHasData && !byId.has('sem_default')) {
-    byId.set('sem_default', { id:'sem_default', name:'Current Semester', subjects: WT_SUBJECTS_BY_DAY.map(s => ({ ...s })) });
-  }
-  oldWeeks.forEach(w => { if (!w.semesterId) w.semesterId = oldDefaultHasData ? 'sem_default' : 'Y3-S1'; });
-
-  const ordered = [
-    ...TRACKER_SEMESTER_IDS.map(id => byId.get(id)).filter(Boolean),
-    ...Array.from(byId.values()).filter(s => !TRACKER_SEMESTER_IDS.includes(s.id))
-  ];
-  state.trackerSemesters = ordered;
-  if (!state.activeSemTracker || !byId.has(state.activeSemTracker)) state.activeSemTracker = 'Y3-S1';
+  const semesterIds = new Set(semesters.map(semester => semester.id));
+  const fallbackId = semesters[0]?.id || '';
+  state.tracker.weeks.forEach(week => {
+    if (!week.semesterId) week.semesterId = semesterIds.has('sem_default') ? 'sem_default' : fallbackId;
+  });
+  state.trackerSemesters = semesters;
+  if (!state.activeSemTracker || !semesterIds.has(state.activeSemTracker)) state.activeSemTracker = fallbackId;
 }
 
 ensureTrackerSemesters();
@@ -12665,7 +12959,7 @@ ensureTrackerSemesters();
 function getActiveSemSubjects() {
   ensureTrackerSemesters();
   const sem = state.trackerSemesters?.find(s => s.id === state.activeSemTracker);
-  return sem?.subjects || makeTrackerSubjectsForSemester('Y3-S1');
+  return sem?.subjects || [];
 }
 
 function openTrackerSemesterManager() {
@@ -12696,6 +12990,11 @@ function switchTrackerSem() {
 }
 
 function addTrackerSemester() {
+  ensureWeeklyProgramMetadata();
+  if (state.tracker.programConfigured !== true) {
+    openWeeklyProgramSettings('setup');
+    return;
+  }
   document.getElementById('semNameInput').value = '';
   const copyFrom = document.getElementById('semCopyFrom');
   copyFrom.innerHTML = `<option value="">Start blank</option>` +
@@ -12713,9 +13012,9 @@ function confirmAddSemester() {
   let subjects;
   if (copyId) {
     const src = state.trackerSemesters.find(s=>s.id===copyId);
-    subjects = src ? src.subjects.map(s=>({...s})) : [...WT_SUBJECTS_BY_DAY];
+    subjects = src ? src.subjects.map(s=>({...s})) : [];
   } else {
-    subjects = [...WT_SUBJECTS_BY_DAY];
+    subjects = [];
   }
   state.trackerSemesters.push({ id, name, subjects });
   state.activeSemTracker = id;
@@ -12764,6 +13063,11 @@ function addSemSubj(semId) {
 // ════════════════════════════════════════════════════════
 function editTrackerSemSubjects(semId = state.activeSemTracker) {
   document.getElementById('trackerSemPanel')?.remove();
+  ensureWeeklyProgramMetadata();
+  if (state.tracker.programConfigured !== true) {
+    openWeeklyProgramSettings('setup');
+    return;
+  }
   ensureTrackerSemesters();
   const sem = state.trackerSemesters?.find(s => s.id === semId) || state.trackerSemesters[0];
   if (!sem) return;
@@ -12810,7 +13114,7 @@ function applySemSubjectsToWeeks(semId) {
   const sem = state.trackerSemesters?.find(s => s.id === semId);
   if (!sem) return;
   state.tracker.weeks
-    .filter(w => (w.semesterId || 'Y3-S1') === semId && !w.isBreak)
+    .filter(w => (w.semesterId || semId) === semId && !w.isBreak)
     .forEach(week => {
       const oldRows = week.rows || [];
       week.rows = sem.subjects.map(s => {
