@@ -1190,6 +1190,8 @@
     padding: 12px;
   }
   .modal-overlay.open { display: flex; }
+  #appConfirmModal,
+  #liveSyncConflictModal { z-index: 1100; }
   .modal {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 16px; padding: 28px; width: 480px; max-width: 95vw;
@@ -3010,57 +3012,161 @@
   }
 
   /* ── WEEKLY TRACKER ── */
-  .wt-table { width:100%; border-collapse:collapse; min-width:720px; }
+  .wt-shell { display:grid; gap:12px; min-width:0; max-width:100%; }
+  #weeklyTrackerTable { min-width:0; max-width:100%; }
+  .wt-toolbar {
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    flex-wrap:wrap; padding:10px; border:1px solid var(--border);
+    background:rgba(255,255,255,0.018); border-radius:8px;
+  }
+  .wt-toolbar-main, .wt-toolbar-actions, .wt-status-legend, .wt-weekday-strip {
+    display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+  }
+  .wt-toolbar-main { min-width:0; flex:1; }
+  .wt-toolbar-actions { justify-content:flex-end; }
+  .wt-focus-strip {
+    display:grid; grid-template-columns:minmax(180px,.8fr) minmax(220px,1.4fr) auto;
+    align-items:center; gap:12px; padding:11px 12px; border:1px solid rgba(106,247,176,.3);
+    border-left:4px solid var(--green); border-radius:8px; background:rgba(106,247,176,.055);
+  }
+  .wt-focus-kicker { color:var(--green); font:800 9px 'Space Mono',monospace; text-transform:uppercase; letter-spacing:1px; }
+  .wt-focus-date { margin-top:3px; color:var(--text); font-size:14px; font-weight:900; }
+  .wt-focus-status { color:var(--text-dim); font-size:11px; line-height:1.45; }
+  .wt-overdue-banner {
+    display:grid; grid-template-columns:minmax(190px,.55fr) minmax(260px,1.45fr) auto;
+    align-items:center; gap:12px; padding:10px 12px; border:1px solid rgba(247,106,106,.36);
+    border-left:4px solid var(--red); border-radius:8px; background:rgba(247,106,106,.07);
+  }
+  .wt-overdue-title { color:var(--red); font-size:12px; font-weight:900; }
+  .wt-overdue-meta { margin-top:2px; color:var(--text-muted); font:700 9px 'Space Mono',monospace; }
+  .wt-overdue-list { display:flex; gap:6px; min-width:0; overflow-x:auto; scrollbar-width:none; }
+  .wt-overdue-list::-webkit-scrollbar { display:none; }
+  .wt-overdue-item { flex:0 0 auto; max-width:220px; padding:5px 8px; border:1px solid rgba(247,106,106,.22); border-radius:6px; color:var(--text-dim); font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wt-weekday-strip { gap:5px; }
+  .wt-weekday-chip {
+    display:inline-flex; align-items:center; gap:5px; min-height:28px; padding:5px 8px;
+    border:1px solid color-mix(in srgb, var(--wt-day-color) 46%, var(--border));
+    border-radius:6px; background:color-mix(in srgb, var(--wt-day-color) 11%, transparent);
+    color:var(--text-dim); font-size:10px; font-weight:800;
+  }
+  .wt-weekday-chip::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--wt-day-color); }
+  .wt-table-wrap { width:100%; min-width:0; max-width:100%; overflow:auto; border:1px solid var(--border); border-radius:8px; box-sizing:border-box; }
+  .wt-table { width:100%; border-collapse:separate; border-spacing:0; min-width:900px; }
   .wt-table th {
-    background:var(--surface2); color:var(--text-dim); font-size:11px;
-    font-weight:700; text-transform:uppercase; letter-spacing:1px;
-    padding:8px 10px; border:1px solid var(--border); text-align:center;
-    white-space:nowrap; position:sticky; top:0; z-index:2;
+    background:var(--surface2); color:var(--text-dim); font-size:10px;
+    font-weight:800; text-transform:uppercase; letter-spacing:1px;
+    padding:8px; border-right:1px solid var(--border); border-bottom:1px solid var(--border);
+    text-align:center; white-space:nowrap; position:sticky; top:0; z-index:3;
   }
   .wt-table th:first-child, .wt-table th:nth-child(2), .wt-table th:nth-child(3) { text-align:left; }
-  .wt-table td {
-    padding:6px 10px; border:1px solid var(--border);
-    font-size:12px; vertical-align:middle;
+  .wt-table td { padding:4px 8px; border-right:1px solid var(--border); border-bottom:1px solid var(--border); font-size:11px; vertical-align:middle; }
+  .wt-table th:last-child, .wt-table td:last-child { border-right:0; }
+  .wt-table tbody tr:last-child td { border-bottom:0; }
+  .wt-week-cell { min-width:150px; vertical-align:top!important; background:var(--surface)!important; }
+  .wt-week-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+  .wt-week-label { font-weight:800; font-size:12px; color:var(--text); }
+  .wt-week-range { margin-top:3px; font:700 9px/1.4 'Space Mono',monospace; color:var(--text-muted); }
+  .wt-week-controls { display:flex; align-items:center; gap:4px; flex-wrap:wrap; margin-top:8px; }
+  .wt-week-start { width:126px; padding:6px 7px; border:1px solid var(--border); border-radius:6px; background:var(--surface2); color:var(--text-dim); font:700 10px 'Space Mono',monospace; }
+  .wt-icon-btn {
+    width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
+    border:1px solid var(--border); border-radius:6px; background:transparent;
+    color:var(--text-muted); cursor:pointer; font-size:12px;
   }
-  .wt-week-label { font-weight:700; font-size:11px; color:var(--text-muted); white-space:nowrap; }
-  .wt-day-cell { font-size:11px; font-weight:700; text-align:center; white-space:nowrap; }
-  .wt-subject-cell { font-size:12px; font-weight:600; white-space:nowrap; }
-  .wt-break-row td { background:rgba(247,106,106,0.45)!important; color:#fff; font-weight:800; text-align:center; font-size:12px; letter-spacing:2px; }
-  .wt-noclass-row td { background:rgba(106,247,176,0.07)!important; }
-  .wt-noclass-row .wt-day-cell, .wt-noclass-row .wt-subject-cell { color:rgba(106,247,176,0.6); }
-  .wt-check-cell { text-align:center; cursor:pointer; user-select:none; position:relative; }
+  .wt-icon-btn:hover { border-color:var(--accent); color:var(--text); }
+  .wt-icon-btn.danger:hover { border-color:var(--red); color:var(--red); }
+  .wt-date-row { --wt-day-color:#7c6af7; --wt-day-bg:rgba(124,106,247,0.08); background:var(--wt-day-bg); }
+  .wt-date-row.day-start td { border-top:2px solid color-mix(in srgb, var(--wt-day-color) 42%, var(--border)); }
+  .wt-date-row.wt-today-row td { box-shadow:inset 0 2px var(--green),inset 0 -2px var(--green); }
+  .wt-date-row.wt-today-row .wt-date-main::after { content:' TODAY'; color:var(--green); font:800 8px 'Space Mono',monospace; }
+  .wt-scroll-focus { animation:wtFocusPulse 1.4s ease-out; }
+  @keyframes wtFocusPulse { 0% { filter:brightness(1.65); } 100% { filter:brightness(1); } }
+  .wt-date-cell { min-width:116px; border-left:4px solid var(--wt-day-color); }
+  .wt-date-badge { display:flex; align-items:center; gap:7px; }
+  .wt-date-dot { width:8px; height:8px; border-radius:50%; background:var(--wt-day-color); box-shadow:0 0 0 2px color-mix(in srgb, var(--wt-day-color) 18%, transparent); flex:0 0 auto; }
+  .wt-date-main { font-size:11px; font-weight:900; color:var(--text); white-space:nowrap; }
+  .wt-date-full { display:none; }
+  .wt-day-select {
+    margin-top:5px; width:100%; border:1px solid transparent; border-radius:5px;
+    background:transparent; color:var(--text-dim); padding:3px 20px 3px 3px;
+    font:800 10px 'Syne',sans-serif; cursor:pointer;
+  }
+  .wt-day-select:focus { outline:none; border-color:var(--wt-day-color); background:var(--surface2); }
+  .wt-subject-cell { min-width:200px; }
+  .wt-subject-row { display:grid; grid-template-columns:minmax(120px,1fr) auto; align-items:center; gap:7px; }
+  .wt-subject-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:800; color:var(--text); }
+  .wt-noclass-row .wt-check-cell { color:var(--text-muted); }
+  .wt-noclass-toggle {
+    min-height:24px; padding:3px 7px; border:1px solid var(--border); border-radius:5px;
+    background:transparent; color:var(--text-muted); cursor:pointer; font:800 9px 'Syne',sans-serif; white-space:nowrap;
+  }
+  .wt-noclass-toggle:hover { border-color:var(--text-muted); color:var(--text); }
+  .wt-noclass-toggle.active { border-color:var(--text-muted); background:rgba(255,255,255,.05); color:var(--text-dim); }
+  .wt-check-cell { text-align:center; user-select:none; min-width:82px; }
   .wt-check {
-    width:18px; height:18px; border-radius:4px; border:2px solid var(--border);
+    width:20px; height:20px; border-radius:5px; border:2px solid var(--border);
     display:inline-flex; align-items:center; justify-content:center;
-    cursor:pointer; transition:all 0.15s; font-size:12px;
-    background:transparent;
+    cursor:pointer; transition:all 0.15s; font-size:12px; background:rgba(0,0,0,0.08);
   }
+  .wt-check:hover { border-color:var(--accent); transform:translateY(-1px); }
   .wt-check.checked { background:rgba(106,247,176,0.2); border-color:#6af7b0; color:#6af7b0; }
   .wt-check.final-checked { background:rgba(124,106,247,0.2); border-color:var(--accent); color:var(--accent); }
-  .wt-note-cell { min-width:100px; }
+  .wt-note-cell { min-width:150px; }
   .wt-note-input {
-    background:transparent; border:none; color:var(--text);
+    background:transparent; border:1px solid transparent; color:var(--text);
     font-family:'Syne',sans-serif; font-size:11px; width:100%;
-    padding:2px 4px; outline:none; border-radius:4px;
+    padding:4px 6px; outline:none; border-radius:6px; min-width:0;
   }
-  .wt-note-input:focus { background:var(--surface2); }
-  .wt-count-cell { font-family:'Space Mono',monospace; font-size:11px; text-align:center; }
-  .wt-done-count { color:var(--green); font-weight:700; }
-  .wt-left-count { color:var(--red); font-weight:700; }
-  .wt-progress-cell { min-width:112px; }
-  .wt-progress-text { display:flex;justify-content:space-between;gap:8px;font-family:'Space Mono',monospace;font-size:10px;margin-bottom:5px; }
-  .wt-progress-bar { height:5px;background:var(--border);border-radius:3px;overflow:hidden; }
+  .wt-note-input:hover { border-color:var(--border); }
+  .wt-note-input:focus { background:var(--surface2); border-color:var(--accent); }
+  .wt-progress-cell { min-width:130px; background:var(--surface)!important; }
+  .wt-progress-text { display:flex;justify-content:space-between;gap:8px;font-family:'Space Mono',monospace;font-size:9px;margin-bottom:7px; }
+  .wt-done-count { color:var(--green); font-weight:800; }
+  .wt-left-count { color:var(--red); font-weight:800; }
+  .wt-progress-bar { height:6px;background:var(--border);border-radius:3px;overflow:hidden; }
   .wt-progress-fill { height:100%;background:var(--green);border-radius:3px;transition:width 0.25s; }
-  .wt-sem-pill { padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;margin-bottom:4px; }
+  .wt-sem-pill { padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-family:'Syne',sans-serif;font-size:11px;font-weight:800; }
   .wt-sem-pill.active { background:var(--accent);border-color:var(--accent);color:#fff; }
-  .wt-add-week-row td { background:var(--surface); text-align:center; }
-
-  /* Day color coding */
-  .day-mon { background:rgba(247,192,106,0.08); }
-  .day-tue { background:rgba(247,106,158,0.08); }
-  .day-wed { background:rgba(106,247,224,0.08); }
-  .day-thu { background:rgba(247,160,106,0.08); }
-  .day-fri { background:rgba(193,106,247,0.08); }
+  .wt-break-row td { background:rgba(247,106,106,0.38)!important; color:#fff; font-weight:800; text-align:center; font-size:11px; letter-spacing:1px; }
+  .wt-mobile { display:none; }
+  .wt-mobile-week { display:grid; gap:8px; }
+  .wt-mobile-week-head { padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface2); }
+  .wt-mobile-day { --wt-day-color:#7c6af7; --wt-day-bg:rgba(124,106,247,0.08); border:1px solid color-mix(in srgb, var(--wt-day-color) 40%, var(--border)); border-left:4px solid var(--wt-day-color); border-radius:8px; background:var(--wt-day-bg); overflow:hidden; }
+  .wt-mobile-day.wt-today-row { box-shadow:0 0 0 2px var(--green); }
+  .wt-mobile-day-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 10px; border-bottom:1px solid color-mix(in srgb, var(--wt-day-color) 30%, var(--border)); }
+  .wt-mobile-subject { padding:8px 10px; border-top:1px solid var(--border); }
+  .wt-mobile-subject:first-child { border-top:0; }
+  .wt-mobile-subject-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:center; }
+  .wt-mobile-checks { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:7px; }
+  .wt-mobile-check { display:grid; justify-items:center; gap:4px; font-size:8px; color:var(--text-muted); text-align:center; }
+  .wt-mobile-note { margin-top:6px; }
+  .wt-sem-subject-row { display:grid; grid-template-columns:minmax(108px,.42fr) minmax(0,1fr) 28px; gap:7px; align-items:center; margin-bottom:8px; }
+  .wt-sem-subject-row .form-input { min-width:0; }
+  .wt-palette-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .wt-palette-row { display:flex; align-items:center; gap:10px; min-width:0; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--surface2); }
+  .wt-palette-row input[type=color] { width:38px; height:32px; padding:2px; border:1px solid var(--border); border-radius:6px; background:transparent; cursor:pointer; }
+  .wt-palette-copy { min-width:0; }
+  .wt-palette-name { font-size:12px; font-weight:800; }
+  .wt-palette-value { margin-top:2px; color:var(--text-muted); font:700 9px 'Space Mono',monospace; }
+  @media (max-width:800px) {
+    #tab-weekly.main { padding-left:12px; padding-right:12px; }
+    .wt-toolbar { align-items:stretch; }
+    .wt-toolbar-main, .wt-toolbar-actions { width:100%; }
+    .wt-toolbar-actions { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .wt-toolbar-actions .btn { min-width:0; }
+    .wt-toolbar-actions .btn:nth-child(1), .wt-toolbar-actions .btn:nth-child(2) { grid-column:span 2; }
+    .wt-toolbar-actions .btn:nth-child(5) { grid-column:span 2; }
+    .wt-focus-strip, .wt-overdue-banner { grid-template-columns:1fr; gap:8px; }
+    .wt-focus-strip .btn, .wt-overdue-banner .btn { width:100%; }
+    .wt-overdue-banner { position:sticky; top:8px; z-index:20; grid-template-columns:minmax(0,1fr) auto; background:color-mix(in srgb,var(--surface) 94%,var(--red)); box-shadow:0 8px 24px rgba(0,0,0,.32); }
+    .wt-overdue-banner .wt-overdue-list { display:none; }
+    .wt-overdue-banner .btn { width:auto; align-self:center; }
+    .wt-desktop { display:none; }
+    .wt-mobile { display:grid; gap:14px; }
+    .wt-weekday-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; }
+    .wt-weekday-chip { justify-content:center; padding-left:5px; padding-right:5px; }
+    .wt-palette-grid { grid-template-columns:1fr; }
+  }
 
   /* ── SESSION GOALS ── */
   .goal-row {
@@ -3370,12 +3476,15 @@
   @media (max-width: 800px) {
     .tasks-layout { grid-template-columns: 1fr; }
     .timer-layout { grid-template-columns: 1fr; }
-    header { padding: 12px 16px; }
-    .header-main { grid-template-columns: 1fr; }
-    .header-stats { flex-wrap: wrap; }
+    header { padding: 10px 12px; position:relative; top:auto; gap:7px; }
+    .header-main { grid-template-columns:1fr; gap:8px; }
+    .xp-block { min-width:0; max-width:none; }
+    .header-stats { width:100%; flex-wrap:nowrap; overflow-x:auto; padding-bottom:2px; }
     .header-status-row { flex-wrap: wrap; overflow: visible; }
     .header-exam-list { width: 100%; }
-    .header-actions { justify-content: flex-start; gap: 6px; }
+    .header-actions { width:100%; justify-content:flex-start; gap:6px; flex-wrap:nowrap; overflow-x:auto; padding-bottom:2px; scrollbar-width:none; }
+    .header-actions::-webkit-scrollbar { display:none; }
+    .header-actions > * { flex:0 0 auto; }
     .header-actions .btn { padding: 8px 11px; }
     .header-search-row { width: 100%; }
     .global-search-wrap { width: 100%; }
@@ -4516,7 +4625,7 @@
         <div class="header-metric-chip" title="Study time tracked today">
           <span>Today</span><strong id="todayStudyHeader">0m</strong>
         </div>
-        <div class="save-status-chip saved" id="saveStatusChip" title="Save status"><strong>Saved</strong></div>
+        <div class="save-status-chip local" id="saveStatusChip" title="Save status: Saved in Chrome"><strong>Saved in Chrome</strong></div>
       </div>
     </div>
 
@@ -5116,29 +5225,32 @@
 
 <!-- WEEKLY TRACKER TAB -->
 <div class="main" id="tab-weekly">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:12px;">
     <div>
       <div style="font-size:22px;font-weight:800;">📅 Weekly Study Tracker</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Track class notes, homework, summaries and more per subject per week</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Subjects grouped by their real Monday-Sunday dates</div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <button class="btn btn-ghost btn-sm" onclick="prevWeekGroup()">← Prev</button>
-      <span id="weekGroupLabel" style="font-size:13px;font-weight:700;font-family:'Space Mono',monospace;min-width:80px;text-align:center;"></span>
-      <button class="btn btn-ghost btn-sm" onclick="nextWeekGroup()">Next →</button>
-      <button class="btn btn-primary btn-sm" onclick="addTrackerWeek()">+ Add Week</button>
-    </div>
+    <span id="weekGroupLabel" style="font-size:11px;font-weight:800;font-family:'Space Mono',monospace;color:var(--text-dim);"></span>
   </div>
-
-  <!-- Legend -->
-  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:11px;font-weight:700;">
-    <div style="display:flex;align-items:center;gap:5px;"><div style="width:14px;height:14px;border-radius:3px;background:rgba(106,247,176,0.15);border:1px solid rgba(106,247,176,0.4);"></div>Done ✓</div>
-    <div style="display:flex;align-items:center;gap:5px;"><div style="width:14px;height:14px;border-radius:3px;background:rgba(247,106,106,0.12);border:1px solid rgba(247,106,106,0.3);"></div>Missing / Not done</div>
-    <div style="display:flex;align-items:center;gap:5px;"><div style="width:14px;height:14px;border-radius:3px;background:rgba(106,247,176,0.08);border:1px solid rgba(106,247,176,0.2);"></div>No class (green row)</div>
-    <div style="display:flex;align-items:center;gap:5px;"><div style="width:14px;height:14px;border-radius:3px;background:rgba(247,106,106,0.5);border:1px solid rgba(247,106,106,0.8);"></div>BREAK week</div>
-  </div>
-
-  <div style="overflow-x:auto;">
+  <div class="wt-shell">
     <div id="weeklyTrackerTable"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="weekdayColorsModal">
+  <div class="modal" style="width:min(560px,calc(100vw - 24px));">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+      <div>
+        <div class="modal-title" style="margin-bottom:4px;">Weekday Colors</div>
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">One palette is shared by every semester. Matching weekdays always use the same color.</div>
+      </div>
+      <button class="task-modal-close" onclick="closeModal('weekdayColorsModal')" aria-label="Close weekday colors">×</button>
+    </div>
+    <div class="wt-palette-grid" id="weekdayColorGrid" style="margin-top:16px;"></div>
+    <div class="modal-btns" style="position:sticky;bottom:-28px;background:var(--surface);padding:14px 0 0;border-top:1px solid var(--border);">
+      <button class="btn btn-ghost" onclick="resetWTWeekdayColors()">Reset Colors</button>
+      <button class="btn btn-primary" onclick="closeModal('weekdayColorsModal')">Done</button>
+    </div>
   </div>
 </div>
 
@@ -5638,8 +5750,8 @@
   <div class="modal" style="max-width:720px;width:95vw;">
     <div class="task-modal-head" style="padding:0 0 12px;border-bottom:1px solid var(--border);">
       <div>
-        <div class="modal-title" style="margin-bottom:4px;">Choose Which Save To Keep</div>
-        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">Local and live StudyQuest were both changed. Both copies are preserved until you choose.</div>
+        <div class="modal-title" id="liveSyncConflictTitle" style="margin-bottom:4px;">Choose Which Save To Keep</div>
+        <div id="liveSyncConflictCopy" style="font-size:12px;color:var(--text-dim);line-height:1.5;">Local and live StudyQuest were both changed. Both copies are preserved until you choose.</div>
       </div>
     </div>
     <div id="liveSyncConflictBody" style="padding:14px 0;"></div>
@@ -5847,9 +5959,14 @@ const SERVER_STATE_ENDPOINT = '/api/state';
 const CLOUD_STATE_ENDPOINT = '/api/v2/state';
 const LOCAL_LIVE_STATE_ENDPOINT = '/api/live-state';
 const LOCAL_LIVE_STATUS_ENDPOINT = '/api/live-sync/status';
+const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
+const LOCAL_RELEASE_ENDPOINT = '/api/release/v13';
+const LOCAL_RELEASE_STATUS_ENDPOINT = '/api/release/v13/status';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
+const LIVE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 let serverSaveTimer = null;
-let liveSyncTimer = null;
+let liveSyncScheduleTimer = null;
+let releasePollTimer = null;
 let saveStatusClearTimer = null;
 let pendingServerSync = false;
 let corruptSaveInfo = null;
@@ -5864,6 +5981,19 @@ let liveSync = {
   username: null,
   deviceName: null,
   release: null,
+  localServerHealthy: null,
+  liveHealthy: null,
+  localHash: null,
+  publishedHash: null,
+  publishedAt: null,
+  lastCloudRevision: null,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastPushAt: null,
+  lastPullAt: null,
+  nextSyncAt: null,
+  lastDirection: null,
+  inFlight: false,
   message: '',
 };
 let accountRecovery = {
@@ -6169,6 +6299,12 @@ function hasUserData(s) {
 const initialLiveSyncMeta = getLiveSyncMeta();
 liveSync.revision = Number.isInteger(initialLiveSyncMeta.revision) ? initialLiveSyncMeta.revision : null;
 liveSync.pending = !!initialLiveSyncMeta.pending;
+liveSync.lastAttemptAt = initialLiveSyncMeta.lastSyncAttemptAt || null;
+liveSync.lastSuccessAt = initialLiveSyncMeta.lastSyncSuccessAt || null;
+liveSync.lastPushAt = initialLiveSyncMeta.lastPushAt || null;
+liveSync.lastPullAt = initialLiveSyncMeta.lastPullAt || null;
+liveSync.nextSyncAt = initialLiveSyncMeta.nextScheduledSyncAt || null;
+liveSync.lastDirection = initialLiveSyncMeta.lastSyncDirection || null;
 let state = loadState();
 let SQ_State = state;
 function syncSQStateReference() {
@@ -6251,7 +6387,7 @@ function saveState() {
     if (!canUseServerStorage()) showToast('Browser storage failed. Open with 127.0.0.1 so StudyQuest can save to disk.', '#f76a6a');
   }
   if (!canUseServerStorage()) {
-    if (browserSaved) setSaveStatus('local', 'Local only');
+    if (browserSaved) setSaveStatus('local', 'Saved in Chrome');
     return;
   }
   if (browserSaved && (isHostedAppHost() || liveSync.paired)) {
@@ -6263,7 +6399,7 @@ function saveState() {
 
 function queueServerStateSave() {
   if (!canUseServerStorage()) {
-    setSaveStatus('local', 'Local only');
+    setSaveStatus('local', 'Saved in Chrome');
     return;
   }
   setSaveStatus('saving', 'Saving...');
@@ -6273,11 +6409,12 @@ function queueServerStateSave() {
 
 async function saveStateToServer() {
   if (!canUseServerStorage()) {
-    setSaveStatus('local', 'Local only');
+    setSaveStatus('local', 'Saved in Chrome');
     return;
   }
   if (isHostedAppHost()) {
-    await saveStateToCloud();
+    pendingServerSync = false;
+    queueLiveCloudSave();
     return;
   }
   const controller = new AbortController();
@@ -6292,32 +6429,84 @@ async function saveStateToServer() {
     if (!res.ok) throw new Error('Server save failed');
     pendingServerSync = false;
     setSaveMeta({ latestServerSaveAt: new Date().toISOString(), latestLocalServerSaveAt: new Date().toISOString() });
-    setSaveStatus(liveSync.paired ? 'saving' : 'saved', liveSync.paired ? 'Local saved · syncing' : 'Saved');
+    setSaveStatus(liveSync.paired ? 'saving' : 'local', liveSync.paired ? 'Saved locally · admin sync pending' : 'Saved locally · live not paired');
     if (liveSync.paired) queueLiveCloudSave();
   } catch (e) {
     console.warn('StudyQuest server save failed', e);
     recordAppError('server-save', e);
     pendingServerSync = true;
-    setSaveStatus('offline', 'Local saved');
+    liveSync.localServerHealthy = false;
+    setSaveStatus('offline', 'Saved in Chrome · local server offline');
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function queueLiveCloudSave(delay = 500) {
+function syncTimeOnly(value) {
+  if (!value) return 'not scheduled';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'not scheduled';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function syncDirectionText(direction) {
+  if (direction === 'browser-to-cloud') return isLocalLabHost() ? 'Chrome → Live admin' : 'Live browser → Cloud';
+  if (direction === 'cloud-to-browser') return isLocalLabHost() ? 'Live admin → Chrome' : 'Cloud → Live browser';
+  if (direction === 'no-change') return 'Already matched';
+  return 'Not synced yet';
+}
+
+function scheduledSyncStatusText() {
+  const next = liveSync.nextSyncAt || getLiveSyncMeta().nextScheduledSyncAt;
+  return liveSync.pending
+    ? `Saved locally · sync at ${syncTimeOnly(next)}`
+    : `Synced · next ${syncTimeOnly(next)}`;
+}
+
+function scheduleNextLiveSync({ reset = false } = {}) {
+  clearTimeout(liveSyncScheduleTimer);
+  if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) {
+    liveSync.nextSyncAt = null;
+    return;
+  }
+  const now = Date.now();
+  const meta = getLiveSyncMeta();
+  let target = reset ? now + LIVE_SYNC_INTERVAL_MS : Date.parse(meta.nextScheduledSyncAt || liveSync.nextSyncAt || '');
+  if (!Number.isFinite(target)) target = now + LIVE_SYNC_INTERVAL_MS;
+  liveSync.nextSyncAt = new Date(target).toISOString();
+  setLiveSyncMeta({ nextScheduledSyncAt: liveSync.nextSyncAt });
+  liveSyncScheduleTimer = setTimeout(() => runLiveSyncCycle({ reason: 'scheduled' }), Math.max(250, target - now));
+}
+
+function queueLiveCloudSave() {
   if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return;
   liveSync.pending = true;
   setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
-  clearTimeout(liveSyncTimer);
-  liveSyncTimer = setTimeout(saveStateToCloud, delay);
+  scheduleNextLiveSync();
+  setSaveStatus('local', scheduledSyncStatusText());
+  renderRecoveryCenter();
 }
 
 function cloudStateEndpoint() {
   return isHostedAppHost() ? CLOUD_STATE_ENDPOINT : LOCAL_LIVE_STATE_ENDPOINT;
 }
 
+function recordSuccessfulLiveSync(direction, at = new Date().toISOString()) {
+  liveSync.lastSuccessAt = at;
+  liveSync.lastDirection = direction;
+  if (direction === 'browser-to-cloud') liveSync.lastPushAt = at;
+  if (direction === 'cloud-to-browser') liveSync.lastPullAt = at;
+  const patch = {
+    lastSyncSuccessAt: at,
+    lastSyncDirection: direction,
+  };
+  if (direction === 'browser-to-cloud') patch.lastPushAt = at;
+  if (direction === 'cloud-to-browser') patch.lastPullAt = at;
+  setLiveSyncMeta(patch);
+}
+
 async function saveStateToCloud() {
-  if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return;
+  if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return { ok: false };
   const meta = getLiveSyncMeta();
   const baseRevision = Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
   const controller = new AbortController();
@@ -6347,10 +6536,11 @@ async function saveStateToCloud() {
         revision: Number(result.revision || 0),
         cloudUpdatedAt: result.updatedAt || null,
       });
-      return;
+      return { ok: false, conflict: true };
     }
     if (!res.ok) throw new Error(result.error || 'Live save failed');
     liveSync.revision = Number(result.revision || baseRevision || 0);
+    liveSync.lastCloudRevision = liveSync.revision;
     liveSync.updatedAt = result.savedAt || new Date().toISOString();
     liveSync.pending = false;
     liveSync.status = 'synced';
@@ -6360,18 +6550,21 @@ async function saveStateToCloud() {
       lastSyncedStateUpdatedAt: state.updatedAt,
       latestCloudSaveAt: liveSync.updatedAt,
     });
+    recordSuccessfulLiveSync('browser-to-cloud', liveSync.updatedAt);
     setSaveMeta({ latestCloudSaveAt: liveSync.updatedAt });
-    setSaveStatus('saved', 'Synced');
+    setSaveStatus('saved', scheduledSyncStatusText());
     renderRecoveryCenter();
+    return { ok: true, direction: 'browser-to-cloud', at: liveSync.updatedAt };
   } catch (e) {
     if (!liveSync.conflict) {
       liveSync.pending = true;
       liveSync.status = 'offline';
       liveSync.message = e?.name === 'AbortError' ? 'Live server timed out' : String(e?.message || e);
       setLiveSyncMeta({ pending: true, lastError: liveSync.message });
-      setSaveStatus('offline', 'Local saved · live pending');
+      setSaveStatus('offline', 'Saved locally · admin sync pending');
       recordAppError('live-save', e);
     }
+    return { ok: false, error: liveSync.message };
   } finally {
     clearTimeout(timeout);
   }
@@ -6506,12 +6699,21 @@ function downloadJsonFile(filename, value) {
 
 function openLiveSyncConflict(conflict) {
   if (!conflict?.localState || !conflict?.cloudState) return;
+  clearTimeout(liveSyncScheduleTimer);
   liveSync.conflict = conflict;
   liveSync.pending = false;
   liveSync.status = 'conflict';
-  pushAutoBackup('Live conflict - local copy', conflict.localState);
-  pushAutoBackup('Live conflict - cloud copy', conflict.cloudState);
+  if (!conflict.snapshotsPrepared) {
+    pushAutoBackup('Live conflict - local copy', conflict.localState);
+    pushAutoBackup('Live conflict - cloud copy', conflict.cloudState);
+  }
   setLiveSyncMeta({ pending: false, conflictAt: new Date().toISOString() });
+  const title = document.getElementById('liveSyncConflictTitle');
+  const copy = document.getElementById('liveSyncConflictCopy');
+  if (title) title.textContent = conflict.reason === 'initial-pair' ? 'Compare Chrome and Live Saves' : 'Choose Which Save To Keep';
+  if (copy) copy.textContent = conflict.reason === 'initial-pair'
+    ? 'First pairing never overwrites either copy automatically. Chrome, local-disk, and live snapshots are ready.'
+    : 'Local and live StudyQuest were both changed. Both copies are preserved until you choose.';
   const body = document.getElementById('liveSyncConflictBody');
   if (body) {
     body.innerHTML = `
@@ -6559,19 +6761,22 @@ async function resolveLiveSyncConflict(choice) {
       lastSyncedStateUpdatedAt: state.updatedAt,
       latestCloudLoadAt: new Date().toISOString(),
     });
+    recordSuccessfulLiveSync('cloud-to-browser');
     liveSync.pending = false;
     liveSync.status = 'synced';
     ensureTrackerSemesters();
     ensureTravelState();
     renderAll();
     if (isLocalLabHost()) await saveStateToLocalServerOnly();
-    setSaveStatus('saved', 'Live copy restored');
+    scheduleNextLiveSync({ reset: true });
+    setSaveStatus('saved', scheduledSyncStatusText());
   } else {
     setSQState(conflict.localState);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     liveSync.pending = true;
     setLiveSyncMeta({ revision: liveSync.revision, pending: true, localUpdatedAt: state.updatedAt });
     await saveStateToCloud();
+    scheduleNextLiveSync({ reset: true });
   }
   renderRecoveryCenter();
 }
@@ -6588,6 +6793,26 @@ async function saveStateToLocalServerOnly() {
   } catch (e) {
     recordAppError('local-server-save', e);
   }
+}
+
+async function createFirstPairingSafetyBundle(cloudState, revision, updatedAt) {
+  pushAutoBackup('Before first live pairing - Chrome', state);
+  if (hasUserData(cloudState)) pushAutoBackup('Before first live pairing - Live', cloudState);
+  if (!isLocalLabHost()) return;
+  const res = await fetch(LOCAL_PAIRING_SNAPSHOT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      label: 'Before first live pairing comparison',
+      browserState: state,
+      cloudState,
+      cloudRevision: revision,
+      cloudUpdatedAt: updatedAt,
+    }),
+  });
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(result.error || 'Could not create the first-pair safety backup.');
+  setSaveMeta({ latestPairingBackupAt: result.createdAt || new Date().toISOString() });
 }
 
 async function generateLivePairingCode() {
@@ -6629,7 +6854,8 @@ async function pairLocalLiveAccount() {
     liveSync.status = 'paired';
     if (input) input.value = '';
     await syncLiveState({ initialPair: true });
-    showToast('Local v13 paired with the live admin account.', '#6af7b0');
+    if (!liveSync.conflict) scheduleNextLiveSync({ reset: true });
+    showToast(liveSync.conflict ? 'Paired safely. Compare both saves before syncing.' : 'Local v13 paired with the live admin account.', '#6af7b0');
   } catch (e) {
     setSaveStatus('offline', 'Pairing failed');
     showToast(String(e?.message || e), '#f76a6a');
@@ -6644,9 +6870,11 @@ function disconnectLocalLiveAccount() {
     onConfirm: async () => {
       try { await fetch('/api/live-sync/revoke', { method: 'POST' }); } catch {}
       liveSync = { ...liveSync, paired: false, status: 'unpaired', revision: null, pending: false, conflict: null, username: null, deviceName: null };
-      setLiveSyncMeta({ paired: false, pending: false, revision: null });
+      clearTimeout(liveSyncScheduleTimer);
+      liveSync.nextSyncAt = null;
+      setLiveSyncMeta({ paired: false, pending: false, revision: null, nextScheduledSyncAt: null });
       renderRecoveryCenter();
-      setSaveStatus('local', 'Local only');
+      setSaveStatus('local', 'Saved locally · live not paired');
       showToast('Live sync disconnected. Local data was kept.', '#6af7b0');
     }
   });
@@ -6982,10 +7210,69 @@ function renderAccountRecoveryAdmin() {
     </div>`;
 }
 
+function shortReleaseHash(value) {
+  return value ? String(value).slice(0, 10) : 'Unavailable';
+}
+
+function confirmPublishV13() {
+  if (!isLocalLabHost()) return showToast('Publish Now is available only from local Chrome.', '#f7c06a');
+  showAppConfirm({
+    title: 'Publish Tested v13?',
+    message: 'This runs the release checks, commits only the complete v13 HTML and version metadata, and deploys them to the admin-only live route. Your StudyQuest data is not changed.',
+    confirmText: 'Publish Now',
+    onConfirm: publishV13Now,
+  });
+}
+
+async function publishV13Now() {
+  try {
+    setSaveStatus('saving', 'Publishing admin v13...');
+    const res = await fetch(LOCAL_RELEASE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'PUBLISH_V13' }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(result.error || 'Could not start the v13 release.');
+    liveSync.release = { status: 'running', running: true, startedAt: result.startedAt, message: 'Running release checks.' };
+    renderRecoveryCenter();
+    showToast('v13 release checks started.', '#6af7b0');
+    pollV13ReleaseStatus();
+  } catch (e) {
+    liveSync.release = { status: 'failed', running: false, finishedAt: new Date().toISOString(), message: String(e?.message || e) };
+    setSaveStatus('error', 'Publish failed');
+    renderRecoveryCenter();
+    showToast(String(e?.message || e), '#f76a6a');
+  }
+}
+
+async function pollV13ReleaseStatus() {
+  clearTimeout(releasePollTimer);
+  if (!isLocalLabHost()) return;
+  try {
+    const res = await fetch(LOCAL_RELEASE_STATUS_ENDPOINT, { cache: 'no-store' });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(result.error || 'Release status unavailable.');
+    liveSync.release = result;
+    liveSync.localHash = result.local?.hash || liveSync.localHash;
+    renderRecoveryCenter();
+    if (result.running || result.job?.status === 'running') {
+      releasePollTimer = setTimeout(pollV13ReleaseStatus, 5000);
+    } else {
+      await refreshLiveSyncStatus();
+      showToast(result.status === 'deployed' || result.status === 'unchanged' ? 'Admin v13 is up to date.' : (result.message || 'Release finished.'), result.status === 'failed' ? '#f76a6a' : '#6af7b0');
+    }
+  } catch (e) {
+    liveSync.release = { ...(liveSync.release || {}), running: false, status: 'failed', message: String(e?.message || e) };
+    renderRecoveryCenter();
+  }
+}
+
 function renderRecoveryCenter() {
   const body = document.getElementById('recoveryCenterBody');
   if (!body) return;
   const meta = getSaveMeta();
+  const syncMeta = getLiveSyncMeta();
   const undoHistory = getUndoHistory();
   const autoBackups = trimSafetyList(safeReadJson(AUTO_BACKUP_STORAGE_KEY, []), 10);
   const errors = trimSafetyList(safeReadJson(ERROR_LOG_STORAGE_KEY, []), 20);
@@ -6993,6 +7280,11 @@ function renderRecoveryCenter() {
   const saveHealth = corrupt ? 'Recovery needed' : liveSync.conflict ? 'Sync choice needed' : pendingServerSync || liveSync.pending ? 'Local saved · sync pending' : 'Ready';
   const liveStatus = liveSync.conflict ? 'Conflict - both preserved' : liveSync.paired || isHostedAppHost() ? liveSync.status || 'Connected' : 'Not paired';
   const release = liveSync.release || null;
+  const releaseState = release?.job?.status || release?.status || (release?.hash ? 'deployed' : 'not run');
+  const releaseRunning = release?.running || release?.job?.status === 'running';
+  const localHash = liveSync.localHash || release?.local?.hash || null;
+  const publishedHash = liveSync.publishedHash || release?.hash || null;
+  const hashesMatch = !!localHash && !!publishedHash && localHash === publishedHash;
   body.innerHTML = `
     <div class="recovery-grid">
       <div class="recovery-card"><div class="recovery-label">Save Health</div><div class="recovery-value">${escapeHtml(saveHealth)}</div></div>
@@ -7001,21 +7293,33 @@ function renderRecoveryCenter() {
       <div class="recovery-card"><div class="recovery-label">Live Cloud Save</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(meta.latestCloudSaveAt || getLiveSyncMeta().latestCloudSaveAt))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Current Data</div><div class="recovery-value">${escapeHtml(stateSummary(state))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live Sync</div><div class="recovery-value">${escapeHtml(liveStatus)}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Local v13</div><div class="recovery-value">${escapeHtml(shortReleaseHash(localHash))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Live v13</div><div class="recovery-value">${escapeHtml(shortReleaseHash(publishedHash))}${hashesMatch ? ' · Current' : localHash && publishedHash ? ' · Update ready' : ''}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Live Server</div><div class="recovery-value">${liveSync.liveHealthy === true ? 'Healthy' : liveSync.liveHealthy === false ? 'Waking / unavailable' : 'Not checked'}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Cloud Revision</div><div class="recovery-value">${liveSync.lastCloudRevision == null ? 'Not synced' : escapeHtml(String(liveSync.lastCloudRevision))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Sync Schedule</div><div class="recovery-value">Two-way · every 30 minutes</div></div>
+      <div class="recovery-card"><div class="recovery-label">Last Attempt</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastAttemptAt || syncMeta.lastSyncAttemptAt))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Last Successful Sync</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastSuccessAt || syncMeta.lastSyncSuccessAt))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Last Direction</div><div class="recovery-value">${escapeHtml(syncDirectionText(liveSync.lastDirection || syncMeta.lastSyncDirection))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Next Automatic Sync</div><div class="recovery-value">${liveSync.conflict ? 'Paused for conflict' : escapeHtml(formatRecoveryDate(liveSync.nextSyncAt || syncMeta.nextScheduledSyncAt))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Last Browser → Cloud</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastPushAt || syncMeta.lastPushAt))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Last Cloud → Browser</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastPullAt || syncMeta.lastPullAt))}</div></div>
     </div>
     ${renderAccountRecoveryAdmin()}
     <div class="recovery-section">
       <div class="recovery-section-title">Live Admin Sync</div>
       ${isHostedAppHost() ? `
-        <div class="recovery-empty">This is the live admin v13. Generate a one-time code here, then enter it in Recovery Center on <strong>http://127.0.0.1:3000/claudever13.html</strong>.</div>
+        <div class="recovery-empty">Two-way sync checks the cloud every 30 minutes. Live edits save in this browser immediately, then safely reach paired Chrome through revision-protected cloud sync.</div>
         <div class="recovery-actions" style="margin-top:9px;">
+          <button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:'manual'})">Sync Now</button>
           <button class="btn btn-primary btn-sm" onclick="generateLivePairingCode()">Generate Pairing Code</button>
           <button class="btn btn-ghost btn-sm" onclick="openStableApp()">Open Stable App</button>
         </div>
         ${liveSync.pairingCode ? `<div class="sync-conflict-card" style="margin-top:10px;"><div class="recovery-label">One-time code</div><div class="sync-code">${escapeHtml(liveSync.pairingCode)}</div><div class="recovery-row-meta" style="white-space:normal;">Expires ${escapeHtml(formatRecoveryDate(liveSync.pairingExpiresAt))}</div></div>` : ''}
       ` : liveSync.paired ? `
-        <div class="recovery-empty">Paired as <strong>${escapeHtml(liveSync.username || 'admin')}</strong>${liveSync.deviceName ? ' · ' + escapeHtml(liveSync.deviceName) : ''}. Local changes save to browser and disk first, then sync live.</div>
+        <div class="recovery-empty">Paired as <strong>${escapeHtml(liveSync.username || 'admin')}</strong>${liveSync.deviceName ? ' · ' + escapeHtml(liveSync.deviceName) : ''}. Chrome and live exchange changes every 30 minutes. Browser and disk saves remain immediate.</div>
         <div class="recovery-actions" style="margin-top:9px;">
-          <button class="btn btn-primary btn-sm" onclick="syncLiveState({manual:true})">Sync Now</button>
+          <button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:'manual'})">Sync Now</button>
           <button class="btn btn-ghost btn-sm" onclick="disconnectLocalLiveAccount()">Disconnect Device</button>
         </div>
       ` : `
@@ -7029,7 +7333,11 @@ function renderRecoveryCenter() {
     </div>
     <div class="recovery-section">
       <div class="recovery-section-title">Daily v13 Release</div>
-      <div class="recovery-empty">${release ? `${escapeHtml(release.status || 'unknown')} · ${escapeHtml(formatRecoveryDate(release.finishedAt || release.startedAt))}${release.commit ? ' · ' + escapeHtml(String(release.commit).slice(0, 10)) : ''}${release.message ? '<br>' + escapeHtml(release.message) : ''}` : 'No local release run recorded yet.'}</div>
+      <div class="recovery-empty">${release ? `${escapeHtml(releaseState)} · ${escapeHtml(formatRecoveryDate(release.job?.finishedAt || release.finishedAt || release.job?.startedAt || release.startedAt))}${release.commit ? ' · ' + escapeHtml(String(release.commit).slice(0, 10)) : ''}${release.job?.message || release.message ? '<br>' + escapeHtml(release.job?.message || release.message) : ''}` : 'No local release run recorded yet.'}</div>
+      ${isLocalLabHost() ? `<div class="recovery-actions" style="margin-top:9px;">
+        <button class="btn btn-primary btn-sm" onclick="confirmPublishV13()" ${releaseRunning ? 'disabled' : ''}>${releaseRunning ? 'Publishing...' : 'Publish Now'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshLiveSyncStatus()">Check Live Version</button>
+      </div>` : ''}
     </div>
     ${corrupt ? `
       <div class="recovery-section" style="border-color:rgba(247,106,106,0.35);">
@@ -7080,25 +7388,59 @@ function renderRecoveryCenter() {
 
 async function refreshLiveSyncStatus() {
   if (!canUseServerStorage()) return;
+  const syncMeta = getLiveSyncMeta();
+  liveSync.lastAttemptAt = syncMeta.lastSyncAttemptAt || liveSync.lastAttemptAt;
+  liveSync.lastSuccessAt = syncMeta.lastSyncSuccessAt || liveSync.lastSuccessAt;
+  liveSync.lastPushAt = syncMeta.lastPushAt || liveSync.lastPushAt;
+  liveSync.lastPullAt = syncMeta.lastPullAt || liveSync.lastPullAt;
+  liveSync.nextSyncAt = syncMeta.nextScheduledSyncAt || liveSync.nextSyncAt;
+  liveSync.lastDirection = syncMeta.lastSyncDirection || liveSync.lastDirection;
   try {
     if (isHostedAppHost()) {
       liveSync.paired = true;
       liveSync.status = liveSync.conflict ? 'conflict' : 'connected';
+      liveSync.liveHealthy = true;
+      liveSync.localServerHealthy = true;
       const versionRes = await fetch('/api/version', { credentials: 'same-origin', cache: 'no-store' });
-      if (versionRes.ok) liveSync.release = await versionRes.json();
+      if (versionRes.ok) {
+        liveSync.release = await versionRes.json();
+        liveSync.localHash = liveSync.release?.hash || null;
+        liveSync.publishedHash = liveSync.release?.hash || null;
+        liveSync.publishedAt = liveSync.release?.releasedAt || null;
+      }
     } else {
       const res = await fetch(LOCAL_LIVE_STATUS_ENDPOINT, { cache: 'no-store' });
       if (!res.ok) throw new Error('Local live-sync status unavailable');
       const result = await res.json();
+      liveSync.localServerHealthy = result.localServerHealthy === true;
       liveSync.paired = !!result.paired;
       liveSync.username = result.username || null;
       liveSync.deviceName = result.deviceName || null;
       liveSync.release = result.release || null;
-      liveSync.status = liveSync.paired ? (liveSync.conflict ? 'conflict' : liveSync.status === 'offline' ? 'offline' : 'paired') : 'unpaired';
+      liveSync.localHash = result.localSource?.hash || result.release?.local?.hash || null;
+      liveSync.publishedHash = result.publishedHash || null;
+      liveSync.publishedAt = result.publishedAt || null;
+      liveSync.liveHealthy = result.liveHealthy === true;
+      liveSync.lastCloudRevision = Number.isInteger(result.lastCloudRevision) ? result.lastCloudRevision : liveSync.lastCloudRevision;
+      liveSync.lastAttemptAt = liveSync.lastAttemptAt || result.lastSyncAttemptAt || null;
+      liveSync.lastSuccessAt = liveSync.lastSuccessAt || result.lastSyncSuccessAt || null;
+      if (!liveSync.lastDirection && ['browser-to-cloud', 'cloud-to-browser', 'no-change'].includes(result.lastSyncDirection)) {
+        liveSync.lastDirection = result.lastSyncDirection;
+      }
+      if (result.lastCloudSaveAt) setSaveMeta({ latestCloudSaveAt: result.lastCloudSaveAt });
+      liveSync.message = result.liveMessage || '';
+      liveSync.status = liveSync.paired
+        ? (liveSync.conflict ? 'conflict' : ['synced', 'offline', 'syncing'].includes(liveSync.status) ? liveSync.status : 'paired')
+        : 'unpaired';
+      if (!liveSync.conflict && !liveSync.pending) {
+        setSaveStatus(liveSync.status === 'synced' ? 'saved' : 'local', liveSync.paired ? scheduledSyncStatusText() : 'Saved locally · live not paired');
+      }
     }
   } catch (e) {
     liveSync.status = 'offline';
+    liveSync.localServerHealthy = false;
     liveSync.message = String(e?.message || e);
+    if (isLocalLabHost()) setSaveStatus('offline', 'Saved in Chrome · local server offline');
   }
   renderRecoveryCenter();
 }
@@ -7107,7 +7449,7 @@ function statesEquivalent(a, b) {
   try { return JSON.stringify(a || null) === JSON.stringify(b || null); } catch { return false; }
 }
 
-function applyCloudState(cloudState, revision, updatedAt, label = 'Before live cloud load') {
+function applyCloudState(cloudState, revision, updatedAt, label = 'Before live cloud load', { recordCloudSync = true } = {}) {
   if (hasUserData(state)) {
     pushUndoSnapshot(label);
     pushAutoBackup(label, state);
@@ -7115,24 +7457,30 @@ function applyCloudState(cloudState, revision, updatedAt, label = 'Before live c
   setSQState(cloudState);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   liveSync.revision = Number(revision || 0);
+  liveSync.lastCloudRevision = liveSync.revision;
   liveSync.updatedAt = updatedAt || null;
   liveSync.pending = false;
   liveSync.status = 'synced';
+  const loadedAt = new Date().toISOString();
   setLiveSyncMeta({
     revision: liveSync.revision,
     pending: false,
     lastSyncedStateUpdatedAt: state.updatedAt,
-    latestCloudLoadAt: new Date().toISOString(),
+    latestCloudLoadAt: recordCloudSync ? loadedAt : getLiveSyncMeta().latestCloudLoadAt,
   });
-  setSaveMeta({ latestCloudLoadAt: new Date().toISOString() });
+  if (recordCloudSync) {
+    recordSuccessfulLiveSync('cloud-to-browser', loadedAt);
+    setSaveMeta({ latestCloudLoadAt: loadedAt });
+  }
   ensureTrackerSemesters();
   ensureTravelState();
   renderAll();
   if (isLocalLabHost()) saveStateToLocalServerOnly();
+  return { ok: true, direction: recordCloudSync ? 'cloud-to-browser' : 'local-disk-to-browser', at: loadedAt };
 }
 
 async function syncLiveState(options = {}) {
-  if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return;
+  if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return { ok: false, skipped: true };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25_000);
   try {
@@ -7147,10 +7495,10 @@ async function syncLiveState(options = {}) {
         liveSync.status = 'unpaired';
         liveSync.message = 'This local device needs to be paired again.';
       }
-      return;
+      return { ok: false, authorizationRequired: true };
     }
     if (!res.ok) throw new Error(result.error || 'Could not load live state');
-    const cloudState = result.state ? normalizeState(result.state) : null;
+    const cloudState = normalizeState(result.state || defaultState());
     const cloudRevision = Number(result.revision || 0);
     const meta = getLiveSyncMeta();
     const localHasData = hasUserData(state);
@@ -7158,46 +7506,106 @@ async function syncLiveState(options = {}) {
     const pending = !!meta.pending || liveSync.pending;
     const knownRevision = Number.isInteger(meta.revision) ? meta.revision : null;
     const localChangedSinceSync = Number(state.updatedAt || 0) > Number(meta.lastSyncedStateUpdatedAt || 0);
+    const localChanged = pending || localChangedSinceSync;
+    const cloudChanged = knownRevision === null ? !statesEquivalent(state, cloudState) : cloudRevision !== knownRevision;
+    const statesDiffer = !statesEquivalent(state, cloudState);
 
     liveSync.revision = cloudRevision;
+    liveSync.lastCloudRevision = cloudRevision;
     liveSync.updatedAt = result.updatedAt || null;
     liveSync.paired = true;
 
-    if (cloudHasData && localHasData && !statesEquivalent(state, cloudState)) {
-      const initialDifference = options.initialPair || knownRevision === null;
-      const diverged = initialDifference || (cloudRevision !== knownRevision && (pending || localChangedSinceSync));
-      if (diverged) {
+    if (options.initialPair) {
+      await createFirstPairingSafetyBundle(cloudState, cloudRevision, result.updatedAt || null);
+      if (!statesEquivalent(state, cloudState)) {
+        openLiveSyncConflict({
+          localState: cloneStateForSafety(state),
+          cloudState,
+          revision: cloudRevision,
+          cloudUpdatedAt: result.updatedAt || null,
+          reason: 'initial-pair',
+          snapshotsPrepared: true,
+        });
+        return { ok: false, conflict: true };
+      }
+    }
+
+    if (statesDiffer) {
+      const emptySideNeedsChoice = (!localHasData || !cloudHasData) && !(
+        (!localHasData && cloudHasData && cloudChanged && !localChanged && knownRevision !== null) ||
+        (localHasData && !cloudHasData && !cloudChanged && localChanged && knownRevision !== null)
+      );
+      if (knownRevision === null || emptySideNeedsChoice || (localChanged && cloudChanged) || (!localChanged && !cloudChanged)) {
         openLiveSyncConflict({
           localState: cloneStateForSafety(state),
           cloudState,
           revision: cloudRevision,
           cloudUpdatedAt: result.updatedAt || null,
         });
-        return;
+        return { ok: false, conflict: true };
+      }
+      if (cloudChanged && !localChanged) {
+        const outcome = applyCloudState(cloudState, cloudRevision, result.updatedAt);
+        setSaveStatus('saved', scheduledSyncStatusText());
+        return outcome;
+      }
+      if (localChanged && !cloudChanged) {
+        liveSync.revision = cloudRevision;
+        return await saveStateToCloud();
       }
     }
 
-    if (cloudHasData && (!localHasData || cloudRevision > Number(knownRevision || 0))) {
-      applyCloudState(cloudState, cloudRevision, result.updatedAt);
-      setSaveStatus('saved', 'Live loaded');
-    } else if (localHasData && (!cloudHasData || pending)) {
+    if (localHasData && (!cloudHasData || pending)) {
       liveSync.revision = cloudRevision;
-      await saveStateToCloud();
+      return await saveStateToCloud();
     } else {
       liveSync.pending = false;
       liveSync.status = 'synced';
+      const syncedAt = new Date().toISOString();
       setLiveSyncMeta({ revision: cloudRevision, pending: false, lastSyncedStateUpdatedAt: state.updatedAt });
-      setSaveStatus('saved', 'Synced');
+      recordSuccessfulLiveSync('no-change', syncedAt);
+      setSaveStatus('saved', scheduledSyncStatusText());
+      return { ok: true, direction: 'no-change', at: syncedAt };
     }
-    if (options.manual) showToast('Live sync checked.', '#6af7b0');
   } catch (e) {
     liveSync.status = 'offline';
     liveSync.pending = !!getLiveSyncMeta().pending;
     liveSync.message = e?.name === 'AbortError' ? 'Live server timed out while waking.' : String(e?.message || e);
-    setSaveStatus('offline', liveSync.pending ? 'Local saved · live pending' : 'Live unavailable');
+    setSaveStatus('offline', liveSync.pending ? 'Saved locally · admin sync pending' : 'Live server unavailable');
     recordAppError('live-load', e);
+    return { ok: false, error: liveSync.message };
   } finally {
     clearTimeout(timeout);
+    renderRecoveryCenter();
+  }
+}
+
+async function runLiveSyncCycle(options = {}) {
+  if (liveSync.inFlight || liveSync.conflict || corruptSaveInfo || (!liveSync.paired && !isHostedAppHost())) {
+    return { ok: false, skipped: true };
+  }
+  liveSync.inFlight = true;
+  liveSync.lastAttemptAt = new Date().toISOString();
+  setLiveSyncMeta({
+    lastSyncAttemptAt: liveSync.lastAttemptAt,
+    lastSyncReason: options.reason || (options.manual ? 'manual' : 'scheduled'),
+  });
+  let outcome = null;
+  try {
+    outcome = await syncLiveState({ ...options, fromCycle: true });
+    if (options.manual && outcome?.ok) {
+      const direction = outcome.direction === 'browser-to-cloud'
+        ? 'Browser changes sent live.'
+        : outcome.direction === 'cloud-to-browser'
+          ? 'Live changes brought into this browser.'
+          : 'Both sides were already current.';
+      showToast(direction, '#6af7b0');
+    }
+    return outcome;
+  } finally {
+    liveSync.inFlight = false;
+    scheduleNextLiveSync({ reset: true });
+    if (outcome?.ok && !liveSync.conflict) setSaveStatus('saved', scheduledSyncStatusText());
     renderRecoveryCenter();
   }
 }
@@ -7209,7 +7617,7 @@ async function syncStateFromServer() {
   }
   if (isHostedAppHost()) {
     await refreshLiveSyncStatus();
-    await syncLiveState();
+    await runLiveSyncCycle({ reason: 'startup' });
     return;
   }
   try {
@@ -7224,7 +7632,7 @@ async function syncStateFromServer() {
       return;
     }
     if (serverHasData && !localHasData) {
-      applyCloudState(serverState, getLiveSyncMeta().revision || 0, null, 'Before local disk load');
+      applyCloudState(serverState, getLiveSyncMeta().revision || 0, null, 'Before local disk load', { recordCloudSync: false });
       setSaveMeta({ latestLocalServerLoadAt: new Date().toISOString() });
       showToast('Saved StudyQuest data loaded from local disk.', '#6af7b0');
     } else if (localHasData && !serverHasData) {
@@ -7236,15 +7644,21 @@ async function syncStateFromServer() {
   } catch (e) {
     console.warn('StudyQuest local server load failed', e);
     recordAppError('local-server-load', e);
+    liveSync.localServerHealthy = false;
+    setSaveStatus('offline', 'Saved in Chrome · local server offline');
   }
   await refreshLiveSyncStatus();
-  if (liveSync.paired) await syncLiveState();
+  if (liveSync.paired) await runLiveSyncCycle({ reason: 'startup' });
 }
 
 function retryPendingServerSync() {
   if (!canUseServerStorage() || liveSync.conflict) return;
   if (isLocalLabHost() && pendingServerSync) queueServerStateSave();
-  if ((liveSync.paired || isHostedAppHost()) && (liveSync.pending || getLiveSyncMeta().pending)) queueLiveCloudSave(100);
+  if (liveSync.paired || isHostedAppHost()) {
+    const dueAt = Date.parse(getLiveSyncMeta().nextScheduledSyncAt || liveSync.nextSyncAt || '');
+    if (Number.isFinite(dueAt) && dueAt <= Date.now()) runLiveSyncCycle({ reason: 'missed-schedule' });
+    else scheduleNextLiveSync();
+  }
 }
 
 window.addEventListener('online', retryPendingServerSync);
@@ -7252,7 +7666,7 @@ window.addEventListener('focus', retryPendingServerSync);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') retryPendingServerSync();
 });
-setInterval(retryPendingServerSync, 30000);
+setInterval(retryPendingServerSync, 60 * 1000);
 
 // ════════════════════════════════════════════════════════
 // UTILS
@@ -7583,7 +7997,7 @@ function switchTab(name, el) {
   if (name === 'notes') renderNotes();
   if (name === 'files') renderFiles();
   if (name === 'checklist') renderChecklist();
-  if (name === 'weekly') renderWeekly();
+  if (name === 'weekly') openWeeklyAtToday();
   if (name === 'travel') {
     renderTravel();
     if (!wasTravel) startTravelIntro();
@@ -17820,31 +18234,43 @@ function openEditScore(key, scoreId) {
     weeks: [
       {
         id, label, date, isBreak,
-        rows: [ { day, subject, noClass, checks:{classNote,hw,summary,done,finalCheck}, note, event } ]
+        rows: [ { day, subject, noClass, checks:{classNote,hw,summary,finalCheck}, note, event } ]
       }
     ]
   }
 */
 if (!state.tracker) state.tracker = { weeks: [] };
 
+const WT_WEEKDAYS = [
+  { key:'mon', label:'Monday', short:'Mon', offset:0, className:'day-mon', defaultColor:'#F7C06A' },
+  { key:'tue', label:'Tuesday', short:'Tue', offset:1, className:'day-tue', defaultColor:'#F76A9E' },
+  { key:'wed', label:'Wednesday', short:'Wed', offset:2, className:'day-wed', defaultColor:'#6AF7E0' },
+  { key:'thu', label:'Thursday', short:'Thu', offset:3, className:'day-thu', defaultColor:'#FF9966' },
+  { key:'fri', label:'Friday', short:'Fri', offset:4, className:'day-fri', defaultColor:'#C16AF7' },
+  { key:'sat', label:'Saturday', short:'Sat', offset:5, className:'day-sat', defaultColor:'#6AA8F7' },
+  { key:'sun', label:'Sunday', short:'Sun', offset:6, className:'day-sun', defaultColor:'#6AF7B0' },
+];
+const WT_WEEKDAY_BY_KEY = Object.fromEntries(WT_WEEKDAYS.map(day => [day.key, day]));
+const WT_DEFAULT_COLORS = Object.fromEntries(WT_WEEKDAYS.map(day => [day.key, day.defaultColor]));
+const WT_CHECKS = [
+  { key:'classNote', label:'Class Note', short:'Note' },
+  { key:'hw', label:'HW / Exercise', short:'HW' },
+  { key:'summary', label:'Summary', short:'Summary' },
+];
+const WT_MIGRATION_VERSION = 2;
+
 const WT_SUBJECTS_BY_DAY = [
-  { day:'Mon', subject:'PRES SKILL', dayClass:'day-mon' },
-  { day:'Tue', subject:'APP DEV',    dayClass:'day-tue' },
-  { day:'Tue', subject:'EXPL',       dayClass:'day-tue' },
-  { day:'We',  subject:'SIG LIN',    dayClass:'day-wed' },
-  { day:'We',  subject:'AI',         dayClass:'day-wed' },
-  { day:'Th',  subject:'Career Mange.', dayClass:'day-thu' },
-  { day:'Th',  subject:'MGT DIFF',   dayClass:'day-thu' },
-  { day:'Fr',  subject:'ENG MGT',    dayClass:'day-fri' },
+  { day:'Mon', dayKey:'mon', subject:'PRES SKILL', dayClass:'day-mon' },
+  { day:'Tue', dayKey:'tue', subject:'APP DEV', dayClass:'day-tue' },
+  { day:'Tue', dayKey:'tue', subject:'EXPL', dayClass:'day-tue' },
+  { day:'Wed', dayKey:'wed', subject:'SIG LIN', dayClass:'day-wed' },
+  { day:'Wed', dayKey:'wed', subject:'AI', dayClass:'day-wed' },
+  { day:'Thu', dayKey:'thu', subject:'Career Mange.', dayClass:'day-thu' },
+  { day:'Thu', dayKey:'thu', subject:'MGT DIFF', dayClass:'day-thu' },
+  { day:'Fri', dayKey:'fri', subject:'ENG MGT', dayClass:'day-fri' },
 ];
 
-const WT_DAY_ROTATION = [
-  { day:'Mon', dayClass:'day-mon' },
-  { day:'Tue', dayClass:'day-tue' },
-  { day:'We', dayClass:'day-wed' },
-  { day:'Th', dayClass:'day-thu' },
-  { day:'Fr', dayClass:'day-fri' },
-];
+const WT_DAY_ROTATION = WT_WEEKDAYS.map(day => ({ day:day.short, dayKey:day.key, dayClass:day.className }));
 
 const TRACKER_SEMESTER_IDS = ['Y3-S1', 'Y3-S2', 'Y4-S1', 'Y4-S2'];
 
@@ -17858,11 +18284,13 @@ function compactSubjectName(name) {
 
 function makeTrackerSubjectsForSemester(semId) {
   const sem = CURRICULUM.find(s => s.sem === semId);
-  if (!sem) return WT_SUBJECTS_BY_DAY.map(s => ({ ...s }));
+  if (!sem) return WT_SUBJECTS_BY_DAY.map(s => ({ id:'wtsub_' + uid(), ...s }));
   return sem.subjects.map((sub, i) => {
     const d = WT_DAY_ROTATION[i % WT_DAY_ROTATION.length];
     return {
+      id: 'wtsub_' + uid(),
       day: d.day,
+      dayKey: d.dayKey,
       subject: compactSubjectName(sub.name),
       dayClass: d.dayClass,
       code: sub.code,
@@ -17883,42 +18311,315 @@ function getDefaultTrackerSemesters() {
 
 let wtWeekPage = 0;
 const WT_PAGE_SIZE = 4;
+let wtPendingFocusTarget = null;
 
 function getTrackerWeeks() { return state.tracker.weeks; }
 
-function addTrackerWeek() {
-  const weeks = getTrackerWeeks();
-  const nextNum = weeks.filter(w=>!w.isBreak).length + 1;
-  // Guess next Monday date
-  let nextDate = '';
-  if (weeks.length > 0) {
-    const lastDate = weeks[weeks.length-1].date;
-    if (lastDate) {
-      const d = new Date(lastDate + 'T00:00:00');
-      d.setDate(d.getDate() + 7);
-      nextDate = d.toISOString().slice(0,10);
-    }
-  } else {
-    nextDate = today();
+function wtDateFromYmd(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function wtYmd(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
+
+function wtAddDays(value, amount) {
+  const date = value instanceof Date ? new Date(value) : wtDateFromYmd(value);
+  if (!date) return '';
+  date.setDate(date.getDate() + Number(amount || 0));
+  return wtYmd(date);
+}
+
+function wtMondayForDate(value) {
+  const date = wtDateFromYmd(value);
+  if (!date) return '';
+  const offset = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - offset);
+  return wtYmd(date);
+}
+
+function wtDayKeyFromLegacy(value, dayClass = '') {
+  const text = String(value || '').trim().toLowerCase().replace(/[^a-z]/g,'');
+  if (['mon','monday','mor','mo'].includes(text) || String(dayClass).includes('mon')) return 'mon';
+  if (['tue','tues','tuesday','tu'].includes(text) || String(dayClass).includes('tue')) return 'tue';
+  if (['wed','weds','wednesday','we'].includes(text) || String(dayClass).includes('wed')) return 'wed';
+  if (['thu','thur','thurs','thursday','th'].includes(text) || String(dayClass).includes('thu')) return 'thu';
+  if (['fri','friday','fr'].includes(text) || String(dayClass).includes('fri')) return 'fri';
+  if (['sat','saturday','sa'].includes(text) || String(dayClass).includes('sat')) return 'sat';
+  if (['sun','sunday','su'].includes(text) || String(dayClass).includes('sun')) return 'sun';
+  return 'mon';
+}
+
+function wtNormalizeColor(value, fallback) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : fallback;
+}
+
+function wtColorAlpha(hex, alpha = 0.08) {
+  const clean = wtNormalizeColor(hex, '#7C6AF7').slice(1);
+  return `rgba(${parseInt(clean.slice(0,2),16)},${parseInt(clean.slice(2,4),16)},${parseInt(clean.slice(4,6),16)},${alpha})`;
+}
+
+function wtPalette() {
+  const stored = state.tracker?.weekdayColors || {};
+  return Object.fromEntries(WT_WEEKDAYS.map(day => [day.key, wtNormalizeColor(stored[day.key], day.defaultColor)]));
+}
+
+function wtNormalizeRow(row = {}) {
+  const dayKey = WT_WEEKDAY_BY_KEY[row.dayKey] ? row.dayKey : wtDayKeyFromLegacy(row.day, row.dayClass);
+  const day = WT_WEEKDAY_BY_KEY[dayKey] || WT_WEEKDAYS[0];
+  let changed = false;
+  if (!row.id) { row.id = 'wtrow_' + uid(); changed = true; }
+  if (row.sourceSubjectId != null && typeof row.sourceSubjectId !== 'string') { row.sourceSubjectId = String(row.sourceSubjectId); changed = true; }
+  if (row.dayKey !== dayKey) { row.dayKey = dayKey; changed = true; }
+  if (row.day !== day.short) { row.day = day.short; changed = true; }
+  if (row.dayClass !== day.className) { row.dayClass = day.className; changed = true; }
+  if (!row.checks || typeof row.checks !== 'object') { row.checks = {}; changed = true; }
+  WT_CHECKS.forEach(check => {
+    if (typeof row.checks[check.key] !== 'boolean') { row.checks[check.key] = !!row.checks[check.key]; changed = true; }
+  });
+  if (typeof row.note !== 'string') { row.note = String(row.note || ''); changed = true; }
+  if (typeof row.subject !== 'string') { row.subject = String(row.subject || 'New Course'); changed = true; }
+  return changed;
+}
+
+function wtSubjectMatchKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g,' ');
+}
+
+function wtReconcileSemesterWeeks(semId, { seedLegacy = false } = {}) {
+  const semester = (state.trackerSemesters || []).find(item => item.id === semId);
+  if (!semester) return false;
+  if (!Array.isArray(semester.subjects)) semester.subjects = [];
+  const weeks = (state.tracker?.weeks || []).filter(week => (week.semesterId || 'Y3-S1') === semId && !week.isBreak);
+  let changed = false;
+
+  if (seedLegacy) {
+    weeks.forEach(week => (week.rows || []).forEach(row => {
+      let subject = semester.subjects.find(item => item.id && item.id === row.sourceSubjectId);
+      if (!subject) {
+        const rowKey = wtSubjectMatchKey(row.subject);
+        subject = semester.subjects.find(item => wtSubjectMatchKey(item.subject) === rowKey);
+      }
+      if (!subject) {
+        const day = WT_WEEKDAY_BY_KEY[row.dayKey] || WT_WEEKDAYS[0];
+        subject = { id:'wtsub_' + uid(), day:day.short, dayKey:day.key, subject:String(row.subject || 'Recovered Subject'), dayClass:day.className };
+        semester.subjects.push(subject);
+        changed = true;
+      }
+      if (row.sourceSubjectId !== subject.id) { row.sourceSubjectId = subject.id; changed = true; }
+    }));
   }
-  const id = uid();
-  const rows = WT_SUBJECTS_BY_DAY.map(s => ({
-    day: s.day, subject: s.subject, dayClass: s.dayClass,
-    noClass: false,
-    checks: { classNote:false, hw:false, summary:false, finalCheck:false },
-    note: '', event: ''
-  }));
-  weeks.push({ id, label: `Week ${nextNum}`, date: nextDate, isBreak: false, rows });
-  state.tracker = { weeks };
-  saveState();
-  wtWeekPage = Math.floor((weeks.filter(w=>!w.isBreak).length-1) / WT_PAGE_SIZE);
+
+  weeks.forEach(week => {
+    const oldRows = Array.isArray(week.rows) ? week.rows : [];
+    const used = new Set();
+    const nextRows = semester.subjects.map(subject => {
+      const day = WT_WEEKDAY_BY_KEY[subject.dayKey] || WT_WEEKDAYS[0];
+      let old = oldRows.find(row => !used.has(row.id) && row.sourceSubjectId === subject.id);
+      if (!old) {
+        const subjectKey = wtSubjectMatchKey(subject.subject);
+        old = oldRows.find(row => !used.has(row.id) && wtSubjectMatchKey(row.subject) === subjectKey);
+      }
+      if (!old) {
+        changed = true;
+        return wtNewRowFromSubject(subject);
+      }
+      used.add(old.id);
+      if (old.sourceSubjectId !== subject.id) { old.sourceSubjectId = subject.id; changed = true; }
+      if (old.dayKey !== day.key) { old.dayKey = day.key; changed = true; }
+      if (old.day !== day.short) { old.day = day.short; changed = true; }
+      if (old.dayClass !== day.className) { old.dayClass = day.className; changed = true; }
+      if (old.subject !== subject.subject) { old.subject = String(subject.subject || 'New Subject'); changed = true; }
+      return old;
+    });
+    if (oldRows.length !== nextRows.length || oldRows.some((row,index) => row.id !== nextRows[index]?.id)) changed = true;
+    week.rows = nextRows;
+  });
+  return changed;
+}
+
+function ensureWeeklyTrackerData() {
+  if (!state.tracker || typeof state.tracker !== 'object') state.tracker = { weeks: [] };
+  if (!Array.isArray(state.tracker.weeks)) state.tracker.weeks = [];
+  const needsMigration = Number(state.tracker.weekdayMigrationVersion || 0) < WT_MIGRATION_VERSION;
+  if (needsMigration) pushAutoBackup('Before weekly weekday upgrade', state);
+  let changed = needsMigration;
+  const palette = wtPalette();
+  if (JSON.stringify(state.tracker.weekdayColors || {}) !== JSON.stringify(palette)) {
+    state.tracker.weekdayColors = palette;
+    changed = true;
+  }
+  state.tracker.weeks.forEach(week => {
+    if (!week.id) { week.id = 'wtweek_' + uid(); changed = true; }
+    if (!week.isBreak) {
+      const weekStart = wtMondayForDate(week.weekStart || week.date || today());
+      if (week.weekStart !== weekStart) { week.weekStart = weekStart; changed = true; }
+    }
+    if (!Array.isArray(week.rows)) { week.rows = []; changed = true; }
+    week.rows.forEach(row => { if (wtNormalizeRow(row)) changed = true; });
+  });
+  (state.trackerSemesters || []).forEach(semester => {
+    (semester.subjects || []).forEach(subject => {
+      const dayKey = WT_WEEKDAY_BY_KEY[subject.dayKey] ? subject.dayKey : wtDayKeyFromLegacy(subject.day, subject.dayClass);
+      const day = WT_WEEKDAY_BY_KEY[dayKey];
+      if (!subject.id) { subject.id = 'wtsub_' + uid(); changed = true; }
+      if (subject.dayKey !== dayKey) { subject.dayKey = dayKey; changed = true; }
+      if (subject.day !== day.short) { subject.day = day.short; changed = true; }
+      if (subject.dayClass !== day.className) { subject.dayClass = day.className; changed = true; }
+    });
+  });
+  if (needsMigration) {
+    (state.trackerSemesters || []).forEach(semester => {
+      if (wtReconcileSemesterWeeks(semester.id, { seedLegacy:true })) changed = true;
+    });
+  }
+  if (state.tracker.weekdayMigrationVersion !== WT_MIGRATION_VERSION) {
+    state.tracker.weekdayMigrationVersion = WT_MIGRATION_VERSION;
+    changed = true;
+  }
+  if (changed) saveState();
+  return changed;
+}
+
+function wtSortedRows(rows = []) {
+  return rows.map((row,index) => ({ row, index }))
+    .sort((a,b) => (WT_WEEKDAY_BY_KEY[a.row.dayKey]?.offset ?? 0) - (WT_WEEKDAY_BY_KEY[b.row.dayKey]?.offset ?? 0) || a.index - b.index)
+    .map(item => item.row);
+}
+
+function wtFindRow(weekId, rowId) {
+  const week = state.tracker.weeks.find(item => item.id === weekId);
+  return { week, row:week?.rows?.find(item => item.id === rowId) || null };
+}
+
+function wtRowDate(week, row) {
+  return wtAddDays(week.weekStart, WT_WEEKDAY_BY_KEY[row.dayKey]?.offset || 0);
+}
+
+function wtFormatRowDate(value) {
+  const date = wtDateFromYmd(value);
+  if (!date) return 'Date needed';
+  return `${WT_WEEKDAYS[(date.getDay()+6)%7].short} ${date.getDate()} ${date.toLocaleDateString(undefined,{month:'short'})}`;
+}
+
+function wtFormatFullDate(value) {
+  const date = wtDateFromYmd(value);
+  return date ? date.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}) : '';
+}
+
+function wtWeekRange(weekStart) {
+  const start = wtDateFromYmd(weekStart);
+  const end = wtDateFromYmd(wtAddDays(weekStart,6));
+  if (!start || !end) return 'Choose a week';
+  const startMonth = start.toLocaleDateString(undefined,{month:'short'});
+  const endMonth = end.toLocaleDateString(undefined,{month:'short'});
+  return startMonth === endMonth
+    ? `${start.getDate()}-${end.getDate()} ${endMonth} ${end.getFullYear()}`
+    : `${start.getDate()} ${startMonth}-${end.getDate()} ${endMonth} ${end.getFullYear()}`;
+}
+
+function wtFindDateFocus(weeks, targetDate = today()) {
+  const target = wtDateFromYmd(targetDate);
+  const dated = weeks.filter(week => !week.isBreak && wtDateFromYmd(week.weekStart));
+  if (!target || !dated.length) return { week:null, exact:false };
+  const exact = dated.find(week => targetDate >= week.weekStart && targetDate <= wtAddDays(week.weekStart,6));
+  if (exact) return { week:exact, exact:true };
+  const ranked = dated.map(week => {
+    const start = wtDateFromYmd(week.weekStart);
+    const end = wtDateFromYmd(wtAddDays(week.weekStart,6));
+    const distance = target < start ? start-target : target > end ? target-end : 0;
+    return { week, distance };
+  }).sort((a,b) => a.distance-b.distance);
+  return { week:ranked[0]?.week || null, exact:false };
+}
+
+function wtGetOverdueItems(weeks, targetDate = today()) {
+  const items = [];
+  weeks.filter(week => !week.isBreak).forEach(week => {
+    (week.rows || []).forEach(row => {
+      const rowDate = wtRowDate(week,row);
+      if (!row.noClass && rowDate && rowDate < targetDate) {
+        const missing = WT_CHECKS.filter(check => !row.checks?.[check.key]);
+        if (missing.length) items.push({ week, row, date:rowDate, missing });
+      }
+    });
+  });
+  return items.sort((a,b) => a.date.localeCompare(b.date));
+}
+
+function wtSetPageForWeek(weeks, weekId) {
+  const index = weeks.findIndex(week => week.id === weekId);
+  if (index >= 0) wtWeekPage = Math.floor(index / WT_PAGE_SIZE);
+}
+
+function openWeeklyAtToday() {
+  ensureTrackerSemesters();
+  ensureWeeklyTrackerData();
+  const semId = state.activeSemTracker || 'Y3-S1';
+  const weeks = state.tracker.weeks.filter(week => (week.semesterId || 'Y3-S1') === semId);
+  const focus = wtFindDateFocus(weeks,today());
+  if (focus.week) {
+    wtSetPageForWeek(weeks,focus.week.id);
+    wtPendingFocusTarget = { weekId:focus.week.id, date:focus.exact ? today() : '' };
+  }
   renderWeekly();
+}
+
+function jumpWeeklyToToday() {
+  openWeeklyAtToday();
+}
+
+function reviewWeeklyOverdue() {
+  const semId = state.activeSemTracker || 'Y3-S1';
+  const weeks = state.tracker.weeks.filter(week => (week.semesterId || 'Y3-S1') === semId);
+  const first = wtGetOverdueItems(weeks)[0];
+  if (!first) { showToast('No overdue Weekly items'); return; }
+  wtSetPageForWeek(weeks,first.week.id);
+  wtPendingFocusTarget = { weekId:first.week.id, date:first.date };
+  renderWeekly();
+}
+
+function wtRunPendingFocus() {
+  const target = wtPendingFocusTarget;
+  wtPendingFocusTarget = null;
+  if (!target) return;
+  setTimeout(() => {
+    const dateMatches = target.date ? Array.from(document.querySelectorAll(`[data-wt-date="${target.date}"]`)) : [];
+    const weekMatches = Array.from(document.querySelectorAll(`[data-wt-week="${target.weekId}"]`));
+    const element = [...dateMatches,...weekMatches].find(item => {
+      const rect = item.getBoundingClientRect();
+      return item.offsetParent !== null && rect.width > 0 && rect.height > 0;
+    });
+    if (!element) return;
+    element.classList.add('wt-scroll-focus');
+    element.scrollIntoView({ behavior:'auto', block:window.matchMedia('(max-width:800px)').matches ? 'center' : 'nearest' });
+    setTimeout(() => element.classList.remove('wt-scroll-focus'),1500);
+  },350);
+}
+
+function wtDayOptions(selectedKey) {
+  return WT_WEEKDAYS.map(day => `<option value="${day.key}" ${day.key===selectedKey?'selected':''}>${day.label}</option>`).join('');
+}
+
+function wtWeekStats(rows) {
+  const activeRows = rows.filter(row => !row.noClass);
+  const done = activeRows.reduce((sum,row) => sum + WT_CHECKS.filter(check => row.checks?.[check.key]).length, 0);
+  const max = activeRows.length * WT_CHECKS.length;
+  return { done, max, left:Math.max(0,max-done), pct:max ? Math.round(done/max*100) : 100 };
+}
+
+function wtRowStyle(dayKey) {
+  const color = wtPalette()[dayKey] || WT_DEFAULT_COLORS.mon;
+  return `--wt-day-color:${color};--wt-day-bg:${wtColorAlpha(color,0.085)}`;
 }
 
 function addBreakWeek() {
   const weeks = getTrackerWeeks();
-  weeks.push({ id: uid(), label: 'BREAK', date: '', isBreak: true, rows: [] });
-  state.tracker = { weeks };
+  weeks.push({ id:'wtweek_' + uid(), label:'BREAK', date:'', weekStart:'', isBreak:true, rows:[], semesterId:state.activeSemTracker || 'Y3-S1' });
   saveState();
   renderWeekly();
 }
@@ -17937,74 +18638,31 @@ function deleteTrackerWeek(id) {
   });
 }
 
-function setWTCheck(weekId, rowIdx, field) {
-  const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (!week || !week.rows[rowIdx]) return;
-  week.rows[rowIdx].checks[field] = !week.rows[rowIdx].checks[field];
+function setWTCheck(weekId, rowId, field) {
+  const { row } = wtFindRow(weekId, rowId);
+  if (!row || !WT_CHECKS.some(check => check.key === field)) return;
+  row.checks[field] = !row.checks[field];
   saveState();
   renderWeekly();
 }
 
-function setWTNote(weekId, rowIdx, field, val) {
-  const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (!week || !week.rows[rowIdx]) return;
-  week.rows[rowIdx][field] = val;
+function setWTNote(weekId, rowId, field, val) {
+  const { row } = wtFindRow(weekId, rowId);
+  if (!row || field !== 'note') return;
+  row.note = val;
   saveState();
 }
 
-function setWTNoClass(weekId, rowIdx) {
-  const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (!week || !week.rows[rowIdx]) return;
-  week.rows[rowIdx].noClass = !week.rows[rowIdx].noClass;
+function setWTNoClass(weekId, rowId) {
+  const { row } = wtFindRow(weekId, rowId);
+  if (!row) return;
+  row.noClass = !row.noClass;
   saveState();
   renderWeekly();
 }
 
 function wtDayClassFor(day) {
-  const d = String(day || '').toLowerCase();
-  if (d.startsWith('mon')) return 'day-mon';
-  if (d.startsWith('tue')) return 'day-tue';
-  if (d.startsWith('we') || d.startsWith('wed')) return 'day-wed';
-  if (d.startsWith('thu')) return 'day-thu';
-  if (d.startsWith('fri')) return 'day-fri';
-  return '';
-}
-
-function updateWTRow(weekId, rowIdx, field, val) {
-  const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (!week || !week.rows[rowIdx]) return;
-  week.rows[rowIdx][field] = val;
-  if (field === 'day') week.rows[rowIdx].dayClass = wtDayClassFor(val);
-  saveState();
-  renderWeekly();
-}
-
-function addWTRow(weekId) {
-  const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (!week || week.isBreak) return;
-  if (!Array.isArray(week.rows)) week.rows = [];
-  week.rows.push({
-    day: 'Mon',
-    subject: 'New Course',
-    dayClass: 'day-mon',
-    noClass: false,
-    checks: { classNote:false, hw:false, summary:false, finalCheck:false },
-    note: ''
-  });
-  saveState();
-  renderWeekly();
-}
-
-function deleteWTRow(weekId, rowIdx) {
-  const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (!week || !Array.isArray(week.rows)) return;
-  if (week.rows.length <= 1) {
-    showToast('Keep at least one course row in a week.', '#f7c06a');
-    return;
-  }
-  week.rows.splice(rowIdx, 1);
-  saveState();
-  renderWeekly();
+  return WT_WEEKDAY_BY_KEY[wtDayKeyFromLegacy(day)]?.className || 'day-mon';
 }
 
 function setWTWeekLabel(weekId, val) {
@@ -18012,10 +18670,18 @@ function setWTWeekLabel(weekId, val) {
   if (week) { week.label = val; saveState(); }
 }
 
-function setWTWeekDate(weekId, val) {
+function setWTWeekStart(weekId, val) {
   const week = state.tracker.weeks.find(w => w.id === weekId);
-  if (week) { week.date = val; saveState(); renderWeekly(); }
+  if (!week) return;
+  const monday = wtMondayForDate(val);
+  if (!monday) return;
+  week.weekStart = monday;
+  week.date = monday;
+  saveState();
+  renderWeekly();
 }
+
+function setWTWeekDate(weekId, val) { setWTWeekStart(weekId, val); }
 
 function setWTWeekEvent(weekId, val) {
   const week = state.tracker.weeks.find(w => w.id === weekId);
@@ -18041,86 +18707,116 @@ function renderWeekly() {
   if (!container) return;
   if (!state.tracker) state.tracker = { weeks: [] };
   ensureTrackerSemesters();
+  ensureWeeklyTrackerData();
   const allWeeks = state.tracker.weeks;
   const semId = state.activeSemTracker || 'Y3-S1';
   const weeks = allWeeks.filter(w => (w.semesterId || 'Y3-S1') === semId);
   const semSubjects = getActiveSemSubjects();
   const semName = (state.trackerSemesters||[]).find(s=>s.id===semId)?.name || 'Current Semester';
   const semPills = (state.trackerSemesters||[]).map(s =>
-    `<button class="wt-sem-pill ${s.id===semId?'active':''}" onclick="switchSemTracker('${s.id}')">${s.name}</button>`
+    `<button class="wt-sem-pill ${s.id===semId?'active':''}" onclick="switchSemTracker('${s.id}')">${escapeHtml(s.name)}</button>`
   ).join(' ');
   const pageWeeks = weeks.slice(wtWeekPage * WT_PAGE_SIZE, (wtWeekPage+1) * WT_PAGE_SIZE);
   const lbl = document.getElementById('weekGroupLabel');
-  if (lbl) lbl.textContent = semName;
-  const CHECKS = [
-    { key:'classNote', label:'Class Note' },
-    { key:'hw', label:'HW / Exercise' },
-    { key:'summary', label:'Summary' },
-    { key:'finalCheck', label:'Final ✓' },
-  ];
-  let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
-    ${semPills}
-    <button onclick="addTrackerSemester()" style="padding:4px 10px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text-muted);cursor:pointer;font-family:Syne,sans-serif;font-size:11px;font-weight:700;">+ New Semester</button>
-    <button onclick="editTrackerSemSubjects('${semId}')" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-family:Syne,sans-serif;font-size:11px;font-weight:700;">Edit Subjects</button>
+  if (lbl) lbl.textContent = `${semName} · ${weeks.length} week${weeks.length===1?'':'s'}`;
+  const palette = wtPalette();
+  const todayDate = today();
+  const dateFocus = wtFindDateFocus(weeks,todayDate);
+  const overdueItems = wtGetOverdueItems(weeks,todayDate);
+  const overdueMissing = overdueItems.reduce((sum,item) => sum + item.missing.length,0);
+  const todayCourses = dateFocus.exact && dateFocus.week
+    ? (dateFocus.week.rows || []).filter(row => wtRowDate(dateFocus.week,row) === todayDate && !row.noClass)
+    : [];
+  const focusStatus = !dateFocus.week
+    ? 'No dated week is available in this semester yet.'
+    : dateFocus.exact
+      ? `${dateFocus.week.label || 'Current week'} · ${wtWeekRange(dateFocus.week.weekStart)} · ${todayCourses.length ? `${todayCourses.length} course${todayCourses.length===1?'':'s'} today` : 'No class scheduled today'}`
+      : `No tracked week covers today. Closest: ${dateFocus.week.label || 'Week'} · ${wtWeekRange(dateFocus.week.weekStart)}`;
+  const overduePreview = overdueItems.slice(0,4).map(item => `<span class="wt-overdue-item" title="${escapeHtml(item.missing.map(check=>check.label).join(', '))}">${escapeHtml(wtFormatRowDate(item.date))} · ${escapeHtml(item.row.subject || 'Course')} · ${item.missing.length} left</span>`).join('');
+  let html = `<div class="wt-focus-strip">
+    <div><div class="wt-focus-kicker">Today</div><div class="wt-focus-date">${escapeHtml(wtFormatFullDate(todayDate))}</div></div>
+    <div class="wt-focus-status">${escapeHtml(focusStatus)}</div>
+    <button class="btn btn-ghost btn-sm" onclick="jumpWeeklyToToday()" ${dateFocus.week?'':'disabled'}>${dateFocus.exact?'Jump to Today':'Show Closest Week'}</button>
+  </div>
+  ${overdueItems.length ? `<div class="wt-overdue-banner">
+    <div><div class="wt-overdue-title">${overdueMissing} overdue item${overdueMissing===1?'':'s'}</div><div class="wt-overdue-meta">${overdueItems.length} past class${overdueItems.length===1?'':'es'} still incomplete</div></div>
+    <div class="wt-overdue-list">${overduePreview}</div>
+    <button class="btn btn-ghost btn-sm" onclick="reviewWeeklyOverdue()">Review overdue</button>
+  </div>` : ''}
+  <div class="wt-toolbar">
+    <div class="wt-toolbar-main">${semPills}<button class="wt-sem-pill" onclick="addTrackerSemester()">+ Semester</button></div>
+    <div class="wt-toolbar-actions">
+      <button class="btn btn-ghost btn-sm" onclick="editTrackerSemSubjects('${semId}')">Edit Subjects (${semSubjects.length})</button>
+      <button class="btn btn-ghost btn-sm" onclick="openWTWeekdayColors()">Weekday Colors</button>
+      <button class="btn btn-ghost btn-sm" onclick="prevWeekGroup()" title="Previous weeks">←</button>
+      <button class="btn btn-ghost btn-sm" onclick="nextWeekGroup()" title="Next weeks">→</button>
+      <button class="btn btn-primary btn-sm" onclick="addTrackerWeek()">+ Add Week</button>
+    </div>
+  </div>
+  <div class="wt-toolbar">
+    <div class="wt-weekday-strip">${WT_WEEKDAYS.map(day => `<span class="wt-weekday-chip" style="--wt-day-color:${palette[day.key]}">${day.short}</span>`).join('')}</div>
+    <div class="wt-status-legend" style="font-size:10px;color:var(--text-muted);font-weight:800;"><span style="color:var(--green);">✓ Done</span><span>No class</span><span style="color:var(--red);">Break</span></div>
   </div>`;
   if (!weeks.length) {
-    container.innerHTML = html + `<div style="color:var(--text-muted);font-family:'Space Mono',monospace;font-size:13px;padding:24px 0;">No weeks yet for "${semName}". Click "+ Add Week" to start!</div>`;
+    container.innerHTML = html + `<div style="border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-family:'Space Mono',monospace;font-size:12px;padding:28px;text-align:center;">No weeks yet for “${escapeHtml(semName)}”. Add the first week to start.</div>`;
+    wtRunPendingFocus();
     return;
   }
-  html += `<table class="wt-table"><thead><tr>
-    <th style="min-width:110px;">Week</th><th style="min-width:38px;">Day</th><th style="min-width:140px;">Subject</th>
-    ${CHECKS.map(c=>`<th>${c.label}</th>`).join('')}
-    <th style="min-width:120px;">Note</th><th style="min-width:112px;">Progress</th>
+  let desktop = `<div class="wt-desktop wt-table-wrap"><table class="wt-table"><thead><tr>
+    <th>Week</th><th>Date</th><th>Subject</th>${WT_CHECKS.map(check=>`<th>${check.label}</th>`).join('')}<th>Note</th><th>Progress</th>
   </tr></thead><tbody>`;
+  let mobile = `<div class="wt-mobile">`;
   pageWeeks.forEach(week => {
     if (week.isBreak) {
-      html += `<tr class="wt-break-row"><td colspan="9">BREAK &nbsp;<input value="${week.event||''}" placeholder="note..." onchange="setWTWeekEvent('${week.id}',this.value)" style="background:transparent;border:none;color:#fff;font-family:'Syne',sans-serif;font-size:11px;outline:none;opacity:0.85;"><button onclick="deleteTrackerWeek('${week.id}')" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:12px;margin-left:8px;">x</button></td></tr>`;
+      desktop += `<tr class="wt-break-row"><td colspan="8">BREAK · <input value="${escapeHtml(week.event||'')}" placeholder="Add a note" onchange="setWTWeekEvent('${week.id}',this.value)" style="background:transparent;border:none;color:#fff;font-family:'Syne',sans-serif;font-size:11px;outline:none;opacity:.9;"><button class="wt-icon-btn danger" onclick="deleteTrackerWeek('${week.id}')" title="Delete break">×</button></td></tr>`;
+      mobile += `<section class="wt-mobile-week-head" style="border-color:rgba(247,106,106,.55);"><div class="wt-week-heading"><strong style="color:var(--red);">BREAK</strong><button class="wt-icon-btn danger" onclick="deleteTrackerWeek('${week.id}')" title="Delete break">×</button></div><input class="wt-note-input" value="${escapeHtml(week.event||'')}" placeholder="Break note" onchange="setWTWeekEvent('${week.id}',this.value)"></section>`;
       return;
     }
-    const rows = week.rows && week.rows.length ? week.rows : semSubjects.map(s=>({day:s.day,subject:s.subject,dayClass:s.dayClass,noClass:false,checks:{classNote:false,hw:false,summary:false,finalCheck:false},note:''}));
+    const rows = week.rows && week.rows.length ? wtSortedRows(week.rows) : semSubjects.map(subject => wtNewRowFromSubject(subject));
     if (!week.rows || !week.rows.length) { week.rows = rows; }
-    const allChecks = rows.reduce((a,r)=>a+Object.values(r.checks||{}).filter(Boolean).length,0);
-    const maxChecks = rows.filter(r=>!r.noClass).length * CHECKS.length;
-    const leftChecks = Math.max(0,maxChecks-allChecks);
-    const progressPct = maxChecks ? Math.round((allChecks / maxChecks) * 100) : 100;
+    const stats = wtWeekStats(rows);
+    const range = wtWeekRange(week.weekStart);
     rows.forEach((row, ri) => {
       const nc = row.noClass;
-      html += `<tr class="${nc?'wt-noclass-row':''} ${row.dayClass||''}">`;
+      const day = WT_WEEKDAY_BY_KEY[row.dayKey] || WT_WEEKDAYS[0];
+      const rowDate = wtRowDate(week,row);
+      const isDayStart = ri === 0 || rows[ri-1].dayKey !== row.dayKey;
+      desktop += `<tr class="wt-date-row ${isDayStart?'day-start':''} ${nc?'wt-noclass-row':''} ${rowDate===todayDate?'wt-today-row':''}" data-wt-week="${week.id}" data-wt-date="${rowDate}" style="${wtRowStyle(row.dayKey)}">`;
       if (ri===0) {
-        html += `<td rowspan="${rows.length}" style="vertical-align:top;padding-top:8px;border-right:2px solid var(--border);">
-          <input class="wt-note-input" value="${week.label||''}" onchange="setWTWeekLabel('${week.id}',this.value)" style="font-weight:800;font-size:12px;color:var(--text);width:75px;">
-          <br><input type="date" value="${week.date||''}" onchange="setWTWeekDate('${week.id}',this.value)" style="background:transparent;border:none;color:var(--text-muted);font-size:9px;font-family:'Space Mono',monospace;width:100%;outline:none;">
-          <div style="display:flex;gap:3px;margin-top:4px;flex-wrap:wrap;">
-            <button onclick="addWTRow('${week.id}')" style="font-size:9px;padding:2px 4px;border-radius:3px;border:1px solid var(--border);background:rgba(106,247,176,0.1);color:var(--green);cursor:pointer;">+ROW</button>
-            <button onclick="addBreakAfter('${week.id}')" style="font-size:9px;padding:2px 4px;border-radius:3px;border:1px solid var(--border);background:rgba(247,106,106,0.1);color:var(--red);cursor:pointer;">+BREAK</button>
-            <button onclick="deleteTrackerWeek('${week.id}')" style="font-size:9px;padding:2px 4px;border-radius:3px;border:1px solid var(--border);color:var(--text-muted);background:transparent;cursor:pointer;">✕</button>
-          </div></td>`;
+        desktop += `<td rowspan="${rows.length}" class="wt-week-cell"><div class="wt-week-heading"><div><input class="wt-note-input wt-week-label" value="${escapeHtml(week.label||'')}" onchange="setWTWeekLabel('${week.id}',this.value)"><div class="wt-week-range">${escapeHtml(range)}</div></div></div><label class="wt-week-range" style="display:block;margin-top:10px;">WEEK OF</label><input class="wt-week-start" type="date" value="${escapeHtml(week.weekStart||'')}" onchange="setWTWeekStart('${week.id}',this.value)"><div class="wt-week-controls"><button class="wt-icon-btn" onclick="addBreakAfter('${week.id}')" title="Add break after">B</button><button class="wt-icon-btn danger" onclick="deleteTrackerWeek('${week.id}')" title="Delete week">×</button></div></td>`;
       }
-      html += `<td class="wt-day-cell"><input class="wt-note-input" value="${escapeHtml(row.day||'')}" onchange="updateWTRow('${week.id}',${ri},'day',this.value)" style="width:42px;text-align:center;font-weight:800;"></td>`;
-      html += `<td class="wt-subject-cell" title="This row is editable only for this week">
-        <div style="display:flex;gap:5px;align-items:center;">
-          <input class="wt-note-input" value="${escapeHtml(row.subject||'')}" onchange="updateWTRow('${week.id}',${ri},'subject',this.value)" style="min-width:100px;font-weight:800;">
-          <button onclick="setWTNoClass('${week.id}',${ri})" style="font-size:9px;padding:2px 5px;border-radius:4px;border:1px solid ${nc?'var(--green)':'var(--border)'};background:${nc?'rgba(106,247,176,0.12)':'transparent'};color:${nc?'var(--green)':'var(--text-muted)'};cursor:pointer;">${nc?'No class':'Class'}</button>
-          <button onclick="deleteWTRow('${week.id}',${ri})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;">✕</button>
-        </div>
-      </td>`;
-      CHECKS.forEach(c => {
-        const checked = !nc && (row.checks?.[c.key]||false);
-        const cls = c.key==='finalCheck'?(checked?'final-checked':''):(checked?'checked':'');
-        html += `<td class="wt-check-cell">${nc?'<span style="color:var(--text-muted);">—</span>':`<div class="wt-check ${cls}" onclick="setWTCheck('${week.id}',${ri},'${c.key}')">${checked?'✓':''}</div>`}</td>`;
+      desktop += `<td class="wt-date-cell"><div class="wt-date-badge" title="${escapeHtml(wtFormatFullDate(rowDate))}"><span class="wt-date-dot"></span><div class="wt-date-main">${escapeHtml(wtFormatRowDate(rowDate))}</div></div></td>`;
+      desktop += `<td class="wt-subject-cell"><div class="wt-subject-row"><span class="wt-subject-name" title="${escapeHtml(row.subject||'')}">${escapeHtml(row.subject||'New Subject')}</span><button class="wt-noclass-toggle ${nc?'active':''}" onclick="setWTNoClass('${week.id}','${row.id}')" title="${nc?'Restore class for this week':'Mark no class for this week'}">${nc?'Class resumes':'No class'}</button></div></td>`;
+      WT_CHECKS.forEach(check => {
+        const checked = !nc && !!row.checks?.[check.key];
+        const cls = check.key==='finalCheck'?(checked?'final-checked':''):(checked?'checked':'');
+        desktop += `<td class="wt-check-cell">${nc?'<span style="color:var(--text-muted);">—</span>':`<div class="wt-check ${cls}" onclick="setWTCheck('${week.id}','${row.id}','${check.key}')" title="${check.label}">${checked?'✓':''}</div>`}</td>`;
       });
-      html += `<td class="wt-note-cell"><input class="wt-note-input" value="${(row.note||'').replace(/"/g,'&quot;')}" placeholder="note…" onchange="setWTNote('${week.id}',${ri},'note',this.value)"></td>`;
+      desktop += `<td class="wt-note-cell"><input class="wt-note-input" value="${escapeHtml(row.note||'')}" placeholder="Add note" onchange="setWTNote('${week.id}','${row.id}','note',this.value)"></td>`;
       if (ri===0) {
-        html += `<td class="wt-count-cell wt-progress-cell" rowspan="${rows.length}">
-          <div class="wt-progress-text"><span class="wt-done-count">${allChecks}/${maxChecks} done</span><span class="wt-left-count">· ${leftChecks} left</span></div>
-          <div class="wt-progress-bar"><div class="wt-progress-fill" style="width:${progressPct}%;"></div></div>
-        </td>`;
+        desktop += `<td class="wt-progress-cell" rowspan="${rows.length}"><div class="wt-progress-text"><span class="wt-done-count">${stats.done}/${stats.max} done</span><span class="wt-left-count">${stats.left} left</span></div><div class="wt-progress-bar"><div class="wt-progress-fill" style="width:${stats.pct}%;"></div></div></td>`;
       }
-      html += `</tr>`;
+      desktop += `</tr>`;
     });
+
+    mobile += `<section class="wt-mobile-week" data-wt-week="${week.id}"><div class="wt-mobile-week-head"><div class="wt-week-heading"><div><input class="wt-note-input wt-week-label" value="${escapeHtml(week.label||'')}" onchange="setWTWeekLabel('${week.id}',this.value)"><div class="wt-week-range">${escapeHtml(range)} · ${stats.done}/${stats.max} done</div></div><button class="wt-icon-btn danger" onclick="deleteTrackerWeek('${week.id}')" title="Delete week">×</button></div><div class="wt-week-controls"><input class="wt-week-start" type="date" value="${escapeHtml(week.weekStart||'')}" onchange="setWTWeekStart('${week.id}',this.value)"><button class="btn btn-ghost btn-sm" onclick="addBreakAfter('${week.id}')">+ Break</button></div><div class="wt-progress-bar" style="margin-top:8px;"><div class="wt-progress-fill" style="width:${stats.pct}%;"></div></div></div>`;
+    WT_WEEKDAYS.forEach(day => {
+      const dayRows = rows.filter(row => row.dayKey === day.key);
+      if (!dayRows.length) return;
+      const dayDate = wtAddDays(week.weekStart,day.offset);
+      mobile += `<div class="wt-mobile-day ${dayDate===todayDate?'wt-today-row':''}" data-wt-week="${week.id}" data-wt-date="${dayDate}" style="${wtRowStyle(day.key)}"><div class="wt-mobile-day-head"><div class="wt-date-badge" title="${escapeHtml(wtFormatFullDate(dayDate))}"><span class="wt-date-dot"></span><div><div class="wt-date-main">${escapeHtml(wtFormatRowDate(dayDate))}</div><div class="wt-date-full">${escapeHtml(dayDate)}</div></div></div><strong>${dayRows.length}</strong></div><div>`;
+      dayRows.forEach(row => {
+        const nc = row.noClass;
+        mobile += `<article class="wt-mobile-subject ${nc?'wt-noclass-row':''}"><div class="wt-mobile-subject-head"><span class="wt-subject-name" title="${escapeHtml(row.subject||'')}">${escapeHtml(row.subject||'New Subject')}</span><button class="wt-noclass-toggle ${nc?'active':''}" onclick="setWTNoClass('${week.id}','${row.id}')" title="${nc?'Restore class for this week':'Mark no class for this week'}">${nc?'Class resumes':'No class'}</button></div><div class="wt-mobile-checks">${WT_CHECKS.map(check => { const checked=!nc&&!!row.checks?.[check.key]; const cls=check.key==='finalCheck'?(checked?'final-checked':''):(checked?'checked':''); return `<div class="wt-mobile-check"><div class="wt-check ${cls}" onclick="setWTCheck('${week.id}','${row.id}','${check.key}')">${checked?'✓':''}</div><span>${check.short}</span></div>`; }).join('')}</div><div class="wt-mobile-note"><input class="wt-note-input" value="${escapeHtml(row.note||'')}" placeholder="Add note" onchange="setWTNote('${week.id}','${row.id}','note',this.value)"></div></article>`;
+      });
+      mobile += `</div></div>`;
+    });
+    mobile += `</section>`;
   });
-  html += `</tbody></table>`;
-  container.innerHTML = html;
+  desktop += `</tbody></table></div>`;
+  mobile += `</div>`;
+  container.innerHTML = html + desktop + mobile;
+  wtRunPendingFocus();
 }
 
 function addTrackerWeek() {
@@ -18130,18 +18826,23 @@ function addTrackerWeek() {
   const semSubjects = getActiveSemSubjects();
   const semWeeks = state.tracker.weeks.filter(w => (w.semesterId || 'Y3-S1')===semId && !w.isBreak);
   const nextNum = semWeeks.length + 1;
-  let nextDate = today();
+  let nextDate = wtMondayForDate(today());
   const allSemW = state.tracker.weeks.filter(w => (w.semesterId || 'Y3-S1')===semId);
-  if (allSemW.length > 0 && allSemW[allSemW.length-1].date) {
-    const d = new Date(allSemW[allSemW.length-1].date+'T00:00:00');
-    d.setDate(d.getDate()+7);
-    nextDate = d.toISOString().slice(0,10);
+  const lastRegularWeek = [...allSemW].reverse().find(week => !week.isBreak && week.weekStart);
+  if (lastRegularWeek) {
+    nextDate = wtAddDays(lastRegularWeek.weekStart,7);
   }
-  const rows = semSubjects.map(s=>({day:s.day,subject:s.subject,dayClass:s.dayClass,noClass:false,checks:{classNote:false,hw:false,summary:false,finalCheck:false},note:''}));
-  state.tracker.weeks.push({id:uid(),label:`Week ${nextNum}`,date:nextDate,isBreak:false,rows,semesterId:semId});
+  const rows = semSubjects.map(wtNewRowFromSubject);
+  state.tracker.weeks.push({id:'wtweek_' + uid(),label:`Week ${nextNum}`,date:nextDate,weekStart:nextDate,isBreak:false,rows,semesterId:semId});
   saveState();
   wtWeekPage = Math.floor(allSemW.length / WT_PAGE_SIZE);
   renderWeekly();
+}
+
+function wtNewRowFromSubject(subject = {}) {
+  const dayKey = WT_WEEKDAY_BY_KEY[subject.dayKey] ? subject.dayKey : wtDayKeyFromLegacy(subject.day,subject.dayClass);
+  const day = WT_WEEKDAY_BY_KEY[dayKey] || WT_WEEKDAYS[0];
+  return { id:'wtrow_' + uid(), sourceSubjectId:subject.id || '', day:day.short, dayKey:day.key, subject:String(subject.subject||'New Course'), dayClass:day.className, noClass:false, checks:{classNote:false,hw:false,summary:false,finalCheck:false}, note:'' };
 }
 
 function addBreakAfter(weekId) {
@@ -18149,10 +18850,39 @@ function addBreakAfter(weekId) {
   const idx = weeks.findIndex(w => w.id === weekId);
   if (idx < 0) return;
   const semId = weeks[idx].semesterId || 'sem_default';
-  weeks.splice(idx + 1, 0, { id: uid(), label: 'BREAK', date: '', isBreak: true, rows: [], semesterId: semId });
-  state.tracker = { weeks };
+  weeks.splice(idx + 1, 0, { id:'wtweek_' + uid(), label:'BREAK', date:'', weekStart:wtAddDays(weeks[idx].weekStart,7), isBreak:true, rows:[], semesterId:semId });
   saveState();
   renderWeekly();
+}
+
+function openWTWeekdayColors() {
+  renderWTWeekdayColorGrid();
+  openModal('weekdayColorsModal');
+}
+
+function renderWTWeekdayColorGrid() {
+  const grid = document.getElementById('weekdayColorGrid');
+  if (!grid) return;
+  const palette = wtPalette();
+  grid.innerHTML = WT_WEEKDAYS.map(day => `<label class="wt-palette-row"><input type="color" value="${palette[day.key]}" oninput="setWTWeekdayColor('${day.key}',this.value)"><span class="wt-palette-copy"><span class="wt-palette-name">${day.label}</span><span class="wt-palette-value" id="wtColorValue_${day.key}">${palette[day.key]}</span></span></label>`).join('');
+}
+
+function setWTWeekdayColor(dayKey, color) {
+  if (!WT_WEEKDAY_BY_KEY[dayKey]) return;
+  if (!state.tracker.weekdayColors) state.tracker.weekdayColors = { ...WT_DEFAULT_COLORS };
+  state.tracker.weekdayColors[dayKey] = wtNormalizeColor(color,WT_DEFAULT_COLORS[dayKey]);
+  const value = document.getElementById(`wtColorValue_${dayKey}`);
+  if (value) value.textContent = state.tracker.weekdayColors[dayKey];
+  saveState();
+  renderWeekly();
+}
+
+function resetWTWeekdayColors() {
+  state.tracker.weekdayColors = { ...WT_DEFAULT_COLORS };
+  saveState();
+  renderWTWeekdayColorGrid();
+  renderWeekly();
+  showToast('Weekday colors reset');
 }
 
 // ════════════════════════════════════════════════════════
@@ -18754,6 +19484,7 @@ function ensureTrackerSemesters() {
 }
 
 ensureTrackerSemesters();
+ensureWeeklyTrackerData();
 
 function getActiveSemSubjects() {
   ensureTrackerSemesters();
@@ -18777,7 +19508,7 @@ function openTrackerSemesterManager() {
 
 function showInlinePanel(id, html) {
   let el = document.getElementById(id);
-  if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText='position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:800;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.4);'; document.body.appendChild(el); }
+  if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText='position:fixed;top:clamp(12px,8vh,80px);left:50%;transform:translateX(-50%);z-index:800;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);'; document.body.appendChild(el); }
   el.innerHTML = html + `<button onclick="document.getElementById('${id}').remove()" style="position:absolute;top:10px;right:12px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;">✕</button>`;
   el.style.display = 'block';
 }
@@ -18806,9 +19537,9 @@ function confirmAddSemester() {
   let subjects;
   if (copyId) {
     const src = state.trackerSemesters.find(s=>s.id===copyId);
-    subjects = src ? src.subjects.map(s=>({...s})) : [...WT_SUBJECTS_BY_DAY];
+    subjects = src ? src.subjects.map(s=>({...s,id:'wtsub_' + uid()})) : WT_SUBJECTS_BY_DAY.map(s=>({...s,id:'wtsub_' + uid()}));
   } else {
-    subjects = [...WT_SUBJECTS_BY_DAY];
+    subjects = WT_SUBJECTS_BY_DAY.map(s=>({...s,id:'wtsub_' + uid()}));
   }
   state.trackerSemesters.push({ id, name, subjects });
   state.activeSemTracker = id;
@@ -18818,112 +19549,94 @@ function confirmAddSemester() {
   showToast(`📅 "${name}" created`);
 }
 
-function editTrackerSemSubjects() {
-  document.getElementById('trackerSemPanel')?.remove();
-  const sem = state.trackerSemesters?.find(s => s.id === state.activeSemTracker);
-  if (!sem) return;
-  const rows = sem.subjects.map((s,i) => `
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-      <input value="${s.day}" style="width:36px;" class="form-input" onchange="updateSemSubj('${sem.id}',${i},'day',this.value)" placeholder="Day">
-      <input value="${s.subject}" class="form-input" style="flex:1;" onchange="updateSemSubj('${sem.id}',${i},'subject',this.value)" placeholder="Subject">
-      <select class="form-input" style="width:80px;" onchange="updateSemSubj('${sem.id}',${i},'dayClass',this.value)">
-        ${['day-mon','day-tue','day-wed','day-thu','day-fri'].map(d=>`<option value="${d}" ${s.dayClass===d?'selected':''}>${d.replace('day-','')}</option>`).join('')}
-      </select>
-      <button onclick="removeSemSubj('${sem.id}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;flex-shrink:0;">✕</button>
-    </div>
-  `).join('');
-  showInlinePanel('semSubjEditor', `
-    <div style="font-weight:800;font-size:16px;margin-bottom:12px;">Edit Subjects — ${sem.name}</div>
-    <div id="semSubjRows" style="max-height:300px;overflow-y:auto;">${rows}</div>
-    <button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;" onclick="addSemSubj('${sem.id}')">+ Add Row</button>
-  `);
-}
-
-function updateSemSubj(semId, idx, field, val) {
-  const sem = state.trackerSemesters?.find(s => s.id === semId);
-  if (sem?.subjects[idx]) { sem.subjects[idx][field] = val; saveState(); }
-}
-function removeSemSubj(semId, idx) {
-  const sem = state.trackerSemesters?.find(s => s.id === semId);
-  if (sem) { sem.subjects.splice(idx,1); saveState(); editTrackerSemSubjects(); }
-}
-function addSemSubj(semId) {
-  const sem = state.trackerSemesters?.find(s => s.id === semId);
-  if (sem) { sem.subjects.push({day:'Mon',subject:'New Subject',dayClass:'day-mon'}); saveState(); editTrackerSemSubjects(); }
-}
-
-// ════════════════════════════════════════════════════════
-// IMPROVED DRAG-DROP REORDER IN DEFAULT MODE
-// ════════════════════════════════════════════════════════
 function editTrackerSemSubjects(semId = state.activeSemTracker) {
   document.getElementById('trackerSemPanel')?.remove();
   ensureTrackerSemesters();
+  ensureWeeklyTrackerData();
   const sem = state.trackerSemesters?.find(s => s.id === semId) || state.trackerSemesters[0];
   if (!sem) return;
   state.activeSemTracker = sem.id;
   saveState();
-  const semOptions = state.trackerSemesters.map(s => `<option value="${s.id}" ${s.id===sem.id?'selected':''}>${s.name}</option>`).join('');
-  const rows = sem.subjects.map((s,i) => `
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-      <input value="${s.day}" style="width:42px;" class="form-input" onchange="updateSemSubj('${sem.id}',${i},'day',this.value)" placeholder="Day">
-      <input value="${s.subject}" class="form-input" style="flex:1;" onchange="updateSemSubj('${sem.id}',${i},'subject',this.value)" placeholder="Subject">
-      <select class="form-input" style="width:82px;" onchange="updateSemSubj('${sem.id}',${i},'dayClass',this.value)">
-        ${['day-mon','day-tue','day-wed','day-thu','day-fri'].map(d=>`<option value="${d}" ${s.dayClass===d?'selected':''}>${d.replace('day-','')}</option>`).join('')}
-      </select>
-      <button onclick="removeSemSubj('${sem.id}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;flex-shrink:0;">x</button>
+  const semOptions = state.trackerSemesters.map(s => `<option value="${escapeHtml(s.id)}" ${s.id===sem.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('');
+  const sortedSubjects = sem.subjects.map((subject,index) => ({subject,index}))
+    .sort((a,b) => (WT_WEEKDAY_BY_KEY[a.subject.dayKey]?.offset ?? 0) - (WT_WEEKDAY_BY_KEY[b.subject.dayKey]?.offset ?? 0) || a.index-b.index)
+    .map(item => item.subject);
+  const rows = sortedSubjects.map(subject => {
+    const day = WT_WEEKDAY_BY_KEY[subject.dayKey] || WT_WEEKDAYS[0];
+    return `
+    <div class="wt-sem-subject-row" style="--wt-day-color:${wtPalette()[day.key]};">
+      <select class="form-input wt-day-select" onchange="updateSemSubj('${sem.id}','${subject.id}','dayKey',this.value)">${wtDayOptions(day.key)}</select>
+      <input value="${escapeHtml(subject.subject||'')}" class="form-input" onchange="updateSemSubj('${sem.id}','${subject.id}','subject',this.value)" placeholder="Subject">
+      <button class="wt-icon-btn danger" onclick="removeSemSubj('${sem.id}','${subject.id}')" title="Remove subject">×</button>
     </div>
-  `).join('');
+  `; }).join('');
   showInlinePanel('semSubjEditor', `
-    <div style="font-weight:800;font-size:16px;margin-bottom:12px;">Edit Semester Subjects</div>
+    <div style="font-weight:800;font-size:16px;margin-bottom:4px;">Edit Subjects</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">This is the shared course list for every week in the semester. Changes update all weeks while keeping each week's checks, notes, and no-class status.</div>
     <select class="form-input" style="margin-bottom:10px;" onchange="editTrackerSemSubjects(this.value)">${semOptions}</select>
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Each semester has its own subject list. New weeks use the selected semester's list.</div>
-    <div id="semSubjRows" style="max-height:300px;overflow-y:auto;">${rows}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-      <button class="btn btn-ghost btn-sm" onclick="addSemSubj('${sem.id}')">+ Add Row</button>
-      <button class="btn btn-primary btn-sm" onclick="applySemSubjectsToWeeks('${sem.id}')">Apply to this semester's weeks</button>
+    <div id="semSubjRows" style="max-height:min(48vh,420px);overflow-y:auto;padding-right:4px;">${rows}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;position:sticky;bottom:0;background:var(--surface);padding-top:10px;">
+      <button class="btn btn-ghost btn-sm" onclick="addSemSubj('${sem.id}')">+ Add Subject</button>
+      <button class="btn btn-primary btn-sm" onclick="closeSemSubjEditor()">Done</button>
     </div>
   `);
   renderWeekly();
 }
 
-function updateSemSubj(semId, idx, field, val) {
-  const sem = state.trackerSemesters?.find(s => s.id === semId);
-  if (sem?.subjects[idx]) { sem.subjects[idx][field] = val; saveState(); renderWeekly(); }
+function closeSemSubjEditor() {
+  document.getElementById('semSubjEditor')?.remove();
+  showToast('Semester course list updated');
 }
-function removeSemSubj(semId, idx) {
+
+function updateSemSubj(semId, subjectId, field, val) {
   const sem = state.trackerSemesters?.find(s => s.id === semId);
-  if (sem) { sem.subjects.splice(idx,1); saveState(); editTrackerSemSubjects(semId); }
+  const subject = sem?.subjects.find(item => item.id === subjectId);
+  if (!subject) return;
+  if (field === 'dayKey') {
+    const day = WT_WEEKDAY_BY_KEY[val] || WT_WEEKDAYS[0];
+    subject.dayKey = day.key;
+    subject.day = day.short;
+    subject.dayClass = day.className;
+  } else if (field === 'subject') {
+    subject.subject = String(val || '').trim() || 'Untitled Subject';
+  } else return;
+  wtReconcileSemesterWeeks(semId);
+  saveState();
+  renderWeekly();
+  if (field === 'dayKey') editTrackerSemSubjects(semId);
+}
+function removeSemSubj(semId, subjectId) {
+  const sem = state.trackerSemesters?.find(s => s.id === semId);
+  const subject = sem?.subjects.find(item => item.id === subjectId);
+  if (!sem || !subject || !confirm(`Remove "${subject.subject || 'this subject'}" from every week in ${sem.name || 'this semester'}? A recovery backup will be created first.`)) return;
+  pushAutoBackup(`Before removing ${subject.subject || 'semester subject'}`, state);
+  sem.subjects = sem.subjects.filter(item => item.id !== subjectId);
+  wtReconcileSemesterWeeks(semId);
+  saveState();
+  editTrackerSemSubjects(semId);
 }
 function addSemSubj(semId) {
   const sem = state.trackerSemesters?.find(s => s.id === semId);
-  if (sem) { sem.subjects.push({day:'Mon',subject:'New Subject',dayClass:'day-mon'}); saveState(); editTrackerSemSubjects(semId); }
+  if (!sem) return;
+  sem.subjects.push({id:'wtsub_' + uid(),day:'Mon',dayKey:'mon',subject:'New Subject',dayClass:'day-mon'});
+  wtReconcileSemesterWeeks(semId);
+  saveState();
+  editTrackerSemSubjects(semId);
 }
 
 function applySemSubjectsToWeeks(semId) {
   const sem = state.trackerSemesters?.find(s => s.id === semId);
   if (!sem) return;
-  state.tracker.weeks
-    .filter(w => (w.semesterId || 'Y3-S1') === semId && !w.isBreak)
-    .forEach(week => {
-      const oldRows = week.rows || [];
-      week.rows = sem.subjects.map(s => {
-        const old = oldRows.find(r => r.subject === s.subject) || {};
-        return {
-          day: s.day,
-          subject: s.subject,
-          dayClass: s.dayClass,
-          noClass: old.noClass || false,
-          checks: old.checks || {classNote:false,hw:false,summary:false,finalCheck:false},
-          note: old.note || '',
-          event: old.event || ''
-        };
-      });
-    });
+  pushAutoBackup(`Before applying ${sem.name || 'semester'} subjects`, state);
+  wtReconcileSemesterWeeks(semId);
   saveState();
   renderWeekly();
-  editTrackerSemSubjects(semId);
-  showToast('Semester subjects applied to existing weeks');
+  showToast('Semester subjects synced to every week');
 }
+
+// ════════════════════════════════════════════════════════
+// IMPROVED DRAG-DROP REORDER IN DEFAULT MODE
+// ════════════════════════════════════════════════════════
 
 let dragOverTaskId = null;
 
