@@ -37,6 +37,8 @@ Deployment behavior:
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` uses revisions and returns `409 STATE_CONFLICT` instead of silently replacing a newer account save.
+- Paired local Chrome and live admin v13 exchange changes in both directions every 30 minutes. Browser and local-disk saves remain immediate, while startup, missed-run, and manual `Sync Now` checks can run sooner.
+- Recovery Center reports the last attempt, last successful sync, direction, browser-to-cloud time, cloud-to-browser time, and next automatic sync. Conflicts preserve both copies and pause automation for an explicit choice.
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention.
 - `/api/version` reports the tested v13 release hash used by the daily publisher.
