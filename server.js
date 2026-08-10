@@ -21,7 +21,8 @@ const PBKDF2_KEY_LENGTH = 64;
 const PBKDF2_DIGEST = "sha512";
 const MAX_ACCOUNTS = Number(process.env.STUDYQUEST_MAX_ACCOUNTS || 5);
 const MAX_AUTH_BODY_BYTES = 64 * 1024;
-const MAX_STATE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_BYTES || 1024 * 1024);
+const MAX_STATE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_BYTES || 10 * 1024 * 1024);
+const MAX_STATE_ENVELOPE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_ENVELOPE_BYTES || 256 * 1024);
 const TEMP_PASSWORD_MAX_AGE_SECONDS = 24 * 60 * 60;
 const IS_HOSTED = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
 
@@ -58,6 +59,16 @@ function payloadTooLargeError(maxBytes) {
   const error = new Error(`Request body is too large. Limit is ${maxBytes} bytes.`);
   error.code = "PAYLOAD_TOO_LARGE";
   return error;
+}
+
+function stateTooLargePayload(stateBytes) {
+  return {
+    ok: false,
+    error: "STATE_TOO_LARGE",
+    stateBytes,
+    maxStateBytes: MAX_STATE_BYTES,
+    serverTime: new Date().toISOString(),
+  };
 }
 
 function send(req, res, status, body, headers = {}) {
@@ -886,7 +897,7 @@ async function handleState(req, res) {
     const state = await readJsonBody(req, MAX_STATE_BYTES);
     const stateBytes = Buffer.byteLength(JSON.stringify(state || null));
     if (stateBytes > MAX_STATE_BYTES) {
-      sendJson(req, res, 413, { ok: false, error: `Saved state is too large. Limit is ${MAX_STATE_BYTES} bytes.` });
+      sendJson(req, res, 413, stateTooLargePayload(stateBytes));
       return;
     }
     const result = await pool.query(
@@ -900,7 +911,10 @@ async function handleState(req, res) {
     sendJson(req, res, 200, {
       ok: true,
       revision: Number(result.rows[0]?.state_revision || 0),
-      savedAt: result.rows[0]?.state_updated_at || new Date().toISOString()
+      savedAt: result.rows[0]?.state_updated_at || new Date().toISOString(),
+      stateBytes,
+      maxStateBytes: MAX_STATE_BYTES,
+      serverTime: new Date().toISOString(),
     });
     return;
   }
@@ -923,16 +937,43 @@ async function createDailyStateBackup(client, row) {
     [row.username]
   );
   if (!existing.rowCount) {
-    await client.query(
-      `insert into state_backups (username, revision, state, reason)
-       values ($1, $2, $3::jsonb, 'daily')`,
-      [row.username, Number(row.state_revision || 0), JSON.stringify(row.state)]
+    const serialized = JSON.stringify(row.state);
+    const duplicate = await client.query(
+      `select 1 from state_backups
+       where username = $1 and state = $2::jsonb
+       order by created_at desc limit 1`,
+      [row.username, serialized]
     );
+    if (!duplicate.rowCount) {
+      await client.query(
+        `insert into state_backups (username, revision, state, reason)
+         values ($1, $2, $3::jsonb, 'daily')`,
+        [row.username, Number(row.state_revision || 0), serialized]
+      );
+    }
   }
   await client.query(
     "delete from state_backups where username = $1 and created_at < now() - interval '30 days'",
     [row.username]
   );
+}
+
+async function createMergeStateBackup(client, row) {
+  if (!row?.state) return false;
+  const serialized = JSON.stringify(row.state);
+  const duplicate = await client.query(
+    `select 1 from state_backups
+     where username = $1 and state = $2::jsonb
+     order by created_at desc limit 1`,
+    [row.username, serialized]
+  );
+  if (duplicate.rowCount) return false;
+  await client.query(
+    `insert into state_backups (username, revision, state, reason)
+     values ($1, $2, $3::jsonb, 'pre_merge')`,
+    [row.username, Number(row.state_revision || 0), serialized]
+  );
+  return true;
 }
 
 async function handleVersionedState(req, res) {
@@ -948,6 +989,9 @@ async function handleVersionedState(req, res) {
       state: user.state || null,
       revision: Number(user.state_revision || 0),
       updatedAt: user.state_updated_at || user.updated_at || null,
+      stateBytes: Number(user.state_bytes || 0),
+      maxStateBytes: MAX_STATE_BYTES,
+      serverTime: new Date().toISOString(),
     });
     return;
   }
@@ -957,7 +1001,7 @@ async function handleVersionedState(req, res) {
     return;
   }
 
-  const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_AUTH_BODY_BYTES);
+  const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES);
   const incomingState = body?.state;
   const baseRevision = body?.baseRevision;
   if (!incomingState || typeof incomingState !== "object" || !Array.isArray(incomingState.tasks)) {
@@ -970,7 +1014,7 @@ async function handleVersionedState(req, res) {
   }
   const stateBytes = Buffer.byteLength(JSON.stringify(incomingState));
   if (stateBytes > MAX_STATE_BYTES) {
-    sendJson(req, res, 413, { ok: false, error: `Saved state is too large. Limit is ${MAX_STATE_BYTES} bytes.` });
+    sendJson(req, res, 413, stateTooLargePayload(stateBytes));
     return;
   }
 
@@ -997,10 +1041,15 @@ async function handleVersionedState(req, res) {
         state: row.state || null,
         revision: currentRevision,
         updatedAt: row.state_updated_at || row.updated_at || null,
+        stateBytes: Buffer.byteLength(JSON.stringify(row.state || null)),
+        maxStateBytes: MAX_STATE_BYTES,
+        serverTime: new Date().toISOString(),
       });
       return;
     }
 
+    const mergeApproved = body?.merge?.source === "v13-smart-merge" && body?.merge?.approvedAt;
+    const preMergeBackupCreated = mergeApproved ? await createMergeStateBackup(client, row) : false;
     await createDailyStateBackup(client, row);
     const saved = await client.query(
       `update accounts
@@ -1015,6 +1064,10 @@ async function handleVersionedState(req, res) {
       ok: true,
       revision: Number(saved.rows[0].state_revision),
       savedAt: saved.rows[0].state_updated_at,
+      stateBytes,
+      maxStateBytes: MAX_STATE_BYTES,
+      serverTime: new Date().toISOString(),
+      preMergeBackupCreated,
     });
   } catch (error) {
     await client.query("rollback").catch(() => {});
@@ -1290,14 +1343,40 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/heartbeat" || url.pathname === "/api/health") {
-      sendJson(req, res, 200, { ok: true, auth: true, db: "postgres", serverTime: new Date().toISOString() });
+      let databaseBytes = null;
+      let stateBytes = null;
+      if (url.pathname === "/api/health") {
+        const [sizeResult, healthUser] = await Promise.all([
+          pool.query("select pg_database_size(current_database()) as bytes"),
+          currentUser(req),
+        ]);
+        databaseBytes = Number(sizeResult.rows[0]?.bytes || 0);
+        stateBytes = healthUser ? Number(healthUser.state_bytes || 0) : null;
+      }
+      sendJson(req, res, 200, {
+        ok: true,
+        auth: true,
+        db: "postgres",
+        serverTime: new Date().toISOString(),
+        maxStateBytes: MAX_STATE_BYTES,
+        maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
+        stateBytes,
+        databaseBytes,
+      });
       return;
     }
 
     send(req, res, 404, "Not found");
   } catch (error) {
     if (error && error.code === "PAYLOAD_TOO_LARGE") {
-      sendJson(req, res, 413, { ok: false, error: error.message });
+      sendJson(req, res, 413, {
+        ok: false,
+        error: "REQUEST_TOO_LARGE",
+        message: error.message,
+        maxStateBytes: MAX_STATE_BYTES,
+        maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
+        serverTime: new Date().toISOString(),
+      });
       return;
     }
     if (error instanceof SyntaxError) {

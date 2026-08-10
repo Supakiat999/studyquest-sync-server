@@ -355,6 +355,58 @@
     background: var(--surface2);
   }
   .sync-conflict-card strong { display:block;margin-bottom:6px;color:var(--text); }
+  .sync-compare-summary {
+    border: 1px solid rgba(247,192,106,.35);
+    border-radius: 8px;
+    background: rgba(247,192,106,.08);
+    padding: 11px 12px;
+    margin-bottom: 10px;
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .sync-compare-summary.is-equal {
+    border-color: rgba(106,247,176,.32);
+    background: rgba(106,247,176,.07);
+  }
+  .sync-diff-list { display:grid;gap:8px;margin-top:10px; }
+  .sync-diff-section {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255,255,255,.025);
+    overflow: hidden;
+  }
+  .sync-diff-section summary {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    cursor:pointer;
+    padding:10px 12px;
+    color:var(--text);
+    font-size:12px;
+    font-weight:800;
+    list-style:none;
+  }
+  .sync-diff-section summary::-webkit-details-marker { display:none; }
+  .sync-diff-count { color:var(--gold);font-family:'Space Mono',monospace;font-size:10px;white-space:nowrap; }
+  .sync-diff-body { border-top:1px solid var(--border);padding:10px 12px;display:grid;gap:9px; }
+  .sync-diff-group-title { color:var(--text-muted);font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.7px; }
+  .sync-diff-items { margin:4px 0 0;padding-left:17px;color:var(--text-dim);font-size:11px;line-height:1.55; }
+  .sync-field-change { color:var(--text-muted);font-size:10px;line-height:1.5;margin-top:3px;overflow-wrap:anywhere; }
+  .smart-merge-list { display:grid;gap:8px;margin-top:12px;max-height:min(48vh,520px);overflow:auto;padding-right:3px; }
+  .smart-merge-row { display:grid;grid-template-columns:minmax(150px,.8fr) minmax(260px,1.7fr) minmax(155px,.8fr);gap:10px;align-items:start;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.025);padding:10px; }
+  .smart-merge-row.needs-choice { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.06); }
+  .smart-merge-path { display:grid;gap:3px;min-width:0;font-size:11px; }
+  .smart-merge-path strong { color:var(--text); }
+  .smart-merge-path span { color:var(--text-muted);font:9px/1.4 'Space Mono',monospace;overflow-wrap:anywhere; }
+  .smart-merge-values { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
+  .smart-merge-values > div { display:grid;gap:3px;min-width:0;border-left:2px solid var(--border);padding-left:7px; }
+  .smart-merge-values span { color:var(--text-muted);font-size:9px;font-weight:800;text-transform:uppercase; }
+  .smart-merge-values strong { color:var(--text);font-size:10px;line-height:1.4;overflow-wrap:anywhere; }
+  .smart-merge-values small,.smart-merge-choice small { color:var(--text-muted);font:8px/1.4 'Space Mono',monospace;overflow-wrap:anywhere; }
+  .smart-merge-choice { display:grid;gap:5px; }
+  .smart-merge-choice .form-input { min-height:32px;padding:5px 7px;font-size:10px; }
   .sync-code {
     font-family: 'Space Mono', monospace;
     font-size: 22px;
@@ -404,6 +456,8 @@
   @media (max-width: 620px) {
     .sync-conflict-grid { grid-template-columns: 1fr; }
     .account-recovery-form { grid-template-columns: 1fr; }
+    .smart-merge-row { grid-template-columns:1fr; }
+    .smart-merge-values { grid-template-columns:1fr; }
   }
   .priority-chip,
   .kind-chip,
@@ -1191,7 +1245,8 @@
   }
   .modal-overlay.open { display: flex; }
   #appConfirmModal,
-  #liveSyncConflictModal { z-index: 1100; }
+  #liveSyncConflictModal,
+  #liveSyncComparisonModal { z-index: 1100; }
   .modal {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 16px; padding: 28px; width: 480px; max-width: 95vw;
@@ -3510,6 +3565,28 @@
     .today-inline-capture .btn { width: 100%; }
     .recovery-row { grid-template-columns: 1fr; }
     .recovery-row .btn { width: 100%; }
+    .sync-conflict-grid { grid-template-columns: 1fr; }
+    .sync-diff-section summary {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    .sync-diff-count { white-space: normal; }
+    #liveSyncConflictModal .modal,
+    #liveSyncComparisonModal .modal {
+      width: calc(100vw - 16px) !important;
+      max-width: calc(100vw - 16px) !important;
+      padding: 18px 16px;
+    }
+    #liveSyncConflictModal .modal-btns,
+    #liveSyncComparisonModal .modal-btns {
+      justify-content: stretch;
+    }
+    #liveSyncConflictModal .modal-btns .btn,
+    #liveSyncComparisonModal .modal-btns .btn {
+      flex: 1 1 145px;
+      min-width: 0;
+      white-space: normal;
+    }
     .task-editor-modal {
       width: calc(100vw - 16px);
       max-width: calc(100vw - 16px);
@@ -5599,7 +5676,7 @@
 <div class="modal-overlay" id="taskModal">
   <div class="modal task-editor-modal">
     <div class="task-modal-head">
-      <div class="modal-title" id="modalTitle">New Task</div>
+      <div><div class="modal-title" id="modalTitle">New Task</div><div class="task-form-help" id="taskLastUpdated" style="margin-top:3px;"></div></div>
       <button class="task-modal-close" type="button" onclick="closeModal('taskModal')" title="Close task editor" aria-label="Close task editor">×</button>
     </div>
     <div class="task-modal-body">
@@ -5789,15 +5866,36 @@
   <div class="modal" style="max-width:720px;width:95vw;">
     <div class="task-modal-head" style="padding:0 0 12px;border-bottom:1px solid var(--border);">
       <div>
-        <div class="modal-title" id="liveSyncConflictTitle" style="margin-bottom:4px;">Choose Which Save To Keep</div>
-        <div id="liveSyncConflictCopy" style="font-size:12px;color:var(--text-dim);line-height:1.5;">Local and live StudyQuest were both changed. Both copies are preserved until you choose.</div>
+        <div class="modal-title" id="liveSyncConflictTitle" style="margin-bottom:4px;">Review Smart Merge</div>
+        <div id="liveSyncConflictCopy" style="font-size:12px;color:var(--text-dim);line-height:1.5;">Review each proposed field winner. Nothing changes until Apply Smart Merge.</div>
       </div>
+      <button class="task-modal-close" type="button" onclick="closeModal('liveSyncConflictModal')" title="Close merge preview" aria-label="Close merge preview">×</button>
     </div>
     <div id="liveSyncConflictBody" style="padding:14px 0;"></div>
     <div class="modal-btns" style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;flex-wrap:wrap;">
-      <button class="btn btn-ghost" onclick="exportLiveSyncConflictCopies()">Export Both</button>
-      <button class="btn btn-ghost" onclick="resolveLiveSyncConflict('cloud')">Use Live</button>
-      <button class="btn btn-primary" onclick="resolveLiveSyncConflict('local')">Use Local</button>
+      <button class="btn btn-ghost" onclick="closeModal('liveSyncConflictModal')">Not Now</button>
+      <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Export Chrome + Live + Merged</button>
+      <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Use Live</button>
+      <button class="btn btn-ghost" onclick="resolveLiveSyncConflict('local')">Use Chrome</button>
+      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Apply Smart Merge</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="liveSyncComparisonModal">
+  <div class="modal" style="max-width:760px;width:95vw;">
+    <div class="task-modal-head" style="padding:0 0 12px;border-bottom:1px solid var(--border);">
+      <div>
+        <div class="modal-title" style="margin-bottom:4px;">Chrome and Live Comparison</div>
+        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">This review is read-only. It prepares per-field winners and never writes automatically.</div>
+      </div>
+      <button class="task-modal-close" type="button" onclick="closeLiveSyncComparison()" title="Close comparison" aria-label="Close comparison">×</button>
+    </div>
+    <div id="liveSyncComparisonBody" style="padding:14px 0;"></div>
+    <div class="modal-btns" style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;flex-wrap:wrap;">
+      <button class="btn btn-ghost" onclick="closeLiveSyncComparison()">Close</button>
+      <button class="btn btn-ghost" onclick="exportLiveSyncComparisonReport()">Export Difference Report</button>
+      <button class="btn btn-primary" id="reviewLiveSyncChoicesBtn" onclick="reviewLiveSyncComparison()">Review Smart Merge</button>
     </div>
   </div>
 </div>
@@ -5991,6 +6089,7 @@ function defaultState() {
     activeCurriculumId: 'ice',
     activeSemesterByCurriculum: {},
     updatedAt: 0,
+    _syncMeta: defaultSyncMeta(),
   };
 }
 
@@ -6002,6 +6101,7 @@ const ERROR_LOG_STORAGE_KEY = `${STORAGE_KEY}_error_log`;
 const SAVE_META_STORAGE_KEY = `${STORAGE_KEY}_save_meta`;
 const CORRUPT_SAVE_STORAGE_KEY = `${STORAGE_KEY}_corrupt_save`;
 const LIVE_SYNC_META_STORAGE_KEY = `${STORAGE_KEY}_live_sync_meta`;
+const DEVICE_ID_STORAGE_KEY = `${STORAGE_KEY}_device_id`;
 const SERVER_STATE_ENDPOINT = '/api/state';
 const CLOUD_STATE_ENDPOINT = '/api/v2/state';
 const LOCAL_LIVE_STATE_ENDPOINT = '/api/live-state';
@@ -6011,6 +6111,19 @@ const LOCAL_RELEASE_ENDPOINT = '/api/release/v13';
 const LOCAL_RELEASE_STATUS_ENDPOINT = '/api/release/v13/status';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 const LIVE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+const STUDYQUEST_MAX_STATE_BYTES = 10 * 1024 * 1024;
+const SYNC_HISTORY_LIMIT = 500;
+const SYNC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const SYNC_TYPING_COALESCE_MS = 5000;
+const SYNC_META_VERSION = 1;
+const SYNC_UI_ONLY_ROOTS = new Set([
+  'updatedAt', 'checklistFilter', 'calendarView', 'calendarDate', 'activeTripId',
+  'travelSubtab', 'travelItineraryView', 'travelCalendarAxis', 'travelPlaceFilter',
+  'travelPlaceSearch', 'activeTravelPlaceId', 'activeTravelDayId',
+  'activeTravelActivityId', 'activeSemTracker', 'activeCurriculumId',
+  'activeSemesterByCurriculum',
+]);
+const SYNC_COUNTER_ROOTS = new Set(['totalXP', 'totalDone', 'pomodorosDone']);
 let serverSaveTimer = null;
 let liveSyncScheduleTimer = null;
 let releasePollTimer = null;
@@ -6025,6 +6138,9 @@ let liveSync = {
   updatedAt: null,
   pending: false,
   conflict: null,
+  preview: null,
+  comparison: null,
+  lastComparedAt: null,
   username: null,
   deviceName: null,
   release: null,
@@ -6042,7 +6158,16 @@ let liveSync = {
   lastDirection: null,
   inFlight: false,
   message: '',
+  maxStateBytes: STUDYQUEST_MAX_STATE_BYTES,
+  stateBytes: 0,
+  cloudStateBytes: null,
+  databaseBytes: null,
+  clockOffsetMs: 0,
+  clockVerified: false,
 };
+let syncBaselineState = null;
+let syncTrackingSuspended = false;
+let changeHistoryFilter = 'all';
 let accountRecovery = {
   loading: false,
   error: '',
@@ -6072,6 +6197,322 @@ function safeWriteJson(key, value) {
     return false;
   }
 }
+
+// SMART_SYNC_CORE_BEGIN
+function defaultSyncMeta() {
+  return {
+    version: SYNC_META_VERSION,
+    seq: 0,
+    fields: {},
+    tombstones: {},
+    counters: {},
+    history: [],
+    migratedAt: null,
+  };
+}
+
+function getSyncDeviceId() {
+  let value = '';
+  try { value = String(localStorage.getItem(DEVICE_ID_STORAGE_KEY) || ''); } catch {}
+  if (/^sq_[a-z0-9_-]{10,}$/i.test(value)) return value;
+  const random = globalThis.crypto?.randomUUID?.().replace(/-/g, '') || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  value = `sq_${random}`;
+  try { localStorage.setItem(DEVICE_ID_STORAGE_KEY, value); } catch {}
+  return value;
+}
+
+function syncHash(value) {
+  const text = String(value || '');
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function syncCanonicalValue(value) {
+  if (Array.isArray(value)) return value.map(syncCanonicalValue);
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  Object.keys(value).sort().forEach(key => {
+    if (key === '_syncMeta' || key === '_syncId') return;
+    result[key] = syncCanonicalValue(value[key]);
+  });
+  return result;
+}
+
+function syncValueString(value) {
+  try { return JSON.stringify(syncCanonicalValue(value)); } catch { return String(value); }
+}
+
+function syncValuesEqual(left, right) {
+  return syncValueString(left) === syncValueString(right);
+}
+
+function syncClone(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function syncPathJoin(path, segment) {
+  const encoded = encodeURIComponent(String(segment));
+  return path ? `${path}/${encoded}` : encoded;
+}
+
+function syncPathSegments(path) {
+  return String(path || '').split('/').filter(Boolean).map(segment => {
+    try { return decodeURIComponent(segment); } catch { return segment; }
+  });
+}
+
+function syncRecordId(item, index, path) {
+  if (item && typeof item === 'object') {
+    if (item.id !== undefined && item.id !== null && String(item.id)) return String(item.id);
+    if (item._syncId) return String(item._syncId);
+    const seed = syncValueString(item).slice(0, 1000);
+    item._syncId = `legacy_${syncHash(`${path}|${index}|${seed}`)}`;
+    return item._syncId;
+  }
+  return `value_${index}_${syncHash(syncValueString(item))}`;
+}
+
+function ensureStableSyncIds(value, path = '') {
+  let added = 0;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const hadId = !!(item.id || item._syncId);
+        const id = syncRecordId(item, index, path);
+        if (!hadId && id) added++;
+        added += ensureStableSyncIds(item, syncPathJoin(path, `@${id}`));
+      } else if (Array.isArray(item)) {
+        added += ensureStableSyncIds(item, syncPathJoin(path, index));
+      }
+    });
+    return added;
+  }
+  if (!value || typeof value !== 'object') return added;
+  Object.entries(value).forEach(([key, child]) => {
+    if (key === '_syncMeta') return;
+    added += ensureStableSyncIds(child, syncPathJoin(path, key));
+  });
+  return added;
+}
+
+function normalizeSyncMeta(source) {
+  const fallback = defaultSyncMeta();
+  const value = source && typeof source === 'object' ? source : {};
+  return {
+    ...fallback,
+    ...value,
+    version: SYNC_META_VERSION,
+    seq: Math.max(0, Number(value.seq || 0)),
+    fields: value.fields && typeof value.fields === 'object' ? value.fields : {},
+    tombstones: value.tombstones && typeof value.tombstones === 'object' ? value.tombstones : {},
+    counters: value.counters && typeof value.counters === 'object' ? value.counters : {},
+    history: Array.isArray(value.history) ? value.history : [],
+  };
+}
+
+function syncUtf8Bytes(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? null);
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(text).byteLength;
+  return unescape(encodeURIComponent(text)).length;
+}
+
+function stateSizeBreakdown(source = state) {
+  const full = syncClone(source || defaultState());
+  const meta = normalizeSyncMeta(full?._syncMeta);
+  delete full._syncMeta;
+  const history = meta.history || [];
+  const compactMeta = { ...meta, history: [] };
+  const totalBytes = syncUtf8Bytes(source || defaultState());
+  const userDataBytes = syncUtf8Bytes(full);
+  const metadataBytes = syncUtf8Bytes(compactMeta);
+  const historyBytes = syncUtf8Bytes(history);
+  const maxBytes = Number(liveSync?.maxStateBytes || STUDYQUEST_MAX_STATE_BYTES);
+  return {
+    totalBytes,
+    userDataBytes,
+    metadataBytes,
+    historyBytes,
+    maxBytes,
+    percent: maxBytes ? (totalBytes / maxBytes) * 100 : 0,
+    overLimit: totalBytes > maxBytes,
+  };
+}
+
+function formatStateBytes(bytes) {
+  const value = Math.max(0, Number(bytes || 0));
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+function calibrateSyncClock(serverTime) {
+  const parsed = Date.parse(serverTime || '');
+  if (!Number.isFinite(parsed)) return;
+  liveSync.clockOffsetMs = parsed - Date.now();
+  liveSync.clockVerified = true;
+}
+
+function syncNowStamp(meta) {
+  meta.seq = Math.max(0, Number(meta.seq || 0)) + 1;
+  return {
+    at: new Date(Date.now() + Number(liveSync.clockOffsetMs || 0)).toISOString(),
+    seq: meta.seq,
+    deviceId: getSyncDeviceId(),
+    clockVerified: !!liveSync.clockVerified,
+  };
+}
+
+function isSyncUiOnlyPath(path) {
+  const [root] = syncPathSegments(path);
+  return !root || SYNC_UI_ONLY_ROOTS.has(root) || root === '_syncMeta' || root === '_exportedAt' || root === '_exportVersion';
+}
+
+function syncArrayUsesRecords(left, right) {
+  return [...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])]
+    .some(item => item && typeof item === 'object' && !Array.isArray(item));
+}
+
+function collectSyncChanges(previous, current, path = '', changes = []) {
+  if (path && isSyncUiOnlyPath(path)) return changes;
+  if (syncValuesEqual(previous, current)) return changes;
+  if (Array.isArray(previous) || Array.isArray(current)) {
+    const before = Array.isArray(previous) ? previous : [];
+    const after = Array.isArray(current) ? current : [];
+    if (!syncArrayUsesRecords(before, after)) {
+      changes.push({ path, kind:'field', before:syncClone(previous), after:syncClone(current) });
+      return changes;
+    }
+    const beforeMap = new Map(before.map((item, index) => [syncRecordId(item, index, path), item]));
+    const afterMap = new Map(after.map((item, index) => [syncRecordId(item, index, path), item]));
+    const beforeOrder = [...beforeMap.keys()];
+    const afterOrder = [...afterMap.keys()];
+    if (!syncValuesEqual(beforeOrder, afterOrder)) {
+      changes.push({ path:syncPathJoin(path, '@order'), kind:'order', before:beforeOrder, after:afterOrder });
+    }
+    new Set([...beforeMap.keys(), ...afterMap.keys()]).forEach(id => {
+      const recordPath = syncPathJoin(path, `@${id}`);
+      if (!afterMap.has(id)) {
+        changes.push({ path:recordPath, kind:'delete-record', before:syncClone(beforeMap.get(id)), after:undefined });
+      } else if (!beforeMap.has(id)) {
+        changes.push({ path:recordPath, kind:'add-record', before:undefined, after:syncClone(afterMap.get(id)) });
+        collectSyncChanges({}, afterMap.get(id), recordPath, changes);
+      } else {
+        collectSyncChanges(beforeMap.get(id), afterMap.get(id), recordPath, changes);
+      }
+    });
+    return changes;
+  }
+  if ((previous && typeof previous === 'object') || (current && typeof current === 'object')) {
+    const before = previous && typeof previous === 'object' ? previous : {};
+    const after = current && typeof current === 'object' ? current : {};
+    new Set([...Object.keys(before), ...Object.keys(after)]).forEach(key => {
+      if (key === '_syncMeta' || key === '_syncId' || key === 'id') return;
+      collectSyncChanges(before[key], after[key], syncPathJoin(path, key), changes);
+    });
+    return changes;
+  }
+  changes.push({ path, kind:'field', before:syncClone(previous), after:syncClone(current) });
+  return changes;
+}
+
+function isSyncCounterPath(path) {
+  const [root] = syncPathSegments(path);
+  return SYNC_COUNTER_ROOTS.has(root) || ['studyTime', 'xpByDay', 'completedByDay'].includes(root);
+}
+
+function syncChangeLabel(change) {
+  const parts = syncPathSegments(change.path).filter(part => part !== '@order');
+  const readable = parts.map(part => part.startsWith('@') ? part.slice(1) : part).join(' / ');
+  if (change.kind === 'delete-record') return `Deleted ${readable}`;
+  if (change.kind === 'add-record') return `Added ${readable}`;
+  if (change.kind === 'order') return `Reordered ${readable || 'items'}`;
+  return `Updated ${readable || 'saved data'}`;
+}
+
+function trimSyncHistory(history, now = Date.now()) {
+  const cutoff = now - SYNC_HISTORY_RETENTION_MS;
+  return (Array.isArray(history) ? history : [])
+    .filter(entry => Date.parse(entry?.at || '') >= cutoff)
+    .slice(0, SYNC_HISTORY_LIMIT);
+}
+
+function appendSyncHistory(meta, change, stamp, label) {
+  const history = Array.isArray(meta.history) ? meta.history : [];
+  const first = history[0];
+  const at = Date.parse(stamp.at);
+  if (first && first.path === change.path && at - Date.parse(first.at || '') <= SYNC_TYPING_COALESCE_MS && change.kind === 'field') {
+    first.at = stamp.at;
+    first.seq = stamp.seq;
+    first.after = describeComparisonValue(change.after, 100);
+    first.label = label || syncChangeLabel(change);
+  } else {
+    history.unshift({
+      id:`chg_${stamp.deviceId}_${stamp.seq}_${syncHash(change.path)}`,
+      path:change.path,
+      kind:change.kind,
+      label:label || syncChangeLabel(change),
+      before:describeComparisonValue(change.before, 100),
+      after:describeComparisonValue(change.after, 100),
+      ...stamp,
+    });
+  }
+  meta.history = trimSyncHistory(history, at);
+}
+
+function trackCurrentStateChanges(label = '') {
+  if (syncTrackingSuspended || !syncBaselineState) return [];
+  ensureStableSyncIds(state);
+  const changes = collectSyncChanges(syncBaselineState, state);
+  if (!changes.length) {
+    syncBaselineState = syncClone(state);
+    return changes;
+  }
+  const meta = normalizeSyncMeta(state._syncMeta);
+  const stamp = syncNowStamp(meta);
+  changes.forEach((change, index) => {
+    if (!change.path || isSyncUiOnlyPath(change.path)) return;
+    if (change.kind === 'delete-record') {
+      meta.tombstones[change.path] = { ...stamp };
+      meta.fields[syncPathJoin(change.path, '@exists')] = { ...stamp };
+    } else if (change.kind === 'add-record') {
+      delete meta.tombstones[change.path];
+      meta.fields[syncPathJoin(change.path, '@exists')] = { ...stamp };
+    } else {
+      meta.fields[change.path] = { ...stamp };
+    }
+    if (change.kind === 'field' && isSyncCounterPath(change.path) && Number.isFinite(Number(change.before)) && Number.isFinite(Number(change.after))) {
+      const counter = meta.counters[change.path] || { base:Number(change.before), ops:[] };
+      const delta = Number(change.after) - Number(change.before);
+      if (delta) counter.ops.push({ id:`${stamp.deviceId}:${stamp.seq}:${index}`, delta, ...stamp });
+      meta.counters[change.path] = counter;
+    }
+    appendSyncHistory(meta, change, stamp, label);
+  });
+  state._syncMeta = meta;
+  syncBaselineState = syncClone(state);
+  return changes;
+}
+
+function initializeSyncTracking() {
+  const before = syncClone(state);
+  const existing = state?._syncMeta;
+  const needsMigration = !existing || Number(existing.version || 0) < SYNC_META_VERSION;
+  const idsAdded = ensureStableSyncIds(state);
+  state._syncMeta = normalizeSyncMeta(existing);
+  if (needsMigration || idsAdded) {
+    if (hasUserData(before)) pushAutoBackup('Before smart sync metadata migration', before);
+    state._syncMeta.migratedAt = state._syncMeta.migratedAt || new Date().toISOString();
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (error) { recordAppError('sync-migration', error); }
+  }
+  syncBaselineState = syncClone(state);
+  liveSync.stateBytes = syncUtf8Bytes(state);
+}
+// SMART_SYNC_CORE_END
 
 function trimSafetyList(items, limit) {
   return (Array.isArray(items) ? items : []).slice(0, limit);
@@ -6360,14 +6801,18 @@ liveSync.lastPullAt = initialLiveSyncMeta.lastPullAt || null;
 liveSync.nextSyncAt = initialLiveSyncMeta.nextScheduledSyncAt || null;
 liveSync.lastDirection = initialLiveSyncMeta.lastSyncDirection || null;
 let state = loadState();
+initializeSyncTracking();
 let SQ_State = state;
 function syncSQStateReference() {
   SQ_State = state;
   if (typeof window !== 'undefined') window.SQ_State = SQ_State;
   return SQ_State;
 }
-function setSQState(nextState) {
+function setSQState(nextState, options = {}) {
   state = normalizeState(nextState);
+  ensureStableSyncIds(state);
+  state._syncMeta = normalizeSyncMeta(state._syncMeta);
+  if (options.resetSyncBaseline) syncBaselineState = syncClone(state);
   return syncSQStateReference();
 }
 syncSQStateReference();
@@ -6426,14 +6871,23 @@ let viewDays = 30;
 // PERSISTENCE
 // ════════════════════════════════════════════════════════
 function saveState() {
+  const trackedChanges = trackCurrentStateChanges();
   state.updatedAt = Date.now();
   syncSQStateReference();
   setSaveStatus('saving', 'Saving...');
   let browserSaved = false;
+  let serializedState = '';
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    serializedState = JSON.stringify(state);
+    liveSync.stateBytes = syncUtf8Bytes(serializedState);
+    localStorage.setItem(STORAGE_KEY, serializedState);
     browserSaved = true;
-    setSaveMeta({ latestLocalSaveAt: new Date().toISOString(), latestLocalUpdatedAt: state.updatedAt });
+    setSaveMeta({
+      latestLocalSaveAt: new Date().toISOString(),
+      latestLocalUpdatedAt: state.updatedAt,
+      latestStateBytes: liveSync.stateBytes,
+      latestDataChangeAt: trackedChanges.length ? new Date().toISOString() : getSaveMeta().latestDataChangeAt,
+    });
   } catch (e) {
     console.warn('StudyQuest browser save failed', e);
     recordAppError('save', e);
@@ -6444,7 +6898,7 @@ function saveState() {
     if (browserSaved) setSaveStatus('local', 'Saved in Chrome');
     return;
   }
-  if (browserSaved && (isHostedAppHost() || liveSync.paired)) {
+  if (browserSaved && trackedChanges.length && (isHostedAppHost() || liveSync.paired)) {
     liveSync.pending = true;
     setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
   }
@@ -6560,9 +7014,21 @@ function recordSuccessfulLiveSync(direction, at = new Date().toISOString()) {
 }
 
 async function saveStateToCloud() {
-  if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return { ok: false };
+  const options = arguments[0] || {};
+  if ((!liveSync.paired && !isHostedAppHost()) || (liveSync.conflict && !options.allowDuringConflict) || corruptSaveInfo) return { ok: false };
   const meta = getLiveSyncMeta();
   const baseRevision = Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
+  const size = stateSizeBreakdown(state);
+  liveSync.stateBytes = size.totalBytes;
+  if (size.overLimit) {
+    liveSync.pending = true;
+    liveSync.status = 'size-limit';
+    liveSync.message = `STATE_TOO_LARGE: ${size.totalBytes} / ${size.maxBytes} bytes`;
+    setLiveSyncMeta({ pending:true, lastError:liveSync.message });
+    setSaveStatus('error', 'Saved locally · cloud size limit exceeded');
+    renderRecoveryCenter();
+    return { ok:false, sizeLimit:true, stateBytes:size.totalBytes, maxStateBytes:size.maxBytes };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25_000);
   try {
@@ -6571,10 +7037,17 @@ async function saveStateToCloud() {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, baseRevision, deviceId: isLocalLabHost() ? 'local-v13' : 'hosted-v13' }),
+      body: JSON.stringify({
+        state,
+        baseRevision,
+        deviceId:getSyncDeviceId(),
+        merge:options.mergeApproval || undefined,
+      }),
       signal: controller.signal,
     });
     const result = await res.json().catch(() => ({}));
+    calibrateSyncClock(result.serverTime);
+    if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
     if (res.status === 401) {
       if (isHostedAppHost()) handleHostedAuthExpired();
       else {
@@ -6591,6 +7064,13 @@ async function saveStateToCloud() {
         cloudUpdatedAt: result.updatedAt || null,
       });
       return { ok: false, conflict: true };
+    }
+    if (res.status === 413 && result.error === 'STATE_TOO_LARGE') {
+      liveSync.maxStateBytes = Number(result.maxStateBytes || liveSync.maxStateBytes);
+      liveSync.stateBytes = Number(result.stateBytes || size.totalBytes);
+      const error = new Error(`Cloud limit exceeded (${formatStateBytes(liveSync.stateBytes)} / ${formatStateBytes(liveSync.maxStateBytes)}).`);
+      error.code = 'STATE_TOO_LARGE';
+      throw error;
     }
     if (!res.ok) throw new Error(result.error || 'Live save failed');
     liveSync.revision = Number(result.revision || baseRevision || 0);
@@ -6615,7 +7095,7 @@ async function saveStateToCloud() {
       liveSync.status = 'offline';
       liveSync.message = e?.name === 'AbortError' ? 'Live server timed out' : String(e?.message || e);
       setLiveSyncMeta({ pending: true, lastError: liveSync.message });
-      setSaveStatus('offline', 'Saved locally · admin sync pending');
+      setSaveStatus(e?.code === 'STATE_TOO_LARGE' ? 'error' : 'offline', e?.code === 'STATE_TOO_LARGE' ? 'Saved locally · cloud size limit exceeded' : 'Saved locally · admin sync pending');
       recordAppError('live-save', e);
     }
     return { ok: false, error: liveSync.message };
@@ -6685,6 +7165,501 @@ function stateSummary(s = state) {
   ].join(' · ');
 }
 
+const STATE_COMPARISON_SECTIONS = [
+  { id:'tasks', label:'Tasks' },
+  { id:'categories', label:'Categories' },
+  { id:'notes', label:'Notes' },
+  { id:'files', label:'Files' },
+  { id:'checklist', label:'Checklist' },
+  { id:'grades', label:'Grades' },
+  { id:'trips', label:'Trips' },
+  { id:'weekly', label:'Weekly' },
+  { id:'progress', label:'Progress' },
+  { id:'profile', label:'Profile' },
+];
+const STATE_COMPARISON_IGNORED_FIELDS = new Set(['createdAt', 'updatedAt', '_syncId', '_syncMeta']);
+const STATE_COMPARISON_TRAVEL_DEFAULTS = {
+  stay:['Stay','#7c6af7'], transport:['Transport','#6af7b0'], food:['Food','#f7c06a'],
+  visit:['Visit','#6af7e0'], task:['Task / Document','#f76a6a'], other:['Other','#7986cb'],
+};
+
+function isBuiltInComparisonTravelCategory(item) {
+  const expected = STATE_COMPARISON_TRAVEL_DEFAULTS[item?.id];
+  return !!expected && item?.isDefault === true && item?.name === expected[0] && String(item?.color || '').toLowerCase() === expected[1];
+}
+
+function isDefaultComparisonValue(key, value) {
+  if (value === undefined || value === null || value === '' || value === false) return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) return true;
+  if (key === 'semesterId' && value === 'sem_default') return true;
+  if (key === 'currency' && value === 'THB') return true;
+  if (key === 'travelers' && Number(value) === 1) return true;
+  if (key === 'priorityLevel' && value === 'normal') return true;
+  if (key === 'recurrence' && value === 'none') return true;
+  return false;
+}
+
+function cleanComparisonValue(value, parentKey = '') {
+  if (Array.isArray(value)) {
+    if (parentKey === 'checklist' && value.every(item => item?.isDefault && !item?.done)) return [];
+    return value.map(item => cleanComparisonValue(item, parentKey));
+  }
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  Object.keys(value).sort().forEach(key => {
+    if (STATE_COMPARISON_IGNORED_FIELDS.has(key)) return;
+    const cleaned = cleanComparisonValue(value[key], key);
+    if (!isDefaultComparisonValue(key, cleaned)) result[key] = cleaned;
+  });
+  return result;
+}
+
+function stableComparisonString(value) {
+  try { return JSON.stringify(cleanComparisonValue(value)); } catch { return String(value); }
+}
+
+function addComparisonEntry(map, prefix, rawId, label, value, index = 0) {
+  const base = `${prefix}:${rawId || `row-${index}`}`;
+  let id = base;
+  let suffix = 2;
+  while (map.has(id)) id = `${base}:${suffix++}`;
+  map.set(id, { id, label:String(label || 'Untitled'), value:value ?? null });
+}
+
+function addComparisonArray(map, prefix, values, labeler) {
+  (Array.isArray(values) ? values : []).forEach((item, index) => {
+    addComparisonEntry(map, prefix, item?.id, labeler(item, index), item, index);
+  });
+}
+
+function addComparisonRecord(map, prefix, value, labeler) {
+  Object.entries(value && typeof value === 'object' && !Array.isArray(value) ? value : {}).forEach(([key, item], index) => {
+    addComparisonEntry(map, prefix, key, labeler(item, key), item, index);
+  });
+}
+
+function comparisonEntriesFor(sectionId, source = {}) {
+  const entries = new Map();
+  if (sectionId === 'tasks') {
+    addComparisonArray(entries, 'task', source.tasks, item => item?.title || 'Untitled task');
+  } else if (sectionId === 'categories') {
+    addComparisonArray(entries, 'category', source.categories, item => item?.name || 'Unnamed category');
+    addComparisonArray(entries, 'deleted-category', source.deletedCategories, item => item?.name || item?.id || 'Deleted category');
+  } else if (sectionId === 'notes') {
+    addComparisonArray(entries, 'notebook', source.notebooks, item => `Notebook: ${item?.name || 'Untitled'}`);
+    addComparisonArray(entries, 'note', source.notes, item => `Note: ${item?.title || 'Untitled'}`);
+  } else if (sectionId === 'files') {
+    addComparisonArray(entries, 'file', source.fileLinks, item => item?.name || item?.path || 'Untitled file');
+  } else if (sectionId === 'checklist') {
+    addComparisonArray(entries, 'check', source.checklistItems, item => item?.title || 'Untitled checklist item');
+    addComparisonEntry(entries, 'checklist-settings', 'settings', 'Checklist groups', { groups:source.checklistGroups || [] });
+  } else if (sectionId === 'grades') {
+    addComparisonRecord(entries, 'grade', source.grades, (_, key) => key);
+    addComparisonRecord(entries, 'cutoff', source.cutoffs, (_, key) => `Cutoffs: ${key}`);
+    addComparisonEntry(entries, 'grade-settings', 'settings', 'Grade setup', {
+      electiveNames:source.electiveNames || {}, customSubjects:source.customSubjects || {},
+      customCurricula:source.customCurricula || [], archivedCurriculumIds:source.archivedCurriculumIds || [],
+    });
+  } else if (sectionId === 'trips') {
+    addComparisonArray(entries, 'trip', source.trips, item => item?.name || item?.title || 'Untitled trip');
+    addComparisonArray(entries, 'travel-category', (source.travelCategories || []).filter(item => !isBuiltInComparisonTravelCategory(item)), item => item?.name || 'Unnamed travel category');
+  } else if (sectionId === 'weekly') {
+    addComparisonArray(entries, 'week', source.tracker?.weeks, (item, index) => item?.name || item?.label || `Week ${index + 1}`);
+    addComparisonArray(entries, 'semester', (source.trackerSemesters || []).filter(item => !(item?.id === 'sem_default' && item?.name === 'Recovered Semester')), (item, index) => item?.name || item?.label || `Semester ${index + 1}`);
+    addComparisonEntry(entries, 'weekly-settings', 'settings', 'Weekly setup', {
+      programConfigured:!!source.tracker?.programConfigured,
+      programId:source.tracker?.programId || '',
+      programName:source.tracker?.programName || '',
+      weekdayColors:source.tracker?.weekdayColors || {},
+    });
+  } else if (sectionId === 'progress') {
+    addComparisonArray(entries, 'session', source.sessions, (item, index) => item?.subject || item?.title || `Study session ${index + 1}`);
+    addComparisonEntry(entries, 'progress-settings', 'settings', 'XP and study progress', {
+      totalXP:Number(source.totalXP || 0), totalDone:Number(source.totalDone || 0),
+      pomodorosDone:Number(source.pomodorosDone || 0), streak:Number(source.streak || 0),
+      lastActiveDate:source.lastActiveDate || null, studyTime:source.studyTime || {},
+      xpByDay:source.xpByDay || {}, completedByDay:source.completedByDay || {},
+    });
+  } else if (sectionId === 'profile') {
+    addComparisonEntry(entries, 'profile', 'settings', 'Profile and theme', { profile:source.profile || {}, themeId:source.themeId || 'default' });
+  }
+  return entries;
+}
+
+function describeComparisonValue(value, limit = 72) {
+  let text = '';
+  if (Array.isArray(value)) {
+    const labels = value.slice(0, 3).map(item => item && typeof item === 'object' ? item.title || item.name || item.label || item.id || 'item' : String(item));
+    text = `${value.length} item${value.length === 1 ? '' : 's'}${labels.length ? ` (${labels.join(', ')}${value.length > labels.length ? ', ...' : ''})` : ''}`;
+  } else if (value && typeof value === 'object') {
+    text = `${Object.keys(value).length} field${Object.keys(value).length === 1 ? '' : 's'}`;
+  } else if (value === undefined) text = 'not set';
+  else if (value === null) text = 'none';
+  else if (typeof value === 'boolean') text = value ? 'yes' : 'no';
+  else text = String(value);
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
+function comparisonFieldChanges(chromeValue, liveValue, max = 6) {
+  const chrome = chromeValue && typeof chromeValue === 'object' ? chromeValue : { value:chromeValue };
+  const live = liveValue && typeof liveValue === 'object' ? liveValue : { value:liveValue };
+  const keys = [...new Set([...Object.keys(chrome), ...Object.keys(live)])]
+    .filter(key => key !== 'id' && !STATE_COMPARISON_IGNORED_FIELDS.has(key)).sort();
+  const result = [];
+  for (const key of keys) {
+    if (stableComparisonString({ [key]:chrome[key] }) === stableComparisonString({ [key]:live[key] })) continue;
+    let chromeText = describeComparisonValue(chrome[key]);
+    let liveText = describeComparisonValue(live[key]);
+    if (chromeText === liveText) {
+      chromeText += ' (content differs)';
+      liveText += ' (content differs)';
+    }
+    result.push({ field:key, chrome:chromeText, live:liveText });
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+function buildStateComparison(chromeState, liveState, metadata = {}) {
+  const sections = STATE_COMPARISON_SECTIONS.map(spec => {
+    const chrome = comparisonEntriesFor(spec.id, chromeState || {});
+    const live = comparisonEntriesFor(spec.id, liveState || {});
+    const localOnly = [];
+    const liveOnly = [];
+    const changed = [];
+    chrome.forEach((entry, id) => {
+      const other = live.get(id);
+      if (!other) localOnly.push(entry.label);
+      else if (stableComparisonString(entry.value) !== stableComparisonString(other.value)) {
+        changed.push({ label:entry.label || other.label, fields:comparisonFieldChanges(entry.value, other.value) });
+      }
+    });
+    live.forEach((entry, id) => { if (!chrome.has(id)) liveOnly.push(entry.label); });
+    return {
+      ...spec, chromeCount:chrome.size, liveCount:live.size, localOnly, liveOnly, changed,
+      differenceCount:localOnly.length + liveOnly.length + changed.length,
+    };
+  });
+  const changedSections = sections.filter(item => item.differenceCount);
+  const differenceCount = changedSections.reduce((sum, item) => sum + item.differenceCount, 0);
+  return {
+    status:differenceCount ? 'different' : 'equal', different:differenceCount > 0,
+    differenceCount, changedSectionCount:changedSections.length, sections,
+    comparedAt:metadata.comparedAt || new Date().toISOString(),
+    chromeUpdatedAt:metadata.chromeUpdatedAt || chromeState?.updatedAt || null,
+    liveUpdatedAt:metadata.liveUpdatedAt || liveState?.updatedAt || null,
+    liveRevision:Number.isFinite(Number(metadata.liveRevision)) ? Number(metadata.liveRevision) : null,
+  };
+}
+
+function compareSyncStamps(localStamp, cloudStamp) {
+  if (!localStamp || !cloudStamp) return { winner:null, reason:'Missing update history; choose manually.' };
+  const localSeq = Number(localStamp.seq || 0);
+  const cloudSeq = Number(cloudStamp.seq || 0);
+  if (localStamp.deviceId && localStamp.deviceId === cloudStamp.deviceId && localSeq !== cloudSeq) {
+    return { winner:localSeq > cloudSeq ? 'local' : 'cloud', reason:'Newest change from the same device.' };
+  }
+  if (!localStamp.clockVerified || !cloudStamp.clockVerified) {
+    return { winner:null, reason:'One or both clocks were not server-verified.' };
+  }
+  const localAt = Date.parse(localStamp.at || '');
+  const cloudAt = Date.parse(cloudStamp.at || '');
+  if (!Number.isFinite(localAt) || !Number.isFinite(cloudAt)) return { winner:null, reason:'Update time is unavailable.' };
+  if (localAt === cloudAt) return { winner:null, reason:'Both values have the same update time.' };
+  return { winner:localAt > cloudAt ? 'local' : 'cloud', reason:'Newest server-calibrated field update.' };
+}
+
+function syncFieldStamp(source, path) {
+  return source?._syncMeta?.fields?.[path] || null;
+}
+
+function syncRecordStamp(source, path, exists) {
+  return exists
+    ? syncFieldStamp(source, syncPathJoin(path, '@exists'))
+    : source?._syncMeta?.tombstones?.[path] || null;
+}
+
+function syncSectionForPath(path) {
+  const [root] = syncPathSegments(path);
+  const labels = {
+    tasks:'Tasks', categories:'Categories', deletedCategories:'Categories', notes:'Notes', notebooks:'Notes',
+    fileLinks:'Files', checklistItems:'Checklist', checklistGroups:'Checklist', grades:'Grades', cutoffs:'Grades',
+    electiveNames:'Grades', customSubjects:'Grades', customCurricula:'Grades', trips:'Trips', travelCategories:'Trips',
+    tracker:'Weekly', trackerSemesters:'Weekly', sessions:'Progress', studyTime:'Progress', xpByDay:'Progress',
+    completedByDay:'Progress', totalXP:'Progress', totalDone:'Progress', pomodorosDone:'Progress', profile:'Profile', themeId:'Profile',
+  };
+  return labels[root] || 'Other';
+}
+
+function mergeCounterState(path, localValue, cloudValue, localState, cloudState) {
+  const localCounter = localState?._syncMeta?.counters?.[path];
+  const cloudCounter = cloudState?._syncMeta?.counters?.[path];
+  if (!localCounter || !cloudCounter || Number(localCounter.base) !== Number(cloudCounter.base)) return null;
+  const operations = new Map();
+  [...(localCounter.ops || []), ...(cloudCounter.ops || [])].forEach(operation => {
+    if (operation?.id) operations.set(operation.id, operation);
+  });
+  const ops = [...operations.values()];
+  const value = Number(localCounter.base || 0) + ops.reduce((sum, operation) => sum + Number(operation.delta || 0), 0);
+  if (!Number.isFinite(value)) return null;
+  return { value, counter:{ base:Number(localCounter.base || 0), ops } };
+}
+
+function mergeSyncMetadata(localState, cloudState, decisions, mergedCounters = {}) {
+  const localMeta = normalizeSyncMeta(localState?._syncMeta);
+  const cloudMeta = normalizeSyncMeta(cloudState?._syncMeta);
+  const merged = defaultSyncMeta();
+  merged.seq = Math.max(localMeta.seq, cloudMeta.seq);
+  merged.migratedAt = localMeta.migratedAt || cloudMeta.migratedAt || new Date().toISOString();
+  const mergeStampMap = (localMap, cloudMap) => {
+    const result = {};
+    new Set([...Object.keys(localMap || {}), ...Object.keys(cloudMap || {})]).forEach(path => {
+      const localStamp = localMap?.[path];
+      const cloudStamp = cloudMap?.[path];
+      const compared = compareSyncStamps(localStamp, cloudStamp);
+      result[path] = compared.winner === 'cloud' ? cloudStamp : localStamp || cloudStamp;
+    });
+    return result;
+  };
+  merged.fields = mergeStampMap(localMeta.fields, cloudMeta.fields);
+  merged.tombstones = mergeStampMap(localMeta.tombstones, cloudMeta.tombstones);
+  merged.counters = { ...localMeta.counters, ...cloudMeta.counters, ...mergedCounters };
+  const history = new Map();
+  [...(localMeta.history || []), ...(cloudMeta.history || [])].forEach(entry => {
+    if (entry?.id) history.set(entry.id, entry);
+  });
+  merged.history = trimSyncHistory([...history.values()].sort((a, b) => Date.parse(b.at || '') - Date.parse(a.at || '')));
+  decisions.forEach(decision => {
+    const winner = decision.selected || decision.recommended;
+    const stamp = winner === 'cloud' ? decision.cloudStamp : decision.localStamp;
+    if (decision.kind === 'record') {
+      const exists = winner === 'cloud' ? decision.cloudExists : decision.localExists;
+      if (exists) {
+        delete merged.tombstones[decision.path];
+        if (stamp) merged.fields[syncPathJoin(decision.path, '@exists')] = stamp;
+      } else if (stamp) {
+        merged.tombstones[decision.path] = stamp;
+      }
+    } else if (stamp) {
+      merged.fields[decision.path] = stamp;
+    }
+  });
+  return merged;
+}
+
+function buildSmartMerge(localInput, cloudInput, selections = {}) {
+  const localState = syncClone(localInput || defaultState());
+  const cloudState = syncClone(cloudInput || defaultState());
+  ensureStableSyncIds(localState);
+  ensureStableSyncIds(cloudState);
+  localState._syncMeta = normalizeSyncMeta(localState._syncMeta);
+  cloudState._syncMeta = normalizeSyncMeta(cloudState._syncMeta);
+  const decisions = [];
+  const mergedCounters = {};
+
+  const decide = (path, localValue, cloudValue, options = {}) => {
+    const localStamp = options.localStamp === undefined ? syncFieldStamp(localState, path) : options.localStamp;
+    const cloudStamp = options.cloudStamp === undefined ? syncFieldStamp(cloudState, path) : options.cloudStamp;
+    const counter = options.kind !== 'record' && isSyncCounterPath(path)
+      ? mergeCounterState(path, localValue, cloudValue, localState, cloudState)
+      : null;
+    let recommended = null;
+    let reason = '';
+    if (counter) {
+      recommended = 'merged';
+      reason = 'Combined unique counter changes from both copies.';
+      mergedCounters[path] = counter.counter;
+    } else {
+      const compared = compareSyncStamps(localStamp, cloudStamp);
+      recommended = compared.winner;
+      reason = compared.reason;
+    }
+    const selected = selections[path] || recommended;
+    const decision = {
+      path,
+      section:syncSectionForPath(path),
+      kind:options.kind || 'field',
+      localValue:syncClone(localValue),
+      cloudValue:syncClone(cloudValue),
+      localStamp,
+      cloudStamp,
+      localExists:options.localExists,
+      cloudExists:options.cloudExists,
+      recommended,
+      selected,
+      reason,
+      manual:!recommended,
+    };
+    decisions.push(decision);
+    if (selected === 'cloud') return syncClone(cloudValue);
+    if (selected === 'merged' && counter) return counter.value;
+    return syncClone(localValue);
+  };
+
+  const mergeNode = (localValue, cloudValue, path = '') => {
+    if (path && isSyncUiOnlyPath(path)) return syncClone(localValue);
+    if (syncValuesEqual(localValue, cloudValue)) return syncClone(localValue);
+    if (Array.isArray(localValue) || Array.isArray(cloudValue)) {
+      const localArray = Array.isArray(localValue) ? localValue : [];
+      const cloudArray = Array.isArray(cloudValue) ? cloudValue : [];
+      if (!syncArrayUsesRecords(localArray, cloudArray)) return decide(path, localValue, cloudValue);
+      const localMap = new Map(localArray.map((item, index) => [syncRecordId(item, index, path), item]));
+      const cloudMap = new Map(cloudArray.map((item, index) => [syncRecordId(item, index, path), item]));
+      const mergedMap = new Map();
+      new Set([...localMap.keys(), ...cloudMap.keys()]).forEach(id => {
+        const recordPath = syncPathJoin(path, `@${id}`);
+        const localExists = localMap.has(id);
+        const cloudExists = cloudMap.has(id);
+        if (localExists && cloudExists) {
+          mergedMap.set(id, mergeNode(localMap.get(id), cloudMap.get(id), recordPath));
+          return;
+        }
+        const chosen = decide(recordPath, localMap.get(id), cloudMap.get(id), {
+          kind:'record', localExists, cloudExists,
+          localStamp:syncRecordStamp(localState, recordPath, localExists),
+          cloudStamp:syncRecordStamp(cloudState, recordPath, cloudExists),
+        });
+        if (chosen !== undefined) mergedMap.set(id, chosen);
+      });
+      const localOrder = [...localMap.keys()];
+      const cloudOrder = [...cloudMap.keys()];
+      const localRemainingOrder = localOrder.filter(id => mergedMap.has(id));
+      const cloudRemainingOrder = cloudOrder.filter(id => mergedMap.has(id));
+      let order = syncValuesEqual(localRemainingOrder, cloudRemainingOrder)
+        ? localRemainingOrder
+        : decide(syncPathJoin(path, '@order'), localRemainingOrder, cloudRemainingOrder);
+      order = Array.isArray(order) ? order : [];
+      [...mergedMap.keys()].forEach(id => { if (!order.includes(id)) order.push(id); });
+      return order.filter(id => mergedMap.has(id)).map(id => mergedMap.get(id));
+    }
+    const localObject = localValue && typeof localValue === 'object';
+    const cloudObject = cloudValue && typeof cloudValue === 'object';
+    if (localObject || cloudObject) {
+      const localRecord = localObject ? localValue : {};
+      const cloudRecord = cloudObject ? cloudValue : {};
+      const result = {};
+      new Set([...Object.keys(localRecord), ...Object.keys(cloudRecord)]).forEach(key => {
+        if (key === '_syncMeta') return;
+        if (key === '_syncId' || key === 'id') {
+          result[key] = syncClone(localRecord[key] ?? cloudRecord[key]);
+          return;
+        }
+        const mergedValue = mergeNode(localRecord[key], cloudRecord[key], syncPathJoin(path, key));
+        if (mergedValue !== undefined) result[key] = mergedValue;
+      });
+      if (!Object.keys(result).length && (!localObject || !cloudObject)) return undefined;
+      return result;
+    }
+    return decide(path, localValue, cloudValue);
+  };
+
+  const mergedState = mergeNode(localState, cloudState, '');
+  mergedState._syncMeta = mergeSyncMetadata(localState, cloudState, decisions, mergedCounters);
+  mergedState.updatedAt = Math.max(Number(localState.updatedAt || 0), Number(cloudState.updatedAt || 0));
+  return {
+    localState,
+    cloudState,
+    mergedState:normalizeState(mergedState),
+    decisions,
+    selections:{ ...selections },
+    unresolved:decisions.filter(decision => !decision.selected).length,
+    different:decisions.length > 0,
+    size:stateSizeBreakdown(mergedState),
+  };
+}
+
+window.StudyQuestSmartSync = Object.freeze({
+  buildSmartMerge,
+  collectSyncChanges,
+  compareSyncStamps,
+  normalizeSyncMeta,
+  stateSizeBreakdown,
+  syncUtf8Bytes,
+});
+
+function syncStampText(stamp) {
+  if (!stamp?.at) return 'No reliable history';
+  return `${formatRecoveryDate(stamp.at)}${stamp.clockVerified ? '' : ' · unverified clock'}`;
+}
+
+function latestSyncStampForPath(prefix) {
+  const stamps = Object.entries(state?._syncMeta?.fields || {})
+    .filter(([path]) => path === prefix || path.startsWith(`${prefix}/`))
+    .map(([, stamp]) => stamp)
+    .filter(stamp => stamp?.at)
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  return stamps[0] || state?._syncMeta?.tombstones?.[prefix] || null;
+}
+
+function latestSyncStampForRecord(root, id) {
+  return latestSyncStampForPath(syncPathJoin(syncPathJoin('', root), `@${id}`));
+}
+
+function renderSmartMergeReport(preview) {
+  if (!preview?.smartMerge) return '<div class="recovery-empty">Smart merge preview unavailable.</div>';
+  const smart = preview.smartMerge;
+  const otherLabel = preview.cloudLabel || 'Live admin';
+  const unresolved = smart.decisions.filter(decision => !decision.selected);
+  const shown = smart.decisions.slice(0, 300);
+  const size = smart.size;
+  return `
+    <div class="sync-compare-summary${smart.different ? '' : ' is-equal'}">
+      <strong>${smart.different ? `${smart.decisions.length} field decision${smart.decisions.length === 1 ? '' : 's'}` : 'Both versions match'}</strong><br>
+      ${smart.different ? `${unresolved.length} need manual choice. Suggested winners use the latest reliable field time.` : 'No cross-copy changes are needed.'}<br>
+      <span class="recovery-row-meta" style="white-space:normal;">Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</span>
+    </div>
+    <div class="sync-conflict-grid">
+      <div class="sync-conflict-card"><strong>Chrome</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div></div>
+      <div class="sync-conflict-card"><strong>${escapeHtml(otherLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.cloudState))}</div></div>
+    </div>
+    ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose Chrome for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose Live for all manual</button></div>` : ''}
+    <div class="smart-merge-list">${shown.map((decision, index) => `
+      <div class="smart-merge-row${decision.manual && !decision.selected ? ' needs-choice' : ''}">
+        <div class="smart-merge-path"><strong>${escapeHtml(decision.section)}</strong><span>${escapeHtml(syncPathSegments(decision.path).join(' / '))}</span></div>
+        <div class="smart-merge-values">
+          <div><span>Chrome</span><strong>${escapeHtml(describeComparisonValue(decision.localValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.localStamp))}</small></div>
+          <div><span>${escapeHtml(otherLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.cloudValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.cloudStamp))}</small></div>
+        </div>
+        <div class="smart-merge-choice"><select class="form-input" onchange="setSmartMergeFieldChoice(${index},this.value)">
+          <option value=""${decision.selected ? '' : ' selected'}>Choose manually</option>
+          <option value="local"${decision.selected === 'local' ? ' selected' : ''}>Use Chrome</option>
+          <option value="cloud"${decision.selected === 'cloud' ? ' selected' : ''}>Use ${escapeHtml(otherLabel)}</option>
+          ${decision.recommended === 'merged' ? `<option value="merged"${decision.selected === 'merged' ? ' selected' : ''}>Combine increments</option>` : ''}
+        </select><small>${escapeHtml(decision.reason)}</small></div>
+      </div>`).join('')}</div>
+    ${smart.decisions.length > shown.length ? `<div class="recovery-empty" style="margin-top:10px;">Showing the first ${shown.length} decisions. Export the full report or use the bulk manual controls.</div>` : ''}`;
+}
+
+function renderComparisonNameList(title, values) {
+  if (!values?.length) return '';
+  const shown = values.slice(0, 8);
+  return `<div><div class="sync-diff-group-title">${escapeHtml(title)}</div><ul class="sync-diff-items">${shown.map(value => `<li>${escapeHtml(value)}</li>`).join('')}${values.length > shown.length ? `<li>+${values.length - shown.length} more</li>` : ''}</ul></div>`;
+}
+
+function renderStateComparisonReport(comparison, chromeState, liveState) {
+  if (!comparison) return '<div class="recovery-empty">Comparison unavailable.</div>';
+  const changedSections = comparison.sections.filter(item => item.differenceCount);
+  const summary = comparison.different
+    ? `${comparison.differenceCount} saved item${comparison.differenceCount === 1 ? '' : 's'} differ across ${comparison.changedSectionCount} area${comparison.changedSectionCount === 1 ? '' : 's'}. Review the names and fields below before choosing a copy.`
+    : 'Chrome and the live admin account contain the same user data. Save timestamps and navigation-only settings are ignored.';
+  return `
+    <div class="sync-compare-summary${comparison.different ? '' : ' is-equal'}"><strong>${comparison.different ? 'Differences found' : 'Both versions match'}</strong><br>${escapeHtml(summary)}<br><span class="recovery-row-meta" style="white-space:normal;">Compared ${escapeHtml(formatRecoveryDate(comparison.comparedAt))}</span></div>
+    <div class="sync-conflict-grid">
+      <div class="sync-conflict-card"><strong>Chrome on this PC</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.chromeUpdatedAt))}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(chromeState || {}))}</div></div>
+      <div class="sync-conflict-card"><strong>Live admin account</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div></div>
+    </div>
+    ${changedSections.length ? `<div class="sync-diff-list">${changedSections.map(section => `
+      <details class="sync-diff-section" open>
+        <summary><span>${escapeHtml(section.label)}</span><span class="sync-diff-count">${section.differenceCount} difference${section.differenceCount === 1 ? '' : 's'} · Chrome ${section.chromeCount} / Live ${section.liveCount}</span></summary>
+        <div class="sync-diff-body">
+          ${renderComparisonNameList('Only in Chrome', section.localOnly)}
+          ${renderComparisonNameList('Only in Live', section.liveOnly)}
+          ${section.changed.map(item => `<div><div class="sync-diff-group-title">Changed in both: ${escapeHtml(item.label)}</div>${item.fields.length ? item.fields.map(field => `<div class="sync-field-change"><strong>${escapeHtml(field.field)}</strong>: Chrome “${escapeHtml(field.chrome)}” · Live “${escapeHtml(field.live)}”</div>`).join('') : '<div class="sync-field-change">Nested content is different.</div>'}</div>`).join('')}
+        </div>
+      </details>`).join('')}</div>` : ''}`;
+}
+
 function restoreSafetySnapshot(snapshot, title = 'Restore Backup?') {
   if (!snapshot?.state) {
     showToast('That backup is not usable.', '#f76a6a');
@@ -6698,6 +7673,8 @@ function restoreSafetySnapshot(snapshot, title = 'Restore Backup?') {
       pushUndoSnapshot('Before recovery restore');
       pushAutoBackup('Before recovery restore', state);
       setSQState(snapshot.state);
+      trackCurrentStateChanges('Restored backup');
+      state.updatedAt = Date.now();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       setSaveMeta({ latestLocalSaveAt: new Date().toISOString(), latestRestoreAt: new Date().toISOString() });
       ensureTrackerSemesters();
@@ -6754,40 +7731,70 @@ function downloadJsonFile(filename, value) {
 
 function openLiveSyncConflict(conflict) {
   if (!conflict?.localState || !conflict?.cloudState) return;
+  conflict.comparison = conflict.comparison || buildStateComparison(conflict.localState, conflict.cloudState, {
+    cloudUpdatedAt: conflict.cloudUpdatedAt,
+    liveUpdatedAt: conflict.cloudUpdatedAt,
+    liveRevision: conflict.revision,
+  });
   clearTimeout(liveSyncScheduleTimer);
+  conflict.smartMerge = buildSmartMerge(conflict.localState, conflict.cloudState, conflict.selections || {});
+  conflict.selections = conflict.smartMerge.selections;
+  if (!conflict.smartMerge.different) {
+    liveSync.conflict = null;
+    liveSync.preview = null;
+    liveSync.comparison = conflict.comparison;
+    liveSync.lastComparedAt = conflict.comparison.comparedAt;
+    if (conflict.sourceType === 'local-server') {
+      closeModal('liveSyncConflictModal');
+      setSaveStatus(liveSync.pending ? 'local' : 'saved', liveSync.pending ? 'Saved locally · admin sync pending' : 'Chrome and local server match');
+      return false;
+    }
+    liveSync.pending = false;
+    liveSync.status = 'synced';
+    const metaPatch = { pending:false };
+    if (conflict.revision !== undefined && conflict.revision !== null && Number.isFinite(Number(conflict.revision))) {
+      metaPatch.revision = Number(conflict.revision);
+    }
+    setLiveSyncMeta(metaPatch);
+    closeModal('liveSyncConflictModal');
+    setSaveStatus('saved', scheduledSyncStatusText());
+    return false;
+  }
   liveSync.conflict = conflict;
+  liveSync.preview = conflict;
+  liveSync.comparison = conflict.comparison;
+  liveSync.lastComparedAt = conflict.comparison.comparedAt;
   liveSync.pending = false;
   liveSync.status = 'conflict';
+  const otherLabel = conflict.cloudLabel || 'Live';
   if (!conflict.snapshotsPrepared) {
-    pushAutoBackup('Live conflict - local copy', conflict.localState);
-    pushAutoBackup('Live conflict - cloud copy', conflict.cloudState);
+    pushAutoBackup(`${otherLabel} comparison - Chrome copy`, conflict.localState);
+    pushAutoBackup(`${otherLabel} comparison - other copy`, conflict.cloudState);
   }
   setLiveSyncMeta({ pending: false, conflictAt: new Date().toISOString() });
   const title = document.getElementById('liveSyncConflictTitle');
   const copy = document.getElementById('liveSyncConflictCopy');
-  if (title) title.textContent = conflict.reason === 'initial-pair' ? 'Compare Chrome and Live Saves' : 'Choose Which Save To Keep';
+  if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Review Smart Merge';
   if (copy) copy.textContent = conflict.reason === 'initial-pair'
-    ? 'First pairing never overwrites either copy automatically. Chrome, local-disk, and live snapshots are ready.'
-    : 'Local and live StudyQuest were both changed. Both copies are preserved until you choose.';
+    ? 'First pairing preserves every copy. Review the proposed field winners before anything is written.'
+    : `Chrome and ${otherLabel} are both preserved. Review field times and choices, then apply once.`;
+  const exportButton = document.getElementById('exportSmartMergeBtn');
+  const otherButton = document.getElementById('useOtherMergeBtn');
+  if (exportButton) exportButton.textContent = `Export Chrome + ${otherLabel} + Merged`;
+  if (otherButton) otherButton.textContent = `Use ${otherLabel}`;
   const body = document.getElementById('liveSyncConflictBody');
-  if (body) {
-    body.innerHTML = `
-      <div class="sync-conflict-grid">
-        <div class="sync-conflict-card">
-          <strong>Local v13</strong>
-          <div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(conflict.localState.updatedAt))}</div>
-          <div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(conflict.localState))}</div>
-        </div>
-        <div class="sync-conflict-card">
-          <strong>Live admin account</strong>
-          <div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(conflict.cloudUpdatedAt || conflict.cloudState.updatedAt))}</div>
-          <div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(conflict.cloudState))}</div>
-        </div>
-      </div>`;
+  if (body) body.innerHTML = renderSmartMergeReport(conflict);
+  const applyButton = document.getElementById('applySmartMergeBtn');
+  if (applyButton) {
+    applyButton.disabled = conflict.smartMerge.unresolved > 0 || conflict.smartMerge.size.overLimit;
+    applyButton.title = conflict.smartMerge.size.overLimit
+      ? 'The merged save exceeds the 10 MiB cloud limit.'
+      : conflict.smartMerge.unresolved ? 'Resolve every manual field first.' : 'Apply the reviewed field merge.';
   }
   openModal('liveSyncConflictModal');
   setSaveStatus('error', 'Sync choice needed');
   renderRecoveryCenter();
+  return true;
 }
 
 function exportLiveSyncConflictCopies() {
@@ -6799,54 +7806,350 @@ function exportLiveSyncConflictCopies() {
   showToast('Both conflict copies exported.', '#6af7b0');
 }
 
-async function resolveLiveSyncConflict(choice) {
-  const conflict = liveSync.conflict;
-  if (!conflict) return;
-  pushUndoSnapshot('Before live conflict choice');
-  pushAutoBackup('Before live conflict choice', state);
-  liveSync.revision = Number(conflict.revision || 0);
-  liveSync.conflict = null;
-  closeModal('liveSyncConflictModal');
-  if (choice === 'cloud') {
-    setSQState(conflict.cloudState);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    setLiveSyncMeta({
-      revision: liveSync.revision,
-      pending: false,
-      lastSyncedStateUpdatedAt: state.updatedAt,
-      latestCloudLoadAt: new Date().toISOString(),
+function exportSmartMergeBundle() {
+  const preview = liveSync.conflict || liveSync.preview;
+  if (!preview?.smartMerge) return showToast('Run the comparison first.', '#f7c06a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  downloadJsonFile(`studyquest-smart-merge-${stamp}.json`, {
+    exportedAt:new Date().toISOString(),
+    otherSource:preview.cloudLabel || 'Live admin',
+    chrome:preview.localState,
+    other:preview.cloudState,
+    merged:preview.smartMerge.mergedState,
+    decisions:preview.smartMerge.decisions,
+  });
+  showToast(`Chrome, ${preview.cloudLabel || 'Live'}, and merged copies exported together.`, '#6af7b0');
+}
+
+function refreshSmartMergePreview() {
+  const preview = liveSync.conflict || liveSync.preview;
+  if (!preview?.localState || !preview?.cloudState) return;
+  preview.smartMerge = buildSmartMerge(preview.localState, preview.cloudState, preview.selections || {});
+  preview.selections = preview.smartMerge.selections;
+  const body = document.getElementById('liveSyncConflictBody');
+  if (body) body.innerHTML = renderSmartMergeReport(preview);
+  const applyButton = document.getElementById('applySmartMergeBtn');
+  if (applyButton) applyButton.disabled = preview.smartMerge.unresolved > 0 || preview.smartMerge.size.overLimit;
+}
+
+function setSmartMergeFieldChoice(index, choice) {
+  const preview = liveSync.conflict || liveSync.preview;
+  const decision = preview?.smartMerge?.decisions?.[index];
+  if (!decision) return;
+  preview.selections = { ...(preview.selections || {}) };
+  if (choice) preview.selections[decision.path] = choice;
+  else delete preview.selections[decision.path];
+  refreshSmartMergePreview();
+}
+
+function chooseAllManualMergeFields(choice) {
+  const preview = liveSync.conflict || liveSync.preview;
+  if (!preview?.smartMerge || !['local','cloud'].includes(choice)) return;
+  preview.selections = { ...(preview.selections || {}) };
+  preview.smartMerge.decisions.filter(decision => !decision.recommended).forEach(decision => {
+    preview.selections[decision.path] = choice;
+  });
+  refreshSmartMergePreview();
+}
+
+function chooseEveryMergeField(choice) {
+  const preview = liveSync.conflict || liveSync.preview;
+  if (!preview?.smartMerge || !['local','cloud'].includes(choice)) return;
+  preview.selections = {};
+  preview.smartMerge.decisions.forEach(decision => { preview.selections[decision.path] = choice; });
+  refreshSmartMergePreview();
+}
+
+async function compareChromeAndLive() {
+  if ((!liveSync.paired && !isHostedAppHost()) || corruptSaveInfo) {
+    showToast('Pair this Chrome device with the live admin account first.', '#f7c06a');
+    return;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 75_000);
+  try {
+    liveSync.status = 'comparing';
+    liveSync.message = 'Reading both saves without changing either one...';
+    setSaveStatus('saving', 'Comparing Chrome and live...');
+    renderRecoveryCenter();
+    const res = await fetch(cloudStateEndpoint(), { credentials:'same-origin', cache:'no-store', signal:controller.signal });
+    const result = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      if (isHostedAppHost()) handleHostedAuthExpired();
+      else {
+        liveSync.paired = false;
+        liveSync.status = 'unpaired';
+        liveSync.message = 'This Chrome device needs to be paired again.';
+      }
+      return;
+    }
+    if (!res.ok) throw new Error(result.error || 'Could not read the live save.');
+    calibrateSyncClock(result.serverTime);
+    if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
+    const chromeState = cloneStateForSafety(state);
+    const cloudState = normalizeState(result.state || defaultState());
+    const comparison = buildStateComparison(chromeState, cloudState, {
+      comparedAt:new Date().toISOString(),
+      chromeUpdatedAt:chromeState.updatedAt,
+      liveUpdatedAt:result.updatedAt || cloudState.updatedAt,
+      liveRevision:Number(result.revision || 0),
     });
-    recordSuccessfulLiveSync('cloud-to-browser');
-    liveSync.pending = false;
-    liveSync.status = 'synced';
+    liveSync.preview = {
+      localState:chromeState,
+      cloudState,
+      revision:Number(result.revision || 0),
+      cloudUpdatedAt:result.updatedAt || null,
+      comparison,
+    };
+    liveSync.preview.smartMerge = buildSmartMerge(chromeState, cloudState);
+    liveSync.comparison = comparison;
+    liveSync.lastComparedAt = comparison.comparedAt;
+    liveSync.lastCloudRevision = Number(result.revision || 0);
+    liveSync.status = comparison.different ? 'comparison-ready' : 'synced';
+    liveSync.message = comparison.different
+      ? `${comparison.differenceCount} saved item(s) differ. Nothing was changed.`
+      : 'Chrome and live user data match.';
+    const body = document.getElementById('liveSyncComparisonBody');
+    if (body) body.innerHTML = renderStateComparisonReport(comparison, chromeState, cloudState);
+    const reviewButton = document.getElementById('reviewLiveSyncChoicesBtn');
+    if (reviewButton) {
+      reviewButton.disabled = !comparison.different;
+      reviewButton.textContent = comparison.different ? 'Review Smart Merge' : 'Versions Match';
+    }
+    closeModal('recoveryCenterModal');
+    openModal('liveSyncComparisonModal');
+    setSaveStatus(comparison.different ? 'local' : 'saved', comparison.different ? 'Versions differ · review ready' : scheduledSyncStatusText());
+  } catch (error) {
+    liveSync.status = 'offline';
+    liveSync.message = error?.name === 'AbortError' ? 'Live comparison timed out while the server was waking.' : String(error?.message || error);
+    setSaveStatus('offline', 'Could not compare yet');
+    recordAppError('live-compare', error);
+    showToast(liveSync.message, '#f76a6a');
+  } finally {
+    clearTimeout(timeout);
+    renderRecoveryCenter();
+  }
+}
+
+function closeLiveSyncComparison() {
+  closeModal('liveSyncComparisonModal');
+  liveSync.preview = null;
+  renderRecoveryCenter();
+}
+
+function exportLiveSyncComparisonReport() {
+  const preview = liveSync.preview;
+  if (!preview?.comparison) return showToast('Run the comparison first.', '#f7c06a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  downloadJsonFile(`studyquest-chrome-live-differences-${stamp}.json`, {
+    comparison:preview.comparison,
+    smartMerge:preview.smartMerge ? {
+      decisions:preview.smartMerge.decisions,
+      mergedSize:preview.smartMerge.size,
+    } : null,
+  });
+  showToast('Difference report exported. Neither save was changed.', '#6af7b0');
+}
+
+function reviewLiveSyncComparison() {
+  const preview = liveSync.preview;
+  if (!preview?.comparison?.different) return closeLiveSyncComparison();
+  closeModal('liveSyncComparisonModal');
+  liveSync.preview = null;
+  openLiveSyncConflict({
+    localState:preview.localState,
+    cloudState:preview.cloudState,
+    revision:preview.revision,
+    cloudUpdatedAt:preview.cloudUpdatedAt,
+    comparison:preview.comparison,
+    smartMerge:preview.smartMerge,
+    selections:preview.selections || {},
+    reason:'manual-review',
+  });
+}
+
+async function resolveLiveSyncConflict(choice) {
+  if (!['local','cloud'].includes(choice)) return;
+  chooseEveryMergeField(choice);
+  await applySmartMerge();
+}
+
+function finalizeSmartMergeState(preview) {
+  const merged = syncClone(preview.smartMerge.mergedState);
+  const meta = normalizeSyncMeta(merged._syncMeta);
+  const stamp = syncNowStamp(meta);
+  preview.smartMerge.decisions.forEach(decision => {
+    const selected = preview.selections?.[decision.path] || decision.selected || decision.recommended;
+    if (!selected || (!decision.manual && selected === decision.recommended)) return;
+    if (decision.kind === 'record') {
+      const exists = selected === 'cloud' ? decision.cloudExists : decision.localExists;
+      if (exists) {
+        delete meta.tombstones[decision.path];
+        meta.fields[syncPathJoin(decision.path, '@exists')] = { ...stamp };
+      } else {
+        meta.tombstones[decision.path] = { ...stamp };
+      }
+    } else {
+      meta.fields[decision.path] = { ...stamp };
+    }
+  });
+  meta.history.unshift({
+    id:`chg_${stamp.deviceId}_${stamp.seq}_smart_merge`,
+    path:'smart-merge',
+    kind:'merge',
+    label:`Applied smart merge (${preview.smartMerge.decisions.length} field decisions)`,
+    before:'Chrome and Live reviewed',
+    after:'Merged copy approved',
+    ...stamp,
+  });
+  meta.history = trimSyncHistory(meta.history);
+  merged._syncMeta = meta;
+  merged.updatedAt = Date.now();
+  return normalizeState(merged);
+}
+
+async function applySmartMerge() {
+  const preview = liveSync.conflict || liveSync.preview;
+  if (!preview?.smartMerge) return showToast('Run the comparison first.', '#f7c06a');
+  if (preview.smartMerge.unresolved) return showToast('Choose Chrome or Live for every manual field first.', '#f7c06a');
+  if (preview.smartMerge.size.overLimit) return showToast('Merged save exceeds the 10 MiB cloud limit. Export it before cleanup.', '#f76a6a');
+  const button = document.getElementById('applySmartMergeBtn');
+  if (button) button.disabled = true;
+  if (preview.sourceType === 'import' || preview.sourceType === 'local-server') {
+    try {
+      const approvedState = finalizeSmartMergeState(preview);
+      const approvedSize = stateSizeBreakdown(approvedState);
+      if (approvedSize.overLimit) return showToast('Merged save exceeds the 10 MiB limit. Export it before cleanup.', '#f76a6a');
+      const isLocalServerMerge = preview.sourceType === 'local-server';
+      pushAutoBackup(isLocalServerMerge ? 'Before local-server smart merge' : 'Before imported smart merge', state);
+      if (isLocalServerMerge) pushAutoBackup('Local-server copy before smart merge', preview.cloudState);
+      setSQState(approvedState, { resetSyncBaseline:true });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      liveSync.stateBytes = approvedSize.totalBytes;
+      liveSync.pending = liveSync.paired || isHostedAppHost();
+      setLiveSyncMeta({ pending:liveSync.pending, localUpdatedAt:state.updatedAt });
+      if (isLocalLabHost()) await saveStateToLocalServerOnly();
+      liveSync.preview = null;
+      liveSync.conflict = null;
+      closeModal('liveSyncConflictModal');
+      ensureTrackerSemesters();
+      ensureTravelState();
+      renderAll();
+      scheduleNextLiveSync({ reset:true });
+      showToast(isLocalServerMerge
+        ? 'Chrome and the local server now use the reviewed merge. Live remains unchanged.'
+        : 'Imported backup merged into Chrome. Live remains unchanged until the next reviewed comparison.', '#6af7b0');
+    } catch (error) {
+      recordAppError('import-smart-merge', error);
+      showToast(String(error?.message || error), '#f76a6a');
+    } finally {
+      if (button) button.disabled = false;
+      renderRecoveryCenter();
+    }
+    return;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 75_000);
+  try {
+    setSaveStatus('saving', 'Rechecking live revision...');
+    const response = await fetch(cloudStateEndpoint(), { credentials:'same-origin', cache:'no-store', signal:controller.signal });
+    const latest = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(latest.error || 'Could not recheck the live save.');
+    calibrateSyncClock(latest.serverTime);
+    const latestRevision = Number(latest.revision || 0);
+    const cloudChanged = latestRevision !== Number(preview.revision || 0) || !statesEquivalent(latest.state || {}, preview.cloudState || {});
+    const chromeChanged = !statesEquivalent(state, preview.localState || {});
+    if (cloudChanged || chromeChanged) {
+      openLiveSyncConflict({
+        localState:cloneStateForSafety(state),
+        cloudState:normalizeState(latest.state || defaultState()),
+        revision:latestRevision,
+        cloudUpdatedAt:latest.updatedAt || null,
+        reason:'revision-recheck',
+      });
+      showToast('A copy changed during review. The preview was refreshed before writing.', '#f7c06a');
+      return;
+    }
+
+    const approvedState = finalizeSmartMergeState(preview);
+    const approvedSize = stateSizeBreakdown(approvedState);
+    if (approvedSize.overLimit) {
+      preview.smartMerge.size = approvedSize;
+      refreshSmartMergePreview();
+      showToast('Merge metadata moved this save over 10 MiB. Nothing was written.', '#f76a6a');
+      return;
+    }
+    pushUndoSnapshot('Before smart merge');
+    pushAutoBackup('Before smart merge - Chrome', state);
+    pushAutoBackup('Before smart merge - Live', preview.cloudState);
+    pushAutoBackup('Smart merge proposal', approvedState);
+    setSQState(approvedState, { resetSyncBaseline:true });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    liveSync.stateBytes = approvedSize.totalBytes;
+    liveSync.revision = latestRevision;
+    liveSync.lastCloudRevision = latestRevision;
+    liveSync.pending = true;
+    setLiveSyncMeta({ revision:latestRevision, pending:true, localUpdatedAt:state.updatedAt });
+    if (isLocalLabHost()) await saveStateToLocalServerOnly();
+    const activeConflict = liveSync.conflict;
+    liveSync.conflict = null;
+    const outcome = await saveStateToCloud({
+      allowDuringConflict:true,
+      mergeApproval:{
+        approvedAt:new Date().toISOString(),
+        decisionCount:preview.smartMerge.decisions.length,
+        sourceRevision:latestRevision,
+        source:'v13-smart-merge',
+      },
+    });
+    if (!outcome.ok) {
+      if (!liveSync.conflict) liveSync.conflict = activeConflict;
+      return;
+    }
+    liveSync.preview = null;
+    liveSync.conflict = null;
+    closeModal('liveSyncConflictModal');
+    closeModal('liveSyncComparisonModal');
     ensureTrackerSemesters();
     ensureTravelState();
     renderAll();
-    if (isLocalLabHost()) await saveStateToLocalServerOnly();
-    scheduleNextLiveSync({ reset: true });
-    setSaveStatus('saved', scheduledSyncStatusText());
-  } else {
-    setSQState(conflict.localState);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    scheduleNextLiveSync({ reset:true });
+    showToast('Smart merge applied to Chrome and Live.', '#6af7b0');
+  } catch (error) {
     liveSync.pending = true;
-    setLiveSyncMeta({ revision: liveSync.revision, pending: true, localUpdatedAt: state.updatedAt });
-    await saveStateToCloud();
-    scheduleNextLiveSync({ reset: true });
+    setLiveSyncMeta({ pending:true, lastError:String(error?.message || error) });
+    setSaveStatus('offline', 'Saved locally · merge sync pending');
+    recordAppError('smart-merge-apply', error);
+    showToast(error?.name === 'AbortError' ? 'Live recheck timed out. Nothing was overwritten.' : String(error?.message || error), '#f76a6a');
+  } finally {
+    clearTimeout(timeout);
+    if (button) button.disabled = false;
+    renderRecoveryCenter();
   }
-  renderRecoveryCenter();
 }
 
 async function saveStateToLocalServerOnly() {
   if (!isLocalLabHost()) return;
   try {
-    await fetch(SERVER_STATE_ENDPOINT, {
+    const size = stateSizeBreakdown(state);
+    if (size.overLimit) throw new Error(`STATE_TOO_LARGE: ${formatStateBytes(size.totalBytes)} exceeds ${formatStateBytes(size.maxBytes)}`);
+    const response = await fetch(SERVER_STATE_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state),
     });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = result.error === 'STATE_TOO_LARGE'
+        ? `STATE_TOO_LARGE: ${formatStateBytes(result.stateBytes)} exceeds ${formatStateBytes(result.maxStateBytes)}`
+        : result.error || 'Local server save failed';
+      throw new Error(detail);
+    }
     setSaveMeta({ latestLocalServerSaveAt: new Date().toISOString() });
   } catch (e) {
     recordAppError('local-server-save', e);
+    pendingServerSync = true;
+    setSaveStatus('offline', String(e?.message || e).startsWith('STATE_TOO_LARGE') ? 'Saved in Chrome · local copy too large' : 'Saved in Chrome · local server offline');
   }
 }
 
@@ -7332,6 +8635,10 @@ function renderRecoveryCenter() {
   const autoBackups = trimSafetyList(safeReadJson(AUTO_BACKUP_STORAGE_KEY, []), 10);
   const errors = trimSafetyList(safeReadJson(ERROR_LOG_STORAGE_KEY, []), 20);
   const corrupt = corruptSaveInfo || safeReadJson(CORRUPT_SAVE_STORAGE_KEY, null);
+  const size = stateSizeBreakdown(state);
+  const history = trimSyncHistory(state?._syncMeta?.history || []);
+  const filteredHistory = changeHistoryFilter === 'all' ? history : history.filter(entry => syncSectionForPath(entry.path) === changeHistoryFilter);
+  const sizeLevel = size.percent >= 95 ? 'Critical' : size.percent >= 80 ? 'Warning' : 'Healthy';
   const saveHealth = corrupt ? 'Recovery needed' : liveSync.conflict ? 'Sync choice needed' : pendingServerSync || liveSync.pending ? 'Local saved · sync pending' : 'Ready';
   const liveStatus = liveSync.conflict ? 'Conflict - both preserved' : liveSync.paired || isHostedAppHost() ? liveSync.status || 'Connected' : 'Not paired';
   const release = liveSync.release || null;
@@ -7340,6 +8647,14 @@ function renderRecoveryCenter() {
   const localHash = liveSync.localHash || release?.local?.hash || null;
   const publishedHash = liveSync.publishedHash || release?.hash || null;
   const hashesMatch = !!localHash && !!publishedHash && localHash === publishedHash;
+  const comparison = liveSync.comparison;
+  const comparisonStatus = liveSync.conflict
+    ? 'Choice needed'
+    : !comparison
+      ? 'Not checked'
+      : comparison.different
+        ? `${comparison.differenceCount} difference${comparison.differenceCount === 1 ? '' : 's'}`
+        : 'Versions match';
   body.innerHTML = `
     <div class="recovery-grid">
       <div class="recovery-card"><div class="recovery-label">Save Health</div><div class="recovery-value">${escapeHtml(saveHealth)}</div></div>
@@ -7347,7 +8662,12 @@ function renderRecoveryCenter() {
       <div class="recovery-card"><div class="recovery-label">Local Disk Save</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(meta.latestLocalServerSaveAt || meta.latestServerSaveAt))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live Cloud Save</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(meta.latestCloudSaveAt || getLiveSyncMeta().latestCloudSaveAt))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Current Data</div><div class="recovery-value">${escapeHtml(stateSummary(state))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Saved State Size</div><div class="recovery-value">${escapeHtml(formatStateBytes(size.totalBytes))} / 10 MiB · ${escapeHtml(sizeLevel)}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Cloud Account Size</div><div class="recovery-value">${liveSync.cloudStateBytes == null ? 'Not checked' : escapeHtml(formatStateBytes(liveSync.cloudStateBytes))}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Database Storage</div><div class="recovery-value">${liveSync.databaseBytes == null ? 'Not checked' : escapeHtml(formatStateBytes(liveSync.databaseBytes))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live Sync</div><div class="recovery-value">${escapeHtml(liveStatus)}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Chrome vs Live</div><div class="recovery-value">${escapeHtml(comparisonStatus)}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Last Compared</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastComparedAt || comparison?.comparedAt))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Local v13</div><div class="recovery-value">${escapeHtml(shortReleaseHash(localHash))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live v13</div><div class="recovery-value">${escapeHtml(shortReleaseHash(publishedHash))}${hashesMatch ? ' · Current' : localHash && publishedHash ? ' · Update ready' : ''}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live Server</div><div class="recovery-value">${liveSync.liveHealthy === true ? 'Healthy' : liveSync.liveHealthy === false ? 'Waking / unavailable' : 'Not checked'}</div></div>
@@ -7359,6 +8679,12 @@ function renderRecoveryCenter() {
       <div class="recovery-card"><div class="recovery-label">Next Automatic Sync</div><div class="recovery-value">${liveSync.conflict ? 'Paused for conflict' : escapeHtml(formatRecoveryDate(liveSync.nextSyncAt || syncMeta.nextScheduledSyncAt))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Last Browser → Cloud</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastPushAt || syncMeta.lastPushAt))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Last Cloud → Browser</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastPullAt || syncMeta.lastPullAt))}</div></div>
+    </div>
+    <div class="recovery-section">
+      <div class="recovery-section-title">Storage Usage</div>
+      <div style="height:8px;border-radius:4px;background:var(--surface2);overflow:hidden;"><div style="height:100%;width:${Math.min(100, Math.max(1, size.percent)).toFixed(2)}%;background:${size.percent >= 95 ? 'var(--red)' : size.percent >= 80 ? 'var(--gold)' : 'var(--green)'};"></div></div>
+      <div class="recovery-row-meta" style="white-space:normal;margin-top:7px;">User data ${escapeHtml(formatStateBytes(size.userDataBytes))} · sync metadata ${escapeHtml(formatStateBytes(size.metadataBytes))} · change history ${escapeHtml(formatStateBytes(size.historyBytes))}</div>
+      ${size.percent >= 95 ? '<div class="sync-compare-summary" style="border-color:rgba(247,106,106,.5);margin-top:9px;">Cloud saves are nearly full. StudyQuest will keep Chrome data even if the cloud rejects a save. Export a backup before removing old content.</div>' : size.percent >= 80 ? '<div class="sync-compare-summary" style="margin-top:9px;">Cloud storage is above 80%. No user data will be removed automatically.</div>' : ''}
     </div>
     ${renderAccountRecoveryAdmin()}
     <div class="recovery-section">
@@ -7374,7 +8700,9 @@ function renderRecoveryCenter() {
       ` : liveSync.paired ? `
         <div class="recovery-empty">Paired as <strong>${escapeHtml(liveSync.username || 'admin')}</strong>${liveSync.deviceName ? ' · ' + escapeHtml(liveSync.deviceName) : ''}. Chrome and live exchange changes every 30 minutes. Browser and disk saves remain immediate.</div>
         <div class="recovery-actions" style="margin-top:9px;">
-          <button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:'manual'})">Sync Now</button>
+          ${liveSync.conflict
+            ? '<button class="btn btn-primary btn-sm" onclick="openLiveSyncConflict(liveSync.conflict)">Review Current Differences</button>'
+            : '<button class="btn btn-primary btn-sm" onclick="compareChromeAndLive()">Compare Chrome & Live</button>'}
           <button class="btn btn-ghost btn-sm" onclick="disconnectLocalLiveAccount()">Disconnect Device</button>
         </div>
       ` : `
@@ -7422,6 +8750,17 @@ function renderRecoveryCenter() {
       <div class="recovery-list">${renderSnapshotRows(autoBackups, 'restoreAutoBackup')}</div>
     </div>
     <div class="recovery-section">
+      <div class="recovery-section-title">Change History</div>
+      <div class="recovery-actions" style="margin-bottom:9px;">
+        <select class="form-input" onchange="changeHistoryFilter=this.value;renderRecoveryCenter()" style="max-width:190px;min-height:34px;">
+          ${['all', ...new Set(history.map(entry => syncSectionForPath(entry.path)))].map(section => `<option value="${escapeHtml(section)}"${changeHistoryFilter === section ? ' selected' : ''}>${escapeHtml(section === 'all' ? 'All data areas' : section)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="recovery-list">
+        ${filteredHistory.length ? filteredHistory.map(entry => `<div class="recovery-row"><div><div class="recovery-row-title">${escapeHtml(entry.label || entry.path)}</div><div class="recovery-row-meta" style="white-space:normal;">${escapeHtml(formatRecoveryDate(entry.at))} · ${escapeHtml(syncSectionForPath(entry.path))}${entry.clockVerified ? '' : ' · clock unverified'}</div></div><span class="recovery-row-meta">${escapeHtml(entry.after || '')}</span></div>`).join('') : '<div class="recovery-empty">No saved data changes in this filter.</div>'}
+      </div>
+    </div>
+    <div class="recovery-section">
       <div class="recovery-section-title">Recent App Errors</div>
       <div class="recovery-actions" style="margin-bottom:9px;">
         <button class="btn btn-ghost btn-sm" onclick="copyErrorDetails()">Copy Error Details</button>
@@ -7456,17 +8795,35 @@ async function refreshLiveSyncStatus() {
       liveSync.status = liveSync.conflict ? 'conflict' : 'connected';
       liveSync.liveHealthy = true;
       liveSync.localServerHealthy = true;
-      const versionRes = await fetch('/api/version', { credentials: 'same-origin', cache: 'no-store' });
+      const [versionRes, healthRes] = await Promise.all([
+        fetch('/api/version', { credentials:'same-origin', cache:'no-store' }),
+        fetch('/api/health', { credentials:'same-origin', cache:'no-store' }),
+      ]);
       if (versionRes.ok) {
         liveSync.release = await versionRes.json();
         liveSync.localHash = liveSync.release?.hash || null;
         liveSync.publishedHash = liveSync.release?.hash || null;
         liveSync.publishedAt = liveSync.release?.releasedAt || null;
       }
+      if (healthRes.ok) {
+        const health = await healthRes.json();
+        calibrateSyncClock(health.serverTime);
+        if (Number(health.maxStateBytes) > 0) liveSync.maxStateBytes = Number(health.maxStateBytes);
+        if (health.stateBytes != null && Number(health.stateBytes) >= 0) {
+          liveSync.stateBytes = Number(health.stateBytes);
+          liveSync.cloudStateBytes = Number(health.stateBytes);
+        }
+        if (health.databaseBytes != null && Number(health.databaseBytes) >= 0) liveSync.databaseBytes = Number(health.databaseBytes);
+      }
     } else {
       const res = await fetch(LOCAL_LIVE_STATUS_ENDPOINT, { cache: 'no-store' });
       if (!res.ok) throw new Error('Local live-sync status unavailable');
       const result = await res.json();
+      calibrateSyncClock(result.serverTime);
+      if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
+      if (Number(result.stateBytes) >= 0) liveSync.stateBytes = Number(result.stateBytes);
+      if (result.cloudStateBytes != null && Number(result.cloudStateBytes) >= 0) liveSync.cloudStateBytes = Number(result.cloudStateBytes);
+      if (result.databaseBytes != null && Number(result.databaseBytes) >= 0) liveSync.databaseBytes = Number(result.databaseBytes);
       liveSync.localServerHealthy = result.localServerHealthy === true;
       liveSync.paired = !!result.paired;
       liveSync.username = result.username || null;
@@ -7501,7 +8858,7 @@ async function refreshLiveSyncStatus() {
 }
 
 function statesEquivalent(a, b) {
-  try { return JSON.stringify(a || null) === JSON.stringify(b || null); } catch { return false; }
+  try { return !buildStateComparison(a || {}, b || {}).different; } catch { return false; }
 }
 
 function applyCloudState(cloudState, revision, updatedAt, label = 'Before live cloud load', { recordCloudSync = true } = {}) {
@@ -7509,7 +8866,7 @@ function applyCloudState(cloudState, revision, updatedAt, label = 'Before live c
     pushUndoSnapshot(label);
     pushAutoBackup(label, state);
   }
-  setSQState(cloudState);
+  setSQState(cloudState, { resetSyncBaseline:true });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   liveSync.revision = Number(revision || 0);
   liveSync.lastCloudRevision = liveSync.revision;
@@ -7553,16 +8910,10 @@ async function syncLiveState(options = {}) {
       return { ok: false, authorizationRequired: true };
     }
     if (!res.ok) throw new Error(result.error || 'Could not load live state');
+    calibrateSyncClock(result.serverTime);
+    if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
     const cloudState = normalizeState(result.state || defaultState());
     const cloudRevision = Number(result.revision || 0);
-    const meta = getLiveSyncMeta();
-    const localHasData = hasUserData(state);
-    const cloudHasData = hasUserData(cloudState);
-    const pending = !!meta.pending || liveSync.pending;
-    const knownRevision = Number.isInteger(meta.revision) ? meta.revision : null;
-    const localChangedSinceSync = Number(state.updatedAt || 0) > Number(meta.lastSyncedStateUpdatedAt || 0);
-    const localChanged = pending || localChangedSinceSync;
-    const cloudChanged = knownRevision === null ? !statesEquivalent(state, cloudState) : cloudRevision !== knownRevision;
     const statesDiffer = !statesEquivalent(state, cloudState);
 
     liveSync.revision = cloudRevision;
@@ -7572,56 +8923,26 @@ async function syncLiveState(options = {}) {
 
     if (options.initialPair) {
       await createFirstPairingSafetyBundle(cloudState, cloudRevision, result.updatedAt || null);
-      if (!statesEquivalent(state, cloudState)) {
-        openLiveSyncConflict({
-          localState: cloneStateForSafety(state),
-          cloudState,
-          revision: cloudRevision,
-          cloudUpdatedAt: result.updatedAt || null,
-          reason: 'initial-pair',
-          snapshotsPrepared: true,
-        });
-        return { ok: false, conflict: true };
-      }
     }
 
     if (statesDiffer) {
-      const emptySideNeedsChoice = (!localHasData || !cloudHasData) && !(
-        (!localHasData && cloudHasData && cloudChanged && !localChanged && knownRevision !== null) ||
-        (localHasData && !cloudHasData && !cloudChanged && localChanged && knownRevision !== null)
-      );
-      if (knownRevision === null || emptySideNeedsChoice || (localChanged && cloudChanged) || (!localChanged && !cloudChanged)) {
-        openLiveSyncConflict({
-          localState: cloneStateForSafety(state),
-          cloudState,
-          revision: cloudRevision,
-          cloudUpdatedAt: result.updatedAt || null,
-        });
-        return { ok: false, conflict: true };
-      }
-      if (cloudChanged && !localChanged) {
-        const outcome = applyCloudState(cloudState, cloudRevision, result.updatedAt);
-        setSaveStatus('saved', scheduledSyncStatusText());
-        return outcome;
-      }
-      if (localChanged && !cloudChanged) {
-        liveSync.revision = cloudRevision;
-        return await saveStateToCloud();
-      }
+      const reviewOpened = openLiveSyncConflict({
+        localState:cloneStateForSafety(state),
+        cloudState,
+        revision:cloudRevision,
+        cloudUpdatedAt:result.updatedAt || null,
+        reason:options.initialPair ? 'initial-pair' : 'scheduled-preview',
+        snapshotsPrepared:!!options.initialPair,
+      });
+      if (reviewOpened) return { ok:false, conflict:true, previewReady:true };
     }
-
-    if (localHasData && (!cloudHasData || pending)) {
-      liveSync.revision = cloudRevision;
-      return await saveStateToCloud();
-    } else {
-      liveSync.pending = false;
-      liveSync.status = 'synced';
-      const syncedAt = new Date().toISOString();
-      setLiveSyncMeta({ revision: cloudRevision, pending: false, lastSyncedStateUpdatedAt: state.updatedAt });
-      recordSuccessfulLiveSync('no-change', syncedAt);
-      setSaveStatus('saved', scheduledSyncStatusText());
-      return { ok: true, direction: 'no-change', at: syncedAt };
-    }
+    liveSync.pending = false;
+    liveSync.status = 'synced';
+    const syncedAt = new Date().toISOString();
+    setLiveSyncMeta({ revision:cloudRevision, pending:false, lastSyncedStateUpdatedAt:state.updatedAt });
+    recordSuccessfulLiveSync('no-change', syncedAt);
+    setSaveStatus('saved', scheduledSyncStatusText());
+    return { ok:true, direction:'no-change', at:syncedAt };
   } catch (e) {
     liveSync.status = 'offline';
     liveSync.pending = !!getLiveSyncMeta().pending;
@@ -7686,15 +9007,27 @@ async function syncStateFromServer() {
       setSaveStatus('error', 'Recovery needed');
       return;
     }
-    if (serverHasData && !localHasData) {
-      applyCloudState(serverState, getLiveSyncMeta().revision || 0, null, 'Before local disk load', { recordCloudSync: false });
+    if (serverHasData || localHasData) {
+      const browserState = cloneStateForSafety(state);
+      const diskState = serverState || normalizeState(defaultState());
+      const localReviewOpened = openLiveSyncConflict({
+        localState:browserState,
+        cloudState:diskState,
+        cloudLabel:'Local server',
+        sourceType:'local-server',
+        reason:'local-server-preview',
+        comparison:buildStateComparison(browserState, diskState, {
+          chromeUpdatedAt:browserState.updatedAt,
+          liveUpdatedAt:diskState.updatedAt,
+        }),
+      });
+      if (localReviewOpened) {
+        setSaveStatus('error', 'Chrome and local server differ · review needed');
+        showToast('Chrome and the local server differ. Review both copies before applying anything.', '#f7c06a');
+        await refreshLiveSyncStatus();
+        return;
+      }
       setSaveMeta({ latestLocalServerLoadAt: new Date().toISOString() });
-      showToast('Saved StudyQuest data loaded from local disk.', '#6af7b0');
-    } else if (localHasData && !serverHasData) {
-      await saveStateToLocalServerOnly();
-    } else if (serverHasData && localHasData && Number(serverState.updatedAt || 0) > Number(state.updatedAt || 0)) {
-      setSaveStatus('local', 'Browser copy kept');
-      showToast('Browser data kept because local disk differs. Both remain available.', '#f7c06a');
     }
   } catch (e) {
     console.warn('StudyQuest local server load failed', e);
@@ -8824,6 +10157,7 @@ function movePriority(dateStr, taskId, dir) {
 function openCreateTask(dateStr) {
   editingTaskId = null;
   document.getElementById('modalTitle').textContent = 'New Task';
+  document.getElementById('taskLastUpdated').textContent = '';
   document.getElementById('taskName').value = '';
   document.getElementById('taskNotes').value = '';
   document.getElementById('taskTime').value = '';
@@ -8957,6 +10291,8 @@ function editTask(taskId) {
   if (!t) return;
   editingTaskId = taskId;
   document.getElementById('modalTitle').textContent = '✏️ Edit Task';
+  const taskStamp = latestSyncStampForRecord('tasks', taskId);
+  document.getElementById('taskLastUpdated').textContent = taskStamp ? `Last updated ${formatRecoveryDate(taskStamp.at)}` : 'Last updated time will be recorded when this task changes';
   document.getElementById('taskName').value = t.title || '';
   document.getElementById('taskNotes').value = t.notes || '';
   document.getElementById('taskTime').value = t.time || '';
@@ -10055,6 +11391,8 @@ function assignDate(taskId) {
   // Prefill the task modal with this task's info so user can set a date
   editingTaskId = taskId;
   document.getElementById('modalTitle').textContent = '📅 Assign Deadline';
+  const taskStamp = latestSyncStampForRecord('tasks', taskId);
+  document.getElementById('taskLastUpdated').textContent = taskStamp ? `Last updated ${formatRecoveryDate(taskStamp.at)}` : 'Last updated time will be recorded when this task changes';
   document.getElementById('taskName').value = t.title;
   document.getElementById('taskNotes').value = t.notes || '';
   document.getElementById('taskDate').value = today(); // default to today
@@ -10131,11 +11469,21 @@ function importData(event) {
       showAppConfirm({
         title: 'Import Backup?',
         message: `Backup from ${imported._exportedAt ? new Date(imported._exportedAt).toLocaleString() : 'unknown date'}.\n\nThis will merge backup data into your current StudyQuest data.`,
-        confirmText: 'Import',
+        confirmText: 'Review Merge',
         onConfirm: () => {
           pushUndoSnapshot('Before backup import');
           pushAutoBackup('Before backup import', state);
-          mergeImportedData(imported);
+          const importedState = normalizeState(imported);
+          openLiveSyncConflict({
+            localState:cloneStateForSafety(state),
+            cloudState:importedState,
+            revision:Number(liveSync.revision || 0),
+            cloudUpdatedAt:imported._exportedAt || imported.updatedAt || null,
+            reason:'import-preview',
+            sourceType:'import',
+            cloudLabel:'Imported backup',
+            snapshotsPrepared:true,
+          });
           renderRecoveryCenter();
         }
       });
@@ -11176,6 +12524,7 @@ function renderSubjectCards() {
     }
     const color=(directGrade||pct!==null)?pctColor(gp!==null?gp*25:0):'var(--border)';
     const totalWeight=scores.reduce((a,s)=>a+(s.weight||0),0);
+    const gradeStamp=latestSyncStampForPath(syncPathJoin('grades',key));
 
     const card=document.createElement('div');
     card.className='subject-grade-card';
@@ -11201,6 +12550,7 @@ function renderSubjectCards() {
         </div>
       </div>
       <div class="sgc-body" id="body_${key}" style="overflow:hidden;">
+        <div class="recovery-row-meta" style="white-space:normal;margin-bottom:8px;">${gradeStamp ? `Last updated ${escapeHtml(formatRecoveryDate(gradeStamp.at))}` : 'No recorded grade changes yet'}</div>
         <!-- Direct Grade Entry -->
         <div style="margin-bottom:10px;padding:8px 10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
           <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📋 Set Grade Directly</div>
@@ -11250,6 +12600,7 @@ function renderSubjectCards() {
     if(directGrade){letter=directGrade;cls=letterToCls(directGrade);}
     else{const g=scoreToGradeWithCutoffs(pct,key);letter=g.letter;cls=g.cls;}
     const color = (directGrade||pct!==null)?pctColor(directGrade?letterToGP(directGrade)*25:pct):'var(--border)';
+    const gradeStamp=latestSyncStampForPath(syncPathJoin('grades',key));
     const card=document.createElement('div');
     card.className='subject-grade-card';
     card.style.cssText='overflow:hidden;min-width:0;border-left:3px solid var(--accent2);';
@@ -11268,6 +12619,7 @@ function renderSubjectCards() {
         </div>
       </div>
       <div class="sgc-body" id="body_${key}" style="overflow:hidden;">
+        <div class="recovery-row-meta" style="white-space:normal;margin-bottom:8px;">${gradeStamp ? `Last updated ${escapeHtml(formatRecoveryDate(gradeStamp.at))}` : 'No recorded grade changes yet'}</div>
         <div style="margin-bottom:10px;padding:8px 10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
           <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">📋 Set Grade Directly</div>
           <div style="display:flex;gap:5px;flex-wrap:wrap;">

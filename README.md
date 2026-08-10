@@ -37,12 +37,13 @@ Deployment behavior:
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` uses revisions and returns `409 STATE_CONFLICT` instead of silently replacing a newer account save.
-- Paired local Chrome and live admin v13 exchange changes in both directions every 30 minutes. Browser and local-disk saves remain immediate, while startup, missed-run, and manual `Sync Now` checks can run sooner.
-- Recovery Center reports the last attempt, last successful sync, direction, browser-to-cloud time, cloud-to-browser time, and next automatic sync. Conflicts preserve both copies and pause automation for an explicit choice.
+- Paired Chrome and live admin v13 compare changes every 30 minutes. Chrome-versus-local-server, imported, and live differences all require a per-field Smart Merge preview; browser and local-disk saves remain immediate.
+- `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy/tied/unverified differences require a manual choice.
+- Recovery Center reports sync times, per-field decisions, change history, and saved-state usage. Chrome, Live, and the proposed merge can be exported together before applying.
 - Weekly curriculum is stored inside each account's state. New Weekly users choose ICE, BALAC, Industrial Pharmacy, a custom curriculum, or a blank program instead of receiving ICE automatically.
 - Existing Weekly semesters, weeks, notes, checks, and edited course lists are migrated additively. `Edit Subjects` remains the per-semester source for that user's course names and weekdays.
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
-- One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention.
+- One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention. A snapshot is skipped when its state matches the latest stored backup.
 - `/api/version` reports the tested v13 release hash used by the daily publisher.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
 - Admin can preview and restore 30-day account snapshots. Every restore creates a `pre_restore` backup and increments the cloud revision; credentials are not changed.
@@ -76,7 +77,7 @@ Do not upload the local files from the parent folder such as `studyquest-account
 - Public HTTPS app URL from Render.
 - PostgreSQL database instead of local JSON.
 - 5 total accounts by default.
-- 1 MB saved-state limit per account by default.
+- 10 MiB saved-state limit per account by default.
 - Server-side PBKDF2 password hashing with per-password salt.
 - HttpOnly session cookies.
 - Invite-code required account creation.
@@ -110,7 +111,8 @@ STUDYQUEST_INVITE_CODE=<private invite code for friends>
 STUDYQUEST_ADMIN_CONTACT_LABEL=<public contact label shown during recovery>
 STUDYQUEST_ADMIN_CONTACT_URL=<optional mailto or https contact link>
 STUDYQUEST_MAX_ACCOUNTS=5
-STUDYQUEST_MAX_STATE_BYTES=1048576
+STUDYQUEST_MAX_STATE_BYTES=10485760
+STUDYQUEST_MAX_STATE_ENVELOPE_BYTES=262144
 PGSSLMODE=require
 ```
 
@@ -184,10 +186,10 @@ After it connects once, the app remembers that URL.
 With the default limits, PostgreSQL app data is capped at roughly:
 
 ```text
-5 accounts * 1 MB state each = about 5 MB user state
+5 accounts * 10 MiB state each = up to about 50 MiB of current user state
 ```
 
-The database will have some overhead for account rows, sessions, indexes, and JSONB storage, so plan for roughly 10-25 MB for normal usage by 5 people.
+The database also stores account rows, sessions, indexes, and recovery snapshots. Recovery Center reports the current database size because 30 days of frequently changing near-limit saves can use substantially more than the current-state total.
 
 ## Safety Notes
 
@@ -197,4 +199,5 @@ The database will have some overhead for account rows, sessions, indexes, and JS
 - Use a strong admin password.
 - Rotate the invite code if it leaks.
 - Keep Render billing/spend limits at zero unless you decide to upgrade later.
-- If you raise `STUDYQUEST_MAX_STATE_BYTES`, also raise PostgreSQL storage expectations.
+- The per-account state cap is 10 MiB (10,485,760 UTF-8 bytes). The API allows a separate 256 KiB revision/merge envelope and returns structured `STATE_TOO_LARGE` details without deleting browser data.
+- Recovery Center warns at 80% and 95%. A worst-case 10 MiB account can create large 30-day backups, so monitor the reported PostgreSQL database size and keep regular exports.

@@ -22,6 +22,8 @@ services:
       - key: STUDYQUEST_MAX_ACCOUNTS
         value: "5"
       - key: STUDYQUEST_MAX_STATE_BYTES
-        value: "1048576"
+        value: "10485760"
+      - key: STUDYQUEST_MAX_STATE_ENVELOPE_BYTES
+        value: "262144"
       - key: PGSSLMODE
         value: require
