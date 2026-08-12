@@ -1,5 +1,9 @@
 # StudyQuest Hosted Server
 
+See [STUDYQUEST-OPERATIONS-GUIDE.md](./STUDYQUEST-OPERATIONS-GUIDE.md) for the
+safe operating checklist, save-status meanings, setup, recovery, backups, and
+LINE admin procedure. Never add real secrets to either document.
+
 This folder is a Render-ready StudyQuest sync server backed by PostgreSQL.
 
 It is separate from the local laptop sync bridge. The hosted version is the better long-term option when friends do not want to use Tailscale.
