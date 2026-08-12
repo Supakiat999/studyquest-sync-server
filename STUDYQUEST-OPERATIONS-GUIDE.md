@@ -280,7 +280,8 @@ npm.cmd run line:admin:check
 
 `line:admin:check` is read-only and sends no message. It verifies the linked
 admin chat, friendship/profile access, StudyQuest admin pairing, task freshness,
-LINE allowance, credentials, and the installed admin rich menu.
+LINE allowance, credentials, active Worker webhook, and installed admin rich
+menu.
 
 Menu behavior:
 
