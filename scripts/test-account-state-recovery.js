@@ -4,6 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'claudever9.html'), 'utf8');
+const deviceRecovery = fs.readFileSync(path.join(__dirname, '..', 'public', 'device-recovery.js'), 'utf8');
 
 function extractFunction(name) {
   const marker = `function ${name}(`;
@@ -101,5 +102,13 @@ assert.ok(html.includes("'Cloud backup pending'"),
   'Offline saves must report a pending cloud backup instead of a generic save error');
 assert.ok(html.includes("'Conflict - both copies preserved'"),
   'Conflicts must state that both copies are preserved');
+assert.ok(deviceRecovery.includes('indexedDB.open(DB_NAME);'),
+  'The read-only recovery page must open the existing IndexedDB version without upgrading it');
+assert.ok(deviceRecovery.includes('request.transaction.abort();'),
+  'The read-only recovery page must abort database creation when no IndexedDB copy exists');
+assert.ok(deviceRecovery.includes('if (db) {'),
+  'A missing IndexedDB recovery database must be treated as an empty device copy');
+assert.ok(!deviceRecovery.includes('indexedDB.open(DB_NAME, DB_VERSION)'),
+  'The recovery page must not request an IndexedDB version change');
 
 console.log('Stable account recovery tests passed.');

@@ -1,7 +1,6 @@
 (() => {
   "use strict";
   const DB_NAME = "studyquest_device_recovery_v1";
-  const DB_VERSION = 1;
   const status = document.getElementById("status");
   const browserSummary = document.getElementById("browserSummary");
   const durableSummary = document.getElementById("durableSummary");
@@ -39,10 +38,19 @@
 
   function openRecoveryDatabase() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onerror = () => reject(request.error);
+      let databaseWasMissing = false;
+      const request = indexedDB.open(DB_NAME);
+      request.onerror = () => {
+        if (databaseWasMissing && request.error?.name === "AbortError") resolve(null);
+        else reject(request.error || new Error("IndexedDB could not be opened."));
+      };
       request.onsuccess = () => resolve(request.result);
-      request.onupgradeneeded = () => request.transaction.abort();
+      request.onupgradeneeded = () => {
+        // This page is read-only. Abort creation when the recovery database does not exist.
+        databaseWasMissing = true;
+        request.transaction.onabort = () => resolve(null);
+        request.transaction.abort();
+      };
     });
   }
 
@@ -76,9 +84,11 @@
     let durableError = null;
     try {
       const db = await openRecoveryDatabase();
-      durable = await readStore(db, "accountStates", username);
-      outbox = await readStore(db, "outbox", username);
-      db.close();
+      if (db) {
+        durable = await readStore(db, "accountStates", username);
+        outbox = await readStore(db, "outbox", username);
+        db.close();
+      }
     } catch (error) {
       durableError = String(error.message || error);
     }
