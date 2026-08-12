@@ -35,6 +35,46 @@ create table if not exists state_backups (
 
 create index if not exists state_backups_username_created_idx on state_backups(username, created_at desc);
 
+create table if not exists state_versions (
+  id bigserial primary key,
+  username text not null references accounts(username) on delete cascade,
+  revision bigint not null,
+  state_gzip bytea not null,
+  state_hash text not null,
+  state_bytes integer not null,
+  compressed_bytes integer not null,
+  source_device text,
+  summary jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  unique (username, revision)
+);
+
+create index if not exists state_versions_username_created_idx
+  on state_versions(username, created_at desc);
+create index if not exists state_versions_username_hash_idx
+  on state_versions(username, state_hash);
+
+create table if not exists state_save_events (
+  id bigserial primary key,
+  username text not null references accounts(username) on delete cascade,
+  result text not null
+    check (result in ('accepted', 'no_change', 'conflicted', 'rejected', 'oversized', 'restored', 'recovered')),
+  base_revision bigint,
+  current_revision bigint,
+  resulting_revision bigint,
+  state_hash text,
+  state_bytes integer,
+  device_id text,
+  summary jsonb,
+  detail text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists state_save_events_username_created_idx
+  on state_save_events(username, created_at desc);
+create index if not exists state_save_events_result_created_idx
+  on state_save_events(result, created_at desc);
+
 create table if not exists sync_pairing_codes (
   code_hash text primary key,
   username text not null references accounts(username) on delete cascade,

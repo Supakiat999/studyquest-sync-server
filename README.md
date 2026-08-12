@@ -37,6 +37,9 @@ Deployment behavior:
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` uses revisions and returns `409 STATE_CONFLICT` instead of silently replacing a newer account save.
+- Hosted `POST /api/state` is disabled. Every cloud write must include its known base revision through `/api/v2/state`.
+- Stable-app edits save first to `studyquest_v3_<username>` and IndexedDB, with a durable offline outbox and rolling device recovery copies. Cloud backup starts after a two-second quiet period.
+- Every unique accepted cloud revision is retained as a compressed immutable `state_versions` record. Accepted, unchanged, conflicted, rejected, and oversized attempts are recorded in `state_save_events` without passwords or state contents.
 - Paired Chrome and live admin v13 compare changes every 30 minutes. Chrome-versus-local-server, imported, and live differences all require a per-field Smart Merge preview; browser and local-disk saves remain immediate.
 - `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy/tied/unverified differences require a manual choice.
 - Recovery Center reports sync times, per-field decisions, change history, and saved-state usage. Chrome, Live, and the proposed merge can be exported together before applying.
@@ -47,6 +50,8 @@ Deployment behavior:
 - `/api/version` reports the tested v13 release hash used by the daily publisher.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
 - Admin can preview and restore 30-day account snapshots. Every restore creates a `pre_restore` backup and increments the cloud revision; credentials are not changed.
+- Signed-in users can open `/device-recovery` to inspect and export only their current account's browser copies. That page does not fetch cloud state or write storage.
+- The laptop Chrome-to-live pairing bridge is admin-only and loopback-only. Normal accounts use their own same-origin browser session and never receive a pairing token.
 - The admin account password is synced from the private `STUDYQUEST_ADMIN_PASSWORD` environment variable on startup. If the admin login stops working, update that Render environment variable and redeploy/restart the service.
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
@@ -113,6 +118,7 @@ STUDYQUEST_ADMIN_CONTACT_URL=<optional mailto or https contact link>
 STUDYQUEST_MAX_ACCOUNTS=5
 STUDYQUEST_MAX_STATE_BYTES=10485760
 STUDYQUEST_MAX_STATE_ENVELOPE_BYTES=262144
+STUDYQUEST_STATE_HISTORY_BUDGET_BYTES=67108864
 PGSSLMODE=require
 ```
 
@@ -158,8 +164,11 @@ The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_
 - After authentication, the stable app reloads the signed-in user's browser key, such as `studyquest_v3_anya`, before accepting edits.
 - When browser and cloud contain different user data, neither copy is silently applied. The user sees `Unsynced work found` and can choose `Export Both`, `Use Cloud`, or `Use This Browser`.
 - Recovery copies use an auxiliary per-account browser key. The main `studyquest_v3` data family is never cleared automatically.
+- The browser also stores the current account copy, offline outbox, and rolling recovery records in IndexedDB. Failed requests remain `Cloud backup pending` and retry after reconnect, focus, startup, and returning to the tab.
+- Cloud status text distinguishes `Saved on this device`, `Cloud backup pending`, `Backed up at <time>`, and `Conflict - both copies preserved`.
 - `Use This Browser` sends an explicit `stable-account-recovery` approval and creates a server-side `pre_merge` snapshot before cloud replacement.
 - Revision conflicts open the same recovery comparison for non-admin users instead of directing them to an admin-only screen.
+- `/device-recovery` is read-only and never loads the cloud copy. Use it to export the signed-in account's browser and IndexedDB data during an incident.
 
 ## Migrating Current Admin Data
 
@@ -171,7 +180,21 @@ Your current local data is in:
 ../studyquest-accounts.json
 ```
 
-To migrate safely, export only the `admin.state` object and POST it to the hosted `/api/state` endpoint after logging in as admin. Do not upload `studyquest-accounts.json` itself because it contains password hashes and sessions.
+To migrate safely, use the signed-in app's comparison screen or POST the state to `/api/v2/state` with the current `baseRevision`. The old unversioned `POST /api/state` route is deliberately disabled. Do not upload `studyquest-accounts.json` itself because it contains password hashes and sessions.
+
+## Encrypted Laptop Backups
+
+The backup scripts under `scripts/` create AES-256-GCM encrypted database exports. They include accounts, account states, server snapshots, immutable revisions, save-event metadata, and password-recovery cases. Sessions, pairing codes, and device tokens are explicitly excluded.
+
+Setup is local-only. Protect the Neon connection string and a random encryption key with Windows DPAPI, then install the hidden daily task:
+
+```powershell
+.\scripts\configure-database-backup.ps1 -DatabaseUrl '<Neon connection string>'
+.\scripts\run-database-backup.ps1
+.\scripts\install-database-backup-task.ps1
+```
+
+`StudyQuest Encrypted Database Backup` runs at 03:30 with `StartWhenAvailable`, retains 30 daily and 12 monthly files under `%LOCALAPPDATA%\StudyQuest\database-backups`, and decrypt-validates each new backup before reporting success. The DPAPI files can only be unprotected by the same Windows user. Never commit those files.
 
 ## Android App
 
@@ -197,7 +220,7 @@ With the default limits, PostgreSQL app data is capped at roughly:
 5 accounts * 10 MiB state each = up to about 50 MiB of current user state
 ```
 
-The database also stores account rows, sessions, indexes, and recovery snapshots. Recovery Center reports the current database size because 30 days of frequently changing near-limit saves can use substantially more than the current-state total.
+The database also stores account rows, sessions, indexes, snapshots, compressed revisions, and save-event metadata. Recovery Center reports current database and compressed-history usage. The default compressed-history budget is 64 MiB per account; the newest 100 revisions remain recoverable, with older hourly checkpoints through 30 days and daily checkpoints through 90 days while within that budget.
 
 ## Safety Notes
 

@@ -30,6 +30,8 @@ services:
         value: "10485760"
       - key: STUDYQUEST_MAX_STATE_ENVELOPE_BYTES
         value: "262144"
+      - key: STUDYQUEST_STATE_HISTORY_BUDGET_BYTES
+        value: "67108864"
       - key: PGSSLMODE
         value: require
 

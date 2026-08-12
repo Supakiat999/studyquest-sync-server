@@ -6175,8 +6175,12 @@ let accountRecovery = {
   users: [],
   selectedUsername: '',
   snapshots: [],
+  versions: [],
+  saveEvents: [],
+  history: null,
   currentSnapshot: null,
   temporaryCredential: null,
+  incident: null,
 };
 
 function safeReadJson(key, fallback = null) {
@@ -8300,7 +8304,7 @@ function copyErrorDetails() {
 
 function recoverySummaryText(summary) {
   if (!summary) return 'No account data summary';
-  return `${Number(summary.tasks || 0)} tasks · ${Number(summary.notes || 0)} notes · ${Number(summary.files || 0)} files · ${Number(summary.grades || 0)} grades · ${Number(summary.trips || 0)} trips`;
+  return `${Number(summary.tasks || 0)} tasks · ${Number(summary.notes || 0)} notes · ${Number(summary.files || 0)} files · ${Number(summary.grades || 0)} grades · ${Number(summary.trips || 0)} trips · ${Number(summary.weeklyWeeks || 0)} Weekly weeks · ${Number(summary.weeklySemesters || 0)} semesters`;
 }
 
 async function adminRecoveryFetch(path, options = {}) {
@@ -8330,6 +8334,9 @@ async function loadAccountRecoverySnapshots(username, options = {}) {
   try {
     const result = await adminRecoveryFetch(`/api/admin/recovery/snapshots?username=${encodeURIComponent(username)}`);
     accountRecovery.snapshots = Array.isArray(result.snapshots) ? result.snapshots : [];
+    accountRecovery.versions = Array.isArray(result.versions) ? result.versions : [];
+    accountRecovery.saveEvents = Array.isArray(result.saveEvents) ? result.saveEvents : [];
+    accountRecovery.history = result.history || null;
     accountRecovery.currentSnapshot = result.current || null;
   } catch (error) {
     accountRecovery.error = String(error?.message || error);
@@ -8343,12 +8350,14 @@ async function refreshAccountRecoveryAdmin() {
   accountRecovery.error = '';
   renderRecoveryCenter();
   try {
-    const [requestResult, userResult] = await Promise.all([
+    const [requestResult, userResult, incidentResult] = await Promise.all([
       adminRecoveryFetch('/api/admin/recovery/requests'),
       adminRecoveryFetch('/api/admin/users'),
+      adminRecoveryFetch('/api/admin/recovery/incidents/anya-2026-08-11').catch(error => ({ error:String(error?.message || error) })),
     ]);
     accountRecovery.requests = Array.isArray(requestResult.requests) ? requestResult.requests : [];
     accountRecovery.users = Array.isArray(userResult.users) ? userResult.users : [];
+    accountRecovery.incident = incidentResult || null;
     if (!accountRecovery.users.some(user => user.username === accountRecovery.selectedUsername)) {
       accountRecovery.selectedUsername = accountRecovery.users[0]?.username || '';
       accountRecovery.snapshots = [];
@@ -8357,6 +8366,9 @@ async function refreshAccountRecoveryAdmin() {
     if (accountRecovery.selectedUsername) {
       const snapshots = await adminRecoveryFetch(`/api/admin/recovery/snapshots?username=${encodeURIComponent(accountRecovery.selectedUsername)}`);
       accountRecovery.snapshots = Array.isArray(snapshots.snapshots) ? snapshots.snapshots : [];
+      accountRecovery.versions = Array.isArray(snapshots.versions) ? snapshots.versions : [];
+      accountRecovery.saveEvents = Array.isArray(snapshots.saveEvents) ? snapshots.saveEvents : [];
+      accountRecovery.history = snapshots.history || null;
       accountRecovery.currentSnapshot = snapshots.current || null;
     }
   } catch (error) {
@@ -8491,6 +8503,58 @@ function restoreAccountSnapshot(snapshotId) {
   });
 }
 
+function restoreAccountVersion(versionId) {
+  const username = accountRecovery.selectedUsername;
+  const version = accountRecovery.versions.find(item => String(item.id) === String(versionId));
+  if (!username || !version) return;
+  showAppConfirm({
+    title: `Restore ${username} revision ${version.revision}?`,
+    message: `Restore the immutable ${formatRecoveryDate(version.createdAt)} revision (${recoverySummaryText(version.summary)})? The current cloud state will first be saved as a pre-restore backup. Credentials are not changed.`,
+    confirmText: 'Restore Revision',
+    onConfirm: async () => {
+      try {
+        const result = await adminRecoveryFetch(`/api/admin/recovery/versions/${encodeURIComponent(versionId)}/restore`, {
+          method: 'POST',
+          body: JSON.stringify({ username }),
+        });
+        showToast(`Restored ${username}. New revision ${result.revision}.`, '#6af7b0');
+        await loadAccountRecoverySnapshots(username, { silent:true });
+      } catch (error) {
+        showToast(String(error?.message || error), '#f76a6a');
+      }
+    },
+  });
+}
+
+function recoverAnyaIncidentAdditively() {
+  const incident = accountRecovery.incident;
+  if (!incident?.ok || incident.unchanged) return;
+  const taskCount = Array.isArray(incident.addTasks) ? incident.addTasks.length : 0;
+  const weekCount = Array.isArray(incident.addWeeks) ? incident.addWeeks.length : 0;
+  if (taskCount > 2 || weekCount > 2) {
+    showToast('Incident scope changed. Recovery is blocked until it is rechecked.', '#f76a6a');
+    return;
+  }
+  showAppConfirm({
+    title: 'Recover Anya Additively?',
+    message: `Add only ${taskCount} missing tasks and ${weekCount} missing Weekly weeks from verified revision ${Number(incident.sourceRevision || 0)}. Her current tasks, six semesters, shared edits, notes, files, grades, password, and current cloud copy stay intact. A pre-incident recovery snapshot is created first.`,
+    confirmText: 'Recover Missing Records',
+    onConfirm: async () => {
+      try {
+        const result = await adminRecoveryFetch('/api/admin/recovery/incidents/anya-2026-08-11', {
+          method: 'POST',
+          body: JSON.stringify({ confirmation:incident.confirmation }),
+        });
+        accountRecovery.incident = { ...incident, ...result, unchanged:true };
+        showToast(result.unchanged ? 'Anya was already recovered.' : `Recovered ${result.addedTasks.length} tasks and ${result.addedWeeks.length} Weekly weeks.`, '#6af7b0');
+        await refreshAccountRecoveryAdmin();
+      } catch (error) {
+        showToast(String(error?.message || error), '#f76a6a');
+      }
+    },
+  });
+}
+
 function renderAccountRecoveryAdmin() {
   if (!isHostedAppHost()) return '';
   const snapshotUserOptions = accountRecovery.users
@@ -8502,7 +8566,25 @@ function renderAccountRecoveryAdmin() {
     .join('');
   const requests = accountRecovery.requests.slice(0, 50);
   const credential = accountRecovery.temporaryCredential;
+  const incident = accountRecovery.incident;
+  const incidentTasks = Array.isArray(incident?.addTasks) ? incident.addTasks : [];
+  const incidentWeeks = Array.isArray(incident?.addWeeks) ? incident.addWeeks : [];
   return `
+    <div class="recovery-section">
+      <div class="recovery-section-title">Anya August 11 Incident Recovery</div>
+      ${incident?.ok ? `
+        <div class="sync-compare-summary" style="border-color:${incident.unchanged ? 'rgba(106,247,176,.45)' : 'rgba(247,192,106,.45)'};">
+          <strong>${incident.unchanged ? 'Verified recovery is already applied.' : 'Additive recovery ready for review.'}</strong><br>
+          Current: ${escapeHtml(recoverySummaryText(incident.currentSummary || incident.summary))}<br>
+          ${incident.proposedSummary ? `After recovery: ${escapeHtml(recoverySummaryText(incident.proposedSummary))}` : ''}
+        </div>
+        ${incidentTasks.length ? `<div class="recovery-row-meta" style="white-space:normal;margin-top:8px;"><strong>Missing tasks:</strong> ${incidentTasks.map(item => escapeHtml(item.title || 'Untitled task')).join(' · ')}</div>` : ''}
+        ${incidentWeeks.length ? `<div class="recovery-row-meta" style="white-space:normal;margin-top:5px;"><strong>Missing Weekly weeks:</strong> ${incidentWeeks.map(item => escapeHtml(item.label || 'Weekly week')).join(' · ')}</div>` : ''}
+        <div class="recovery-actions" style="margin-top:10px;">
+          <button class="btn btn-primary btn-sm" onclick="recoverAnyaIncidentAdditively()" ${incident.unchanged || incidentTasks.length > 2 || incidentWeeks.length > 2 ? 'disabled' : ''}>Recover Missing Records</button>
+        </div>
+      ` : `<div class="recovery-empty">${escapeHtml(incident?.error || 'Loading the verified incident preview...')}</div>`}
+    </div>
     <div class="recovery-section">
       <div class="recovery-section-title">Password Recovery Requests</div>
       <div class="recovery-empty">Verify each person directly before approval. Resetting a password never changes their StudyQuest data. Admin password recovery remains in Render.</div>
@@ -8564,6 +8646,28 @@ function renderAccountRecoveryAdmin() {
             </div>
             <button class="btn btn-ghost btn-sm" onclick="restoreAccountSnapshot('${escapeHtml(String(snapshot.id))}')">Restore</button>
           </div>`).join('') : '<div class="recovery-empty">No server snapshots are available for this account yet.</div>'}
+      </div>
+      <div class="recovery-section-title" style="margin-top:14px;">Immutable Revisions</div>
+      <div class="recovery-row-meta" style="white-space:normal;">${accountRecovery.history ? `${Number(accountRecovery.history.versionCount || 0)} retained revisions · ${escapeHtml(formatStateBytes(accountRecovery.history.compressedBytes || 0))} compressed` : 'History details are loading.'}</div>
+      <div class="recovery-list" style="max-height:260px;margin-top:10px;">
+        ${accountRecovery.versions.length ? accountRecovery.versions.map(version => `
+          <div class="recovery-row">
+            <div>
+              <div class="recovery-row-title">Revision ${Number(version.revision || 0)} · ${escapeHtml(version.sourceDevice || 'unknown device')}</div>
+              <div class="recovery-row-meta" style="white-space:normal;">${escapeHtml(formatRecoveryDate(version.createdAt))} · ${escapeHtml(recoverySummaryText(version.summary))} · ${escapeHtml(formatStateBytes(version.compressedBytes || 0))} compressed</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="restoreAccountVersion('${escapeHtml(String(version.id))}')">Restore</button>
+          </div>`).join('') : '<div class="recovery-empty">No immutable revision history is available yet.</div>'}
+      </div>
+      <div class="recovery-section-title" style="margin-top:14px;">Recent Save Events</div>
+      <div class="recovery-list" style="max-height:220px;margin-top:10px;">
+        ${accountRecovery.saveEvents.length ? accountRecovery.saveEvents.slice(0,40).map(event => `
+          <div class="recovery-row">
+            <div>
+              <div class="recovery-row-title">${escapeHtml(event.result)}${event.resultingRevision == null ? '' : ` · revision ${Number(event.resultingRevision)}`}</div>
+              <div class="recovery-row-meta" style="white-space:normal;">${escapeHtml(formatRecoveryDate(event.createdAt))} · ${escapeHtml(event.deviceId || 'unknown device')}${event.detail ? ' · ' + escapeHtml(event.detail) : ''}</div>
+            </div>
+          </div>`).join('') : '<div class="recovery-empty">No save events recorded yet.</div>'}
       </div>
     </div>`;
 }

@@ -82,6 +82,7 @@ changedUserData.tasks[0].title = 'Different cloud title';
 assert.equal(recovery.accountStatesEquivalent(browserCopy, changedUserData), false,
   'Real task changes must open recovery comparison');
 assert.match(recovery.accountStateSummary(browserCopy), /1 tasks/);
+assert.match(recovery.accountStateSummary(browserCopy), /0 Weekly weeks/);
 
 const syncStart = html.indexOf('async function syncStateFromServer()');
 const syncEnd = html.indexOf('\n// ═', syncStart);
@@ -90,5 +91,15 @@ assert.ok(syncSource.indexOf('readAuthenticatedAccountState()') < syncSource.ind
   'Authenticated browser storage must load before the cloud request');
 assert.ok(syncSource.includes('openAccountStateRecovery('),
   'Different browser and cloud copies must open recovery review');
+assert.ok(!syncSource.includes('await saveStateToServer({'),
+  'Authenticated startup must never upload a browser copy automatically');
+assert.ok(html.includes("const CLOUD_SAVE_QUIET_MS = 2000;"),
+  'Normal cloud saves must wait for the two-second quiet period');
+assert.ok(html.includes("const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';"),
+  'Stable saves must retain an IndexedDB device recovery copy');
+assert.ok(html.includes("'Cloud backup pending'"),
+  'Offline saves must report a pending cloud backup instead of a generic save error');
+assert.ok(html.includes("'Conflict - both copies preserved'"),
+  'Conflicts must state that both copies are preserved');
 
 console.log('Stable account recovery tests passed.');

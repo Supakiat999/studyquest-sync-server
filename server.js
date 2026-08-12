@@ -3,12 +3,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { Pool } = require("pg");
+const {
+  additiveIncidentRecovery,
+  deserializeStateVersion,
+  serializeStateVersion,
+  stateHash,
+  stateSummary,
+} = require("./lib/state-safety");
 
 const PORT = Number(process.env.PORT || 3001);
 const ROOT = __dirname;
 const HTML_PATH = path.join(ROOT, "public", "claudever9.html");
 const V13_HTML_PATH = path.join(ROOT, "public", "claudever13.html");
 const V13_VERSION_PATH = path.join(ROOT, "public", "v13-version.json");
+const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
+const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
 const WEEKLY_STUDY_PLANNER_LITE_PATH = path.join(ROOT, "public", "weekly-study-planner.html");
 const WEEKLY_STUDY_PLANNER_FULL_PATH = path.join(ROOT, "public", "weekly-study-planner-full.html");
 const SESSION_COOKIE = "sq_session";
@@ -23,6 +32,7 @@ const MAX_ACCOUNTS = Number(process.env.STUDYQUEST_MAX_ACCOUNTS || 5);
 const MAX_AUTH_BODY_BYTES = 64 * 1024;
 const MAX_STATE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_BYTES || 10 * 1024 * 1024);
 const MAX_STATE_ENVELOPE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_ENVELOPE_BYTES || 256 * 1024);
+const STATE_HISTORY_BUDGET_BYTES = Number(process.env.STUDYQUEST_STATE_HISTORY_BUDGET_BYTES || 64 * 1024 * 1024);
 const TEMP_PASSWORD_MAX_AGE_SECONDS = 24 * 60 * 60;
 const IS_HOSTED = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
 
@@ -186,16 +196,121 @@ function temporaryPassword() {
   return `SQ!${readableSecret(6)}-${readableSecret(6)}-${readableSecret(4)}`;
 }
 
-function stateSummary(value) {
-  const state = value && typeof value === "object" ? value : {};
-  return {
-    tasks: Array.isArray(state.tasks) ? state.tasks.length : 0,
-    notes: Array.isArray(state.notes) ? state.notes.length : 0,
-    files: Array.isArray(state.fileLinks) ? state.fileLinks.length : 0,
-    checklist: Array.isArray(state.checklistItems) ? state.checklistItems.length : 0,
-    grades: state.grades && typeof state.grades === "object" ? Object.keys(state.grades).length : 0,
-    trips: Array.isArray(state.trips) ? state.trips.length : 0,
-  };
+function safeDeviceLabel(value, fallback = "unknown") {
+  const label = String(value || fallback).trim().slice(0, 120);
+  return label || fallback;
+}
+
+async function insertStateVersion(client, { username, revision, state, sourceDevice, createdAt = null, version = null }) {
+  if (!state || typeof state !== "object") return null;
+  const prepared = version || serializeStateVersion(state);
+  const result = await client.query(
+    `insert into state_versions
+       (username, revision, state_gzip, state_hash, state_bytes, compressed_bytes, source_device, summary, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, coalesce($9::timestamptz, now()))
+     on conflict (username, revision) do nothing
+     returning id`,
+    [
+      username,
+      Number(revision || 0),
+      prepared.stateGzip,
+      prepared.hash,
+      prepared.stateBytes,
+      prepared.compressedBytes,
+      safeDeviceLabel(sourceDevice),
+      JSON.stringify(stateSummary(state)),
+      createdAt,
+    ]
+  );
+  return { ...prepared, id: result.rows[0]?.id ? String(result.rows[0].id) : null };
+}
+
+async function recordSaveEvent(client, details) {
+  const state = details.state && typeof details.state === "object" ? details.state : null;
+  const serialized = state ? serializeStateVersion(state) : null;
+  await client.query(
+    `insert into state_save_events
+       (username, result, base_revision, current_revision, resulting_revision,
+        state_hash, state_bytes, device_id, summary, detail)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)`,
+    [
+      details.username,
+      details.result,
+      Number.isInteger(details.baseRevision) ? details.baseRevision : null,
+      Number.isInteger(details.currentRevision) ? details.currentRevision : null,
+      Number.isInteger(details.resultingRevision) ? details.resultingRevision : null,
+      details.stateHash || serialized?.hash || null,
+      Number.isInteger(details.stateBytes) ? details.stateBytes : serialized?.stateBytes || null,
+      safeDeviceLabel(details.deviceId),
+      state ? JSON.stringify(stateSummary(state)) : null,
+      String(details.detail || "").slice(0, 240) || null,
+    ]
+  );
+}
+
+function bangkokBucket(dateValue, includeHour) {
+  const shifted = new Date(new Date(dateValue).getTime() + 7 * 60 * 60 * 1000);
+  const day = shifted.toISOString().slice(0, 10);
+  return includeHour ? `${day}T${String(shifted.getUTCHours()).padStart(2, "0")}` : day;
+}
+
+async function pruneStateVersions(username) {
+  const result = await pool.query(
+    `select id, compressed_bytes, created_at
+     from state_versions where username = $1
+     order by created_at desc, id desc`,
+    [username]
+  );
+  const rows = result.rows;
+  if (rows.length <= 100) return;
+  const now = Date.now();
+  const keep = new Set();
+  let keptBytes = 0;
+  const hourly = new Set();
+  const daily = new Set();
+
+  rows.forEach((row, index) => {
+    if (index < 100) {
+      keep.add(String(row.id));
+      keptBytes += Number(row.compressed_bytes || 0);
+    }
+  });
+
+  for (let index = 100; index < rows.length; index += 1) {
+    const row = rows[index];
+    const ageMs = now - new Date(row.created_at).getTime();
+    if (ageMs < 0 || ageMs > 90 * 24 * 60 * 60 * 1000) continue;
+    const bucketSet = ageMs <= 30 * 24 * 60 * 60 * 1000 ? hourly : daily;
+    const bucket = bangkokBucket(row.created_at, bucketSet === hourly);
+    if (bucketSet.has(bucket)) continue;
+    bucketSet.add(bucket);
+    const bytes = Number(row.compressed_bytes || 0);
+    if (keptBytes + bytes > STATE_HISTORY_BUDGET_BYTES) continue;
+    keep.add(String(row.id));
+    keptBytes += bytes;
+  }
+
+  await pool.query(
+    `delete from state_versions
+     where username = $1 and not (id = any($2::bigint[]))`,
+    [username, Array.from(keep)]
+  );
+}
+
+async function backfillCurrentStateVersions() {
+  const result = await pool.query(
+    `select username, state, state_revision, state_updated_at, updated_at
+     from accounts where state is not null`
+  );
+  for (const row of result.rows) {
+    await insertStateVersion(pool, {
+      username: row.username,
+      revision: Number(row.state_revision || 0),
+      state: row.state,
+      sourceDevice: "startup-backfill",
+      createdAt: row.state_updated_at || row.updated_at || null,
+    });
+  }
 }
 
 function isAllowedOrigin(req, origin) {
@@ -284,6 +399,13 @@ async function ensureSchema() {
      set status = 'expired', resolved_at = coalesce(resolved_at, now())
      where status = 'approved' and expires_at < now()`
   );
+  await pool.query("delete from sync_pairing_codes where username <> $1", [ADMIN_USERNAME]);
+  await pool.query(
+    "update sync_devices set revoked_at = coalesce(revoked_at, now()) where username <> $1",
+    [ADMIN_USERNAME]
+  );
+  await backfillCurrentStateVersions();
+  await pool.query("delete from state_save_events where created_at < now() - interval '180 days'");
 
   const admin = await pool.query("select username, password_record from accounts where username = $1", [ADMIN_USERNAME]);
   if (!admin.rowCount) {
@@ -320,8 +442,8 @@ async function currentUser(req) {
               d.id as sync_device_id, d.device_name as sync_device_name
        from sync_devices d
        join accounts a on a.username = d.username
-       where d.token_hash = $1 and d.revoked_at is null`,
-      [tokenHash(deviceToken)]
+       where d.token_hash = $1 and d.revoked_at is null and d.username = $2`,
+      [tokenHash(deviceToken), ADMIN_USERNAME]
     );
     const deviceUser = deviceResult.rows[0] || null;
     if (deviceUser) {
@@ -780,6 +902,24 @@ async function handleAdminRecoverySnapshots(req, res, url) {
      order by created_at desc limit 60`,
     [username]
   );
+  const versions = await pool.query(
+    `select id, revision, state_hash, state_bytes, compressed_bytes, source_device, summary, created_at
+     from state_versions where username = $1
+     order by created_at desc, id desc limit 120`,
+    [username]
+  );
+  const events = await pool.query(
+    `select id, result, base_revision, current_revision, resulting_revision,
+            state_hash, state_bytes, device_id, summary, detail, created_at
+     from state_save_events where username = $1
+     order by created_at desc, id desc limit 100`,
+    [username]
+  );
+  const historyUsage = await pool.query(
+    `select count(*)::int as count, coalesce(sum(compressed_bytes), 0)::bigint as compressed_bytes
+     from state_versions where username = $1`,
+    [username]
+  );
   sendJson(req, res, 200, {
     ok: true,
     username,
@@ -795,6 +935,34 @@ async function handleAdminRecoverySnapshots(req, res, url) {
       createdAt: row.created_at,
       summary: stateSummary(row.state),
     })),
+    versions: versions.rows.map((row) => ({
+      id: String(row.id),
+      revision: Number(row.revision || 0),
+      stateHash: row.state_hash,
+      stateBytes: Number(row.state_bytes || 0),
+      compressedBytes: Number(row.compressed_bytes || 0),
+      sourceDevice: row.source_device,
+      summary: row.summary || {},
+      createdAt: row.created_at,
+    })),
+    saveEvents: events.rows.map((row) => ({
+      id: String(row.id),
+      result: row.result,
+      baseRevision: row.base_revision === null ? null : Number(row.base_revision),
+      currentRevision: row.current_revision === null ? null : Number(row.current_revision),
+      resultingRevision: row.resulting_revision === null ? null : Number(row.resulting_revision),
+      stateHash: row.state_hash,
+      stateBytes: row.state_bytes === null ? null : Number(row.state_bytes),
+      deviceId: row.device_id,
+      summary: row.summary || null,
+      detail: row.detail,
+      createdAt: row.created_at,
+    })),
+    history: {
+      versionCount: Number(historyUsage.rows[0]?.count || 0),
+      compressedBytes: Number(historyUsage.rows[0]?.compressed_bytes || 0),
+      budgetBytes: STATE_HISTORY_BUDGET_BYTES,
+    },
   });
 }
 
@@ -844,14 +1012,269 @@ async function handleAdminRecoverySnapshotRestore(req, res, snapshotId) {
        returning state_revision, state_updated_at`,
       [username, JSON.stringify(restoredState), stateBytes]
     );
+    const resultingRevision = Number(updated.rows[0].state_revision);
+    await insertStateVersion(client, {
+      username,
+      revision: resultingRevision,
+      state: restoredState,
+      sourceDevice: "admin-snapshot-restore",
+    });
+    await recordSaveEvent(client, {
+      username,
+      result: "restored",
+      currentRevision: Number(account.state_revision || 0),
+      resultingRevision,
+      state: restoredState,
+      deviceId: "admin-snapshot-restore",
+      detail: `Restored state_backups/${snapshotId}`,
+    });
     await client.query("commit");
+    await pruneStateVersions(username).catch((error) => console.error("State history pruning failed", error));
     sendJson(req, res, 200, {
       ok: true,
       username,
-      revision: Number(updated.rows[0].state_revision),
+      revision: resultingRevision,
       restoredAt: updated.rows[0].state_updated_at,
       preRestoreBackupId,
       summary: stateSummary(restoredState),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function handleAdminRecoveryVersionRestore(req, res, versionId) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req);
+  const username = normalizeUsername(body.username);
+  if (!USERNAME_PATTERN.test(username) || !/^\d+$/.test(versionId)) {
+    return sendJson(req, res, 400, { ok: false, error: "Invalid version restore request." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const accountResult = await client.query("select * from accounts where username = $1 for update", [username]);
+    const account = accountResult.rows[0];
+    if (!account) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok: false, error: "Account not found." });
+    }
+    const versionResult = await client.query(
+      `select id, revision, state_gzip from state_versions
+       where id = $1 and username = $2`,
+      [versionId, username]
+    );
+    const version = versionResult.rows[0];
+    if (!version) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok: false, error: "Saved revision not found for that account." });
+    }
+    const restoredState = deserializeStateVersion(version.state_gzip);
+    const prepared = serializeStateVersion(restoredState);
+    if (prepared.stateBytes > MAX_STATE_BYTES) {
+      await client.query("rollback");
+      return sendJson(req, res, 413, stateTooLargePayload(prepared.stateBytes));
+    }
+    let preRestoreBackupId = null;
+    if (account.state) {
+      const backup = await client.query(
+        `insert into state_backups (username, revision, state, reason)
+         values ($1, $2, $3::jsonb, 'pre_restore') returning id`,
+        [username, Number(account.state_revision || 0), JSON.stringify(account.state)]
+      );
+      preRestoreBackupId = String(backup.rows[0].id);
+    }
+    const updated = await client.query(
+      `update accounts
+       set state = $2::jsonb, state_bytes = $3, state_revision = state_revision + 1,
+           state_updated_at = now(), updated_at = now()
+       where username = $1
+       returning state_revision, state_updated_at`,
+      [username, prepared.serialized, prepared.stateBytes]
+    );
+    const resultingRevision = Number(updated.rows[0].state_revision);
+    await insertStateVersion(client, {
+      username,
+      revision: resultingRevision,
+      state: restoredState,
+      sourceDevice: "admin-version-restore",
+      version: prepared,
+    });
+    await recordSaveEvent(client, {
+      username,
+      result: "restored",
+      currentRevision: Number(account.state_revision || 0),
+      resultingRevision,
+      state: restoredState,
+      deviceId: "admin-version-restore",
+      detail: `Restored immutable revision ${Number(version.revision || 0)}`,
+    });
+    await client.query("commit");
+    await pruneStateVersions(username).catch((error) => console.error("State history pruning failed", error));
+    sendJson(req, res, 200, {
+      ok: true,
+      username,
+      revision: resultingRevision,
+      restoredAt: updated.rows[0].state_updated_at,
+      restoredFromRevision: Number(version.revision || 0),
+      preRestoreBackupId,
+      summary: stateSummary(restoredState),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+const ANYA_INCIDENT_USERNAME = "anya";
+const ANYA_INCIDENT_BACKUP_REVISION = 4;
+const ANYA_INCIDENT_CONFIRMATION = "RECOVER ANYA ADDITIVELY";
+
+async function loadAnyaIncidentSource(client) {
+  const result = await client.query(
+    `select id, revision, state, created_at
+     from state_backups
+     where username = $1 and revision = $2
+     order by created_at desc limit 1`,
+    [ANYA_INCIDENT_USERNAME, ANYA_INCIDENT_BACKUP_REVISION]
+  );
+  return result.rows[0] || null;
+}
+
+async function handleAnyaIncidentRecovery(req, res) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (!['GET', 'POST'].includes(req.method)) return send(req, res, 405, "Method not allowed");
+
+  if (req.method === "GET") {
+    const accountResult = await pool.query(
+      "select state, state_revision, state_updated_at from accounts where username = $1",
+      [ANYA_INCIDENT_USERNAME]
+    );
+    const account = accountResult.rows[0];
+    const source = await loadAnyaIncidentSource(pool);
+    if (!account || !source) {
+      return sendJson(req, res, 404, { ok: false, error: "The verified Anya incident source is unavailable." });
+    }
+    const proposed = additiveIncidentRecovery(account.state, source.state);
+    return sendJson(req, res, 200, {
+      ok: true,
+      username: ANYA_INCIDENT_USERNAME,
+      sourceSnapshotId: String(source.id),
+      sourceRevision: Number(source.revision),
+      sourceCreatedAt: source.created_at,
+      currentRevision: Number(account.state_revision || 0),
+      currentUpdatedAt: account.state_updated_at,
+      currentSummary: stateSummary(account.state),
+      sourceSummary: stateSummary(source.state),
+      proposedSummary: proposed.summary,
+      unchanged: !proposed.addedTasks.length && !proposed.addedWeeks.length,
+      addTasks: proposed.addedTasks.map((task) => ({ id: task.id || null, title: task.title || task.name || "Untitled task" })),
+      addWeeks: proposed.addedWeeks.map((week) => ({ id: week.id || null, label: week.label || week.name || week.date || "Weekly week" })),
+      confirmation: ANYA_INCIDENT_CONFIRMATION,
+    });
+  }
+
+  const body = await readJsonBody(req);
+  if (String(body.confirmation || "") !== ANYA_INCIDENT_CONFIRMATION) {
+    return sendJson(req, res, 400, { ok: false, error: "Exact incident recovery confirmation is required." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const accountResult = await client.query(
+      "select * from accounts where username = $1 for update",
+      [ANYA_INCIDENT_USERNAME]
+    );
+    const account = accountResult.rows[0];
+    const source = await loadAnyaIncidentSource(client);
+    if (!account || !source) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok: false, error: "The verified Anya incident source is unavailable." });
+    }
+
+    const proposed = additiveIncidentRecovery(account.state, source.state);
+    if (proposed.addedTasks.length > 2 || proposed.addedWeeks.length > 2) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, {
+        ok: false,
+        error: "INCIDENT_SOURCE_MISMATCH",
+        message: "The live data no longer matches the verified recovery scope. Nothing was changed.",
+      });
+    }
+    if (!proposed.addedTasks.length && !proposed.addedWeeks.length) {
+      await client.query("rollback");
+      return sendJson(req, res, 200, {
+        ok: true,
+        unchanged: true,
+        username: ANYA_INCIDENT_USERNAME,
+        revision: Number(account.state_revision || 0),
+        summary: stateSummary(account.state),
+      });
+    }
+    if (proposed.summary.tasks < 28 || proposed.summary.weeklyWeeks < 5 || proposed.summary.weeklySemesters < 6) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, {
+        ok: false,
+        error: "INCIDENT_RECOVERY_VALIDATION_FAILED",
+        message: "The proposed additive result failed the verified count checks. Nothing was changed.",
+        summary: proposed.summary,
+      });
+    }
+
+    const prepared = serializeStateVersion(proposed.state);
+    if (prepared.stateBytes > MAX_STATE_BYTES) {
+      await client.query("rollback");
+      return sendJson(req, res, 413, stateTooLargePayload(prepared.stateBytes));
+    }
+    const preRecovery = await client.query(
+      `insert into state_backups (username, revision, state, reason)
+       values ($1, $2, $3::jsonb, 'pre_incident_recovery') returning id`,
+      [ANYA_INCIDENT_USERNAME, Number(account.state_revision || 0), JSON.stringify(account.state)]
+    );
+    const updated = await client.query(
+      `update accounts
+       set state = $2::jsonb, state_bytes = $3, state_revision = state_revision + 1,
+           state_updated_at = now(), updated_at = now()
+       where username = $1
+       returning state_revision, state_updated_at`,
+      [ANYA_INCIDENT_USERNAME, prepared.serialized, prepared.stateBytes]
+    );
+    const resultingRevision = Number(updated.rows[0].state_revision);
+    await insertStateVersion(client, {
+      username: ANYA_INCIDENT_USERNAME,
+      revision: resultingRevision,
+      state: proposed.state,
+      sourceDevice: "admin-incident-recovery",
+      version: prepared,
+    });
+    await recordSaveEvent(client, {
+      username: ANYA_INCIDENT_USERNAME,
+      result: "recovered",
+      currentRevision: Number(account.state_revision || 0),
+      resultingRevision,
+      state: proposed.state,
+      deviceId: "admin-incident-recovery",
+      detail: `Added ${proposed.addedTasks.length} tasks and ${proposed.addedWeeks.length} Weekly weeks from revision ${ANYA_INCIDENT_BACKUP_REVISION}`,
+    });
+    await client.query("commit");
+    await pruneStateVersions(ANYA_INCIDENT_USERNAME).catch((error) => console.error("State history pruning failed", error));
+    return sendJson(req, res, 200, {
+      ok: true,
+      username: ANYA_INCIDENT_USERNAME,
+      revision: resultingRevision,
+      recoveredAt: updated.rows[0].state_updated_at,
+      preIncidentRecoverySnapshotId: String(preRecovery.rows[0].id),
+      addedTasks: proposed.addedTasks.map((task) => ({ id: task.id || null, title: task.title || task.name || "Untitled task" })),
+      addedWeeks: proposed.addedWeeks.map((week) => ({ id: week.id || null, label: week.label || week.name || week.date || "Weekly week" })),
+      summary: proposed.summary,
     });
   } catch (error) {
     await client.query("rollback").catch(() => {});
@@ -894,26 +1317,19 @@ async function handleState(req, res) {
   }
 
   if (req.method === "POST") {
-    const state = await readJsonBody(req, MAX_STATE_BYTES);
-    const stateBytes = Buffer.byteLength(JSON.stringify(state || null));
-    if (stateBytes > MAX_STATE_BYTES) {
-      sendJson(req, res, 413, stateTooLargePayload(stateBytes));
-      return;
-    }
-    const result = await pool.query(
-      `update accounts
-       set state = $2::jsonb, state_bytes = $3, state_revision = state_revision + 1,
-           state_updated_at = now(), updated_at = now()
-       where username = $1
-       returning state_revision, state_updated_at`,
-      [user.username, JSON.stringify(state && typeof state === "object" ? state : null), stateBytes]
-    );
-    sendJson(req, res, 200, {
-      ok: true,
-      revision: Number(result.rows[0]?.state_revision || 0),
-      savedAt: result.rows[0]?.state_updated_at || new Date().toISOString(),
-      stateBytes,
-      maxStateBytes: MAX_STATE_BYTES,
+    req.resume();
+    await recordSaveEvent(pool, {
+      username: user.username,
+      result: "rejected",
+      currentRevision: Number(user.state_revision || 0),
+      deviceId: "legacy-api",
+      detail: "VERSIONED_STATE_REQUIRED",
+    }).catch((error) => console.error("Save audit failed", error));
+    sendJson(req, res, 426, {
+      ok: false,
+      error: "VERSIONED_STATE_REQUIRED",
+      endpoint: "/api/v2/state",
+      message: "Whole-state writes are disabled. Reload StudyQuest before saving.",
       serverTime: new Date().toISOString(),
     });
     return;
@@ -1004,30 +1420,60 @@ async function handleVersionedState(req, res) {
   const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES);
   const incomingState = body?.state;
   const baseRevision = body?.baseRevision;
+  const deviceId = safeDeviceLabel(user.sync_device_name || body?.deviceId, user.sync_device_id ? "paired-device" : "browser");
   if (!incomingState || typeof incomingState !== "object" || !Array.isArray(incomingState.tasks)) {
+    await recordSaveEvent(pool, {
+      username: user.username,
+      result: "rejected",
+      baseRevision,
+      currentRevision: Number(user.state_revision || 0),
+      deviceId,
+      detail: "INVALID_STATE",
+    }).catch((error) => console.error("Save audit failed", error));
     sendJson(req, res, 400, { ok: false, error: "INVALID_STATE" });
     return;
   }
   if (!Number.isInteger(baseRevision) || baseRevision < 0) {
+    await recordSaveEvent(pool, {
+      username: user.username,
+      result: "rejected",
+      currentRevision: Number(user.state_revision || 0),
+      state: incomingState,
+      deviceId,
+      detail: "BASE_REVISION_REQUIRED",
+    }).catch((error) => console.error("Save audit failed", error));
     sendJson(req, res, 400, { ok: false, error: "BASE_REVISION_REQUIRED" });
     return;
   }
-  const stateBytes = Buffer.byteLength(JSON.stringify(incomingState));
+  const incomingVersion = serializeStateVersion(incomingState);
+  const stateBytes = incomingVersion.stateBytes;
   if (stateBytes > MAX_STATE_BYTES) {
+    await recordSaveEvent(pool, {
+      username: user.username,
+      result: "oversized",
+      baseRevision,
+      currentRevision: Number(user.state_revision || 0),
+      stateHash: incomingVersion.hash,
+      stateBytes,
+      deviceId,
+      detail: "STATE_TOO_LARGE",
+    }).catch((error) => console.error("Save audit failed", error));
     sendJson(req, res, 413, stateTooLargePayload(stateBytes));
     return;
   }
 
   const client = await pool.connect();
+  let currentRevisionForAudit = Number(user.state_revision || 0);
   try {
     await client.query("begin");
     const current = await client.query(
-      `select username, state, state_revision, state_updated_at, updated_at
+      `select username, state, state_bytes, state_revision, state_updated_at, updated_at
        from accounts where username = $1 for update`,
       [user.username]
     );
     const row = current.rows[0];
     const currentRevision = Number(row?.state_revision || 0);
+    currentRevisionForAudit = currentRevision;
     if (!row) {
       await client.query("rollback");
       sendJson(req, res, 404, { ok: false, error: "ACCOUNT_NOT_FOUND" });
@@ -1035,6 +1481,16 @@ async function handleVersionedState(req, res) {
     }
     if (baseRevision !== currentRevision) {
       await client.query("rollback");
+      await recordSaveEvent(pool, {
+        username: user.username,
+        result: "conflicted",
+        baseRevision,
+        currentRevision,
+        stateHash: incomingVersion.hash,
+        stateBytes,
+        deviceId,
+        detail: "STATE_CONFLICT",
+      }).catch((error) => console.error("Save audit failed", error));
       sendJson(req, res, 409, {
         ok: false,
         error: "STATE_CONFLICT",
@@ -1044,6 +1500,32 @@ async function handleVersionedState(req, res) {
         stateBytes: Buffer.byteLength(JSON.stringify(row.state || null)),
         maxStateBytes: MAX_STATE_BYTES,
         serverTime: new Date().toISOString(),
+      });
+      return;
+    }
+
+    if (row.state && stateHash(row.state) === incomingVersion.hash) {
+      await recordSaveEvent(client, {
+        username: user.username,
+        result: "no_change",
+        baseRevision,
+        currentRevision,
+        resultingRevision: currentRevision,
+        stateHash: incomingVersion.hash,
+        stateBytes,
+        deviceId,
+        detail: "State hash already current",
+      });
+      await client.query("commit");
+      sendJson(req, res, 200, {
+        ok: true,
+        unchanged: true,
+        revision: currentRevision,
+        savedAt: row.state_updated_at || row.updated_at || null,
+        stateBytes: Number(row.state_bytes || stateBytes),
+        maxStateBytes: MAX_STATE_BYTES,
+        serverTime: new Date().toISOString(),
+        preMergeBackupCreated: false,
       });
       return;
     }
@@ -1060,10 +1542,31 @@ async function handleVersionedState(req, res) {
        returning state_revision, state_updated_at`,
       [user.username, JSON.stringify(incomingState), stateBytes]
     );
+    const resultingRevision = Number(saved.rows[0].state_revision);
+    await insertStateVersion(client, {
+      username: user.username,
+      revision: resultingRevision,
+      state: incomingState,
+      sourceDevice: deviceId,
+      version: incomingVersion,
+    });
+    await recordSaveEvent(client, {
+      username: user.username,
+      result: "accepted",
+      baseRevision,
+      currentRevision,
+      resultingRevision,
+      stateHash: incomingVersion.hash,
+      stateBytes,
+      state: incomingState,
+      deviceId,
+      detail: mergeApproved ? `Approved ${body.merge.source}` : "Revision-protected save",
+    });
     await client.query("commit");
+    await pruneStateVersions(user.username).catch((error) => console.error("State history pruning failed", error));
     sendJson(req, res, 200, {
       ok: true,
-      revision: Number(saved.rows[0].state_revision),
+      revision: resultingRevision,
       savedAt: saved.rows[0].state_updated_at,
       stateBytes,
       maxStateBytes: MAX_STATE_BYTES,
@@ -1072,6 +1575,16 @@ async function handleVersionedState(req, res) {
     });
   } catch (error) {
     await client.query("rollback").catch(() => {});
+    await recordSaveEvent(pool, {
+      username: user.username,
+      result: "rejected",
+      baseRevision,
+      currentRevision: currentRevisionForAudit,
+      stateHash: incomingVersion.hash,
+      stateBytes,
+      deviceId,
+      detail: String(error?.code || error?.message || "SERVER_ERROR").slice(0, 120),
+    }).catch(() => {});
     throw error;
   } finally {
     client.release();
@@ -1218,6 +1731,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/device-recovery") {
+      const user = await currentUser(req);
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?next=device-recovery&stable=1" });
+        return;
+      }
+      send(req, res, 200, fs.readFileSync(DEVICE_RECOVERY_HTML_PATH), {
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      return;
+    }
+
+    if (url.pathname === "/device-recovery.js") {
+      send(req, res, 200, fs.readFileSync(DEVICE_RECOVERY_JS_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
     if (url.pathname === "/weekly-study-planner" || url.pathname === "/weekly-study-planner.html" || url.pathname === "/weekly-study-planner-lite.html") {
       send(req, res, 200, fs.readFileSync(WEEKLY_STUDY_PLANNER_LITE_PATH), { "content-type": "text/html; charset=utf-8" });
       return;
@@ -1318,6 +1851,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/admin/recovery/incidents/anya-2026-08-11") {
+      await handleAnyaIncidentRecovery(req, res);
+      return;
+    }
+
     const recoveryApproveMatch = url.pathname.match(/^\/api\/admin\/recovery\/requests\/([^/]+)\/approve$/);
     if (recoveryApproveMatch) {
       await handleAdminRecoveryApprove(req, res, decodeURIComponent(recoveryApproveMatch[1]));
@@ -1333,6 +1871,12 @@ const server = http.createServer(async (req, res) => {
     const recoveryRestoreMatch = url.pathname.match(/^\/api\/admin\/recovery\/snapshots\/(\d+)\/restore$/);
     if (recoveryRestoreMatch) {
       await handleAdminRecoverySnapshotRestore(req, res, recoveryRestoreMatch[1]);
+      return;
+    }
+
+    const recoveryVersionRestoreMatch = url.pathname.match(/^\/api\/admin\/recovery\/versions\/(\d+)\/restore$/);
+    if (recoveryVersionRestoreMatch) {
+      await handleAdminRecoveryVersionRestore(req, res, recoveryVersionRestoreMatch[1]);
       return;
     }
 

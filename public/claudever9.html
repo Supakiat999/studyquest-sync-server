@@ -45,13 +45,19 @@
         badge.id = "studyquestAccountBadge";
         document.body.appendChild(badge);
       }
-      badge.innerHTML = `<strong>${escapeHtml(user.username)}</strong><button type="button">Logout</button>`;
+      badge.innerHTML = `<strong>${escapeHtml(user.username)}</strong><a href="/device-recovery">Device Recovery</a><button type="button">Logout</button>`;
       badge.querySelector("button").addEventListener("click", performLogout);
     }
 
     function unlock(user = { username: "admin", legacy: true }) {
       window.__STUDYQUEST_AUTH_USER__ = user;
-      const wantsStable = new URLSearchParams(window.location.search).get("stable") === "1";
+      const search = new URLSearchParams(window.location.search);
+      const next = search.get("next");
+      const wantsStable = search.get("stable") === "1";
+      if (!user.legacy && next === "device-recovery") {
+        window.location.replace("/device-recovery");
+        return;
+      }
       if (!user.legacy && user.username === "admin" && !wantsStable) {
         window.location.replace("/v13");
         return;
@@ -466,7 +472,7 @@
     padding: 8px 10px; border: 1px solid #252a45; border-radius: 999px; background: rgba(19,22,42,.94);
     color: #e8eaf6; font-family: 'Syne', system-ui, sans-serif; font-size: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.28);
   }
-  #studyquestAccountBadge button { border: 0; border-radius: 999px; background: #252a45; color: #e8eaf6; font-weight: 800; padding: 6px 9px; cursor: pointer; }
+  #studyquestAccountBadge button, #studyquestAccountBadge a { border: 0; border-radius: 999px; background: #252a45; color: #e8eaf6; font-weight: 800; padding: 6px 9px; cursor: pointer; text-decoration: none; }
   html.studyquest-locked #studyquestAccountBadge { display: none; }
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -3522,12 +3528,172 @@ function defaultState() {
 const STORAGE_KEY = 'studyquest_v3';
 const SERVER_STATE_ENDPOINT = '/api/v2/state';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
+const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
+const DEVICE_RECOVERY_DB_VERSION = 1;
+const CLOUD_SAVE_QUIET_MS = 2000;
+const CLOUD_SAVE_TIMEOUT_MS = 75000;
 let serverSaveTimer = null;
 let saveStatusClearTimer = null;
 let lastServerSaveStartedAt = 0;
 let serverStateRevision = null;
 let accountStateRecovery = null;
+let durableSaveChain = Promise.resolve();
+let serverSaveInFlight = null;
+let cloudSaveRequested = false;
+let cloudOutboxPending = false;
 const ACCOUNT_RECOVERY_COPY_LIMIT = 4;
+const DEVICE_RECOVERY_COPY_LIMIT = 20;
+
+function authenticatedUsername() {
+  const username = window.__STUDYQUEST_AUTH_USER__?.username;
+  return typeof username === 'string' ? username.trim().toLowerCase() : '';
+}
+
+function openDeviceRecoveryDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('IndexedDB is unavailable'));
+    const request = indexedDB.open(DEVICE_RECOVERY_DB, DEVICE_RECOVERY_DB_VERSION);
+    request.onerror = () => reject(request.error || new Error('IndexedDB could not be opened'));
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('accountStates')) db.createObjectStore('accountStates', { keyPath:'username' });
+      if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath:'username' });
+      if (!db.objectStoreNames.contains('recovery')) {
+        const store = db.createObjectStore('recovery', { keyPath:'id' });
+        store.createIndex('username', 'username', { unique:false });
+      }
+    };
+  });
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function idbTransactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction was aborted'));
+  });
+}
+
+async function pruneDeviceRecoveryCopies(db, username) {
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('recovery', 'readwrite');
+    const store = transaction.objectStore('recovery');
+    const request = store.index('username').getAll(username);
+    request.onerror = () => reject(request.error || new Error('Recovery history could not be read'));
+    request.onsuccess = () => {
+      const rows = Array.isArray(request.result) ? request.result : [];
+      rows.sort((a, b) => Number(b.capturedAtMs || 0) - Number(a.capturedAtMs || 0));
+      let retainedBytes = 0;
+      rows.forEach((row, index) => {
+        const rowBytes = Number(row.stateBytes || 0);
+        const overBudget = index > 0 && retainedBytes + rowBytes > 40 * 1024 * 1024;
+        if (index >= DEVICE_RECOVERY_COPY_LIMIT || overBudget) store.delete(row.id);
+        else retainedBytes += rowBytes;
+      });
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('Recovery history cleanup failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('Recovery history cleanup was aborted'));
+  });
+}
+
+async function persistDeviceState(snapshot, { pending = true, label = 'device-save' } = {}) {
+  const username = authenticatedUsername();
+  if (!username || !snapshot || typeof snapshot !== 'object') return false;
+  const copy = cloneAccountState(snapshot);
+  const serialized = JSON.stringify(copy);
+  const capturedAtMs = Date.now();
+  const updatedAt = Number(copy.updatedAt || capturedAtMs);
+  const fingerprint = `${updatedAt}:${serialized.length}`;
+  const db = await openDeviceRecoveryDb();
+  try {
+    const transaction = db.transaction(['accountStates','outbox','recovery'], 'readwrite');
+    transaction.objectStore('accountStates').put({
+      username, state:copy, updatedAt, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
+    });
+    const outbox = transaction.objectStore('outbox');
+    if (pending) {
+      outbox.put({ username, state:copy, updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint });
+    }
+    transaction.objectStore('recovery').put({
+      id:`${username}:${fingerprint}`, username, state:copy, label,
+      updatedAt, capturedAtMs, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
+    });
+    await idbTransactionDone(transaction);
+    await pruneDeviceRecoveryCopies(db, username);
+    cloudOutboxPending = pending || cloudOutboxPending;
+    return true;
+  } finally {
+    db.close();
+  }
+}
+
+function queueDeviceStatePersistence(snapshot, options = {}) {
+  const copy = cloneAccountState(snapshot);
+  durableSaveChain = durableSaveChain
+    .catch(() => {})
+    .then(() => persistDeviceState(copy, options));
+  return durableSaveChain;
+}
+
+async function clearDeviceOutboxThrough(savedUpdatedAt, force = false) {
+  const username = authenticatedUsername();
+  if (!username) return;
+  const db = await openDeviceRecoveryDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction('outbox', 'readwrite');
+      const store = transaction.objectStore('outbox');
+      const request = store.get(username);
+      request.onerror = () => reject(request.error || new Error('Cloud outbox could not be read'));
+      request.onsuccess = () => {
+        const pending = request.result;
+        if (force || !pending || Number(pending.updatedAt || 0) <= Number(savedUpdatedAt || 0)) store.delete(username);
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error('Cloud outbox cleanup failed'));
+      transaction.onabort = () => reject(transaction.error || new Error('Cloud outbox cleanup was aborted'));
+    });
+    cloudOutboxPending = !!(await readDeviceOutbox(username, db));
+  } finally {
+    db.close();
+  }
+}
+
+async function readDeviceOutbox(username, existingDb = null) {
+  const db = existingDb || await openDeviceRecoveryDb();
+  try {
+    if (!db.objectStoreNames.contains('outbox')) return null;
+    return await idbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username));
+  } finally {
+    if (!existingDb) db.close();
+  }
+}
+
+async function readDeviceStateBundle() {
+  const username = authenticatedUsername();
+  if (!username) return { accountState:null, outbox:null };
+  const db = await openDeviceRecoveryDb();
+  try {
+    const accountState = db.objectStoreNames.contains('accountStates')
+      ? await idbRequest(db.transaction('accountStates', 'readonly').objectStore('accountStates').get(username))
+      : null;
+    const outbox = db.objectStoreNames.contains('outbox')
+      ? await idbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username))
+      : null;
+    return { accountState:accountState || null, outbox:outbox || null };
+  } finally {
+    db.close();
+  }
+}
 
 function serverRevisionKey() {
   return `${currentStorageKey()}_server_revision`;
@@ -3599,7 +3765,9 @@ function accountStatesEquivalent(left, right) {
 function accountStateSummary(value) {
   const source = value || {};
   const gradeCount = source.grades && typeof source.grades === 'object' ? Object.keys(source.grades).length : 0;
-  return `${Array.isArray(source.tasks) ? source.tasks.length : 0} tasks · ${Array.isArray(source.notes) ? source.notes.length : 0} notes · ${Array.isArray(source.fileLinks) ? source.fileLinks.length : 0} files · ${gradeCount} grade records · ${Array.isArray(source.trips) ? source.trips.length : 0} trips`;
+  const weeklyWeeks = Array.isArray(source.tracker?.weeks) ? source.tracker.weeks.length : 0;
+  const weeklySemesters = Array.isArray(source.trackerSemesters) ? source.trackerSemesters.length : 0;
+  return `${Array.isArray(source.tasks) ? source.tasks.length : 0} tasks · ${Array.isArray(source.notes) ? source.notes.length : 0} notes · ${Array.isArray(source.fileLinks) ? source.fileLinks.length : 0} files · ${gradeCount} grade records · ${Array.isArray(source.trips) ? source.trips.length : 0} trips · ${weeklyWeeks} Weekly weeks · ${weeklySemesters} semesters`;
 }
 
 function accountStateTime(value) {
@@ -3678,17 +3846,18 @@ function openAccountStateRecovery(browserState, cloudState, revision, reason = '
   preserveAccountRecoveryCopy('Cloud copy before recovery choice', safeCloud, { revision:Number(revision || 0) });
   state = safeBrowser;
   localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  queueDeviceStatePersistence(state, { pending:true, label:'conflict-browser-copy' }).catch(() => {});
   ensureTrackerSemesters();
   ensureTravelState();
   renderAll();
   renderAccountStateRecovery();
   openModal('accountStateRecoveryModal');
-  setSaveStatus('error', 'Sync choice needed');
+  setSaveStatus('error', 'Conflict - both copies preserved');
 }
 
 function closeAccountStateRecovery() {
   closeModal('accountStateRecoveryModal');
-  if (accountStateRecovery) setSaveStatus('error', 'Sync choice needed');
+  if (accountStateRecovery) setSaveStatus('error', 'Conflict - both copies preserved');
 }
 
 function exportAccountStateCopies() {
@@ -3715,6 +3884,8 @@ function useAccountCloudCopy() {
   preserveAccountRecoveryCopy('Chosen cloud copy', recovery.cloudState, { revision:recovery.revision });
   state = normalizeState(recovery.cloudState);
   localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  queueDeviceStatePersistence(state, { pending:false, label:'chosen-cloud-copy' }).catch(() => {});
+  clearDeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(() => {});
   storeServerRevision(recovery.revision);
   accountStateRecovery = null;
   closeModal('accountStateRecoveryModal');
@@ -3735,6 +3906,7 @@ async function useAccountBrowserCopy() {
   preserveAccountRecoveryCopy('Chosen browser copy', recovery.browserState, { revision:recovery.revision });
   preserveAccountRecoveryCopy('Cloud copy before browser recovery', recovery.cloudState, { revision:recovery.revision });
   state = normalizeState(recovery.browserState);
+  await queueDeviceStatePersistence(state, { pending:true, label:'chosen-browser-copy' }).catch(() => {});
   storeServerRevision(recovery.revision);
   const saved = await saveStateToServer({
     baseRevisionOverride:recovery.revision,
@@ -3935,27 +4107,32 @@ let viewDays = 30;
 // ════════════════════════════════════════════════════════
 function saveState() {
   state.updatedAt = Date.now();
-  setSaveStatus('saving', 'Saving...');
+  const snapshot = cloneAccountState(state);
+  setSaveStatus('saving', 'Saving on this device...');
   let browserSaved = false;
   try {
-    localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+    localStorage.setItem(currentStorageKey(), JSON.stringify(snapshot));
     browserSaved = true;
+    setSaveStatus('local', 'Saved on this device');
   } catch (e) {
     console.warn('StudyQuest browser save failed', e);
-    setSaveStatus('error', 'Save error');
+    setSaveStatus('error', 'Browser save needs attention');
     if (!canUseServerStorage()) showToast('Browser storage failed. Open with 127.0.0.1 so StudyQuest can save to disk.', '#f76a6a');
   }
   if (!canUseServerStorage()) {
-    if (browserSaved) setSaveStatus('local', 'Local only');
+    if (browserSaved) setSaveStatus('local', 'Saved on this device');
     return;
   }
   if (accountStateRecovery) {
-    accountStateRecovery.browserState = cloneAccountState(state);
+    accountStateRecovery.browserState = snapshot;
     renderAccountStateRecovery();
-    setSaveStatus('error', 'Sync choice needed');
+    queueDeviceStatePersistence(snapshot, { pending:true, label:'edit-during-conflict' }).catch(() => {});
+    setSaveStatus('error', 'Conflict - both copies preserved');
     return;
   }
-  queueServerStateSave();
+  queueDeviceStatePersistence(snapshot, { pending:true, label:'before-cloud-save' })
+    .catch(error => console.warn('StudyQuest IndexedDB recovery save failed', error))
+    .finally(() => queueServerStateSave());
 }
 
 function queueServerStateSave() {
@@ -3964,12 +4141,13 @@ function queueServerStateSave() {
     return;
   }
   if (accountStateRecovery) {
-    setSaveStatus('error', 'Sync choice needed');
+    setSaveStatus('error', 'Conflict - both copies preserved');
     return;
   }
-  setSaveStatus('saving', 'Saving...');
+  cloudSaveRequested = true;
+  setSaveStatus('saving', 'Cloud backup pending');
   clearTimeout(serverSaveTimer);
-  serverSaveTimer = setTimeout(() => saveStateToServer(), 350);
+  serverSaveTimer = setTimeout(() => saveStateToServer(), CLOUD_SAVE_QUIET_MS);
 }
 
 async function saveStateToServer(options = {}) {
@@ -3981,17 +4159,27 @@ async function saveStateToServer(options = {}) {
     allowRecovery = false,
   } = options;
   if (!canUseServerStorage()) {
-    if (!silent) setSaveStatus('local', 'Local only');
+    if (!silent) setSaveStatus('local', 'Saved on this device');
     return false;
   }
   if (accountStateRecovery && !allowRecovery) {
-    if (!silent) setSaveStatus('error', 'Sync choice needed');
+    if (!silent) setSaveStatus('error', 'Conflict - both copies preserved');
     return false;
+  }
+  if (serverSaveInFlight) {
+    cloudSaveRequested = true;
+    return serverSaveInFlight;
   }
   clearTimeout(serverSaveTimer);
   serverSaveTimer = null;
+  cloudSaveRequested = false;
   lastServerSaveStartedAt = Date.now();
-  try {
+  const snapshot = cloneAccountState(state);
+  const snapshotUpdatedAt = Number(snapshot.updatedAt || 0);
+  serverSaveInFlight = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CLOUD_SAVE_TIMEOUT_MS);
+    try {
     const baseRevision = Number.isInteger(baseRevisionOverride)
       ? baseRevisionOverride
       : serverStateRevision ?? readServerRevision() ?? 0;
@@ -4000,18 +4188,23 @@ async function saveStateToServer(options = {}) {
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        state,
+        state:snapshot,
         baseRevision,
         deviceId:'stable-app',
         merge:mergeApproval || undefined,
       }),
       keepalive,
+      signal:controller.signal,
     });
     const result = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      setSaveStatus('error', 'Sign in to back up');
+      return false;
+    }
     if (res.status === 409 && result.error === 'STATE_CONFLICT') {
       storeServerRevision(result.revision);
       openAccountStateRecovery(
-        state,
+        snapshot,
         result.state || defaultState(),
         result.revision,
         'The cloud changed after this browser loaded. Both copies are preserved; choose before syncing.'
@@ -4022,14 +4215,31 @@ async function saveStateToServer(options = {}) {
       }
       return false;
     }
-    if (!res.ok) throw new Error(result.error || 'Server save failed');
+    if (res.status === 413 && result.error === 'STATE_TOO_LARGE') {
+      throw new Error(`Cloud limit reached (${result.stateBytes || '?'} of ${result.maxStateBytes || '?'} bytes)`);
+    }
+    if (!res.ok) throw new Error(result.error || 'Cloud backup failed');
     storeServerRevision(result.revision);
-    if (!silent) setSaveStatus('saved', 'Saved');
+    await clearDeviceOutboxThrough(snapshotUpdatedAt).catch(error => console.warn('StudyQuest outbox cleanup failed', error));
+    const backedUpAt = result.savedAt ? new Date(result.savedAt) : new Date();
+    if (!silent) setSaveStatus('saved', `Backed up at ${backedUpAt.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}`);
     return true;
-  } catch (e) {
-    console.warn('StudyQuest server save failed', e);
-    if (!silent) setSaveStatus('error', 'Save error');
+    } catch (e) {
+    console.warn('StudyQuest cloud backup failed', e);
+    cloudOutboxPending = true;
+    if (!silent) setSaveStatus('local', 'Cloud backup pending');
     return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+  try {
+    return await serverSaveInFlight;
+  } finally {
+    serverSaveInFlight = null;
+    if (!accountStateRecovery && (cloudSaveRequested || Number(state.updatedAt || 0) > snapshotUpdatedAt)) {
+      queueServerStateSave();
+    }
   }
 }
 
@@ -4044,21 +4254,8 @@ function bestEffortSaveBeforePageExit() {
   if (!state || Date.now() - lastServerSaveStartedAt < 300) return;
   try {
     const stateBody = JSON.stringify(state);
-    const body = JSON.stringify({ state, baseRevision: serverStateRevision ?? readServerRevision() ?? 0, deviceId: 'stable-app-exit' });
     localStorage.setItem(currentStorageKey(), stateBody);
-    if (body.length < 60000 && navigator.sendBeacon) {
-      const blob = new Blob([body], { type: 'application/json' });
-      if (navigator.sendBeacon(SERVER_STATE_ENDPOINT, blob)) return;
-    }
-    if (body.length < 60000) {
-      fetch(SERVER_STATE_ENDPOINT, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        keepalive: true,
-      }).catch(() => {});
-    }
+    queueDeviceStatePersistence(state, { pending:true, label:'page-exit' }).catch(() => {});
   } catch (e) {
     console.warn('StudyQuest final save failed', e);
   }
@@ -4068,7 +4265,35 @@ window.studyquestFlushSave = flushStateToServerBeforeExit;
 window.addEventListener('pagehide', bestEffortSaveBeforePageExit);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') bestEffortSaveBeforePageExit();
+  if (document.visibilityState === 'visible') retryPendingCloudBackup();
 });
+
+async function retryPendingCloudBackup() {
+  if (!canUseServerStorage() || accountStateRecovery || !authenticatedUsername()) return false;
+  try {
+    const pending = await readDeviceOutbox(authenticatedUsername());
+    cloudOutboxPending = !!pending;
+    if (!pending?.state) return false;
+    if (Number(pending.updatedAt || 0) > Number(state.updatedAt || 0)) {
+      state = normalizeState(pending.state);
+      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+      ensureTrackerSemesters();
+      ensureTravelState();
+      renderAll();
+    }
+    setSaveStatus('saving', 'Cloud backup pending');
+    return saveStateToServer({ silent:false });
+  } catch (error) {
+    console.warn('StudyQuest pending cloud backup retry failed', error);
+    return false;
+  }
+}
+
+window.addEventListener('online', retryPendingCloudBackup);
+window.addEventListener('focus', retryPendingCloudBackup);
+setInterval(() => {
+  if (navigator.onLine !== false && cloudOutboxPending) retryPendingCloudBackup();
+}, 60 * 1000);
 
 function loadState() {
   try {
@@ -4088,17 +4313,38 @@ async function syncStateFromServer() {
   }
 
   try {
-    const accountBrowserState = readAuthenticatedAccountState();
+    const localStorageState = readAuthenticatedAccountState();
+    const deviceBundle = await readDeviceStateBundle().catch(error => {
+      console.warn('StudyQuest IndexedDB recovery copy could not be read', error);
+      return { accountState:null, outbox:null };
+    });
+    cloudOutboxPending = !!deviceBundle.outbox;
+    const deviceCandidates = [
+      { state:localStorageState, priority:1, label:'browser storage' },
+      { state:deviceBundle.accountState?.state, priority:2, label:'IndexedDB recovery' },
+      { state:deviceBundle.outbox?.state, priority:3, label:'offline outbox' },
+    ].filter(candidate => candidate.state && typeof candidate.state === 'object');
+    deviceCandidates.sort((left, right) => {
+      const timeDifference = Number(right.state.updatedAt || 0) - Number(left.state.updatedAt || 0);
+      return timeDifference || right.priority - left.priority;
+    });
+    const accountBrowserState = deviceCandidates[0]?.state ? normalizeState(deviceCandidates[0].state) : null;
     if (accountBrowserState) {
       state = accountBrowserState;
+      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
       ensureTrackerSemesters();
       ensureTravelState();
       renderAll();
+      if (cloudOutboxPending) setSaveStatus('local', 'Cloud backup pending');
     }
     const res = await fetch(SERVER_STATE_ENDPOINT, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('Server state request failed');
+    if (res.status === 401) {
+      setSaveStatus('error', 'Sign in to back up');
+      throw new Error('Account session expired');
+    }
+    if (!res.ok) throw new Error('Cloud state request failed');
     const serverRaw = await res.json();
-    if (!serverRaw?.ok) throw new Error(serverRaw?.error || 'Server state request failed');
+    if (!serverRaw?.ok) throw new Error(serverRaw?.error || 'Cloud state request failed');
     storeServerRevision(serverRaw.revision);
     const serverState = serverRaw.state ? normalizeState(serverRaw.state) : null;
     const serverHasData = hasUserData(serverState);
@@ -4116,26 +4362,35 @@ async function syncStateFromServer() {
       return;
     }
 
-    if (serverHasData) {
-      state = serverState;
-      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
-      ensureTrackerSemesters();
-      ensureTravelState();
-      renderAll();
-      showToast('Saved StudyQuest data loaded from your account.', '#6af7b0');
+    if (!serverHasData && localHasData) {
+      openAccountStateRecovery(
+        browserState,
+        defaultState(),
+        serverRaw.revision,
+        'This device has StudyQuest information but the account cloud copy is empty. Nothing was uploaded; choose before syncing.'
+      );
+      showToast('Device information found. Review it before creating the cloud copy.', '#f7c06a');
       return;
     }
 
-    if (localHasData && !serverHasData) {
-      state = browserState;
-      await saveStateToServer({
-        baseRevisionOverride:serverRaw.revision,
-        mergeApproval:{ source:'stable-account-recovery', approvedAt:new Date().toISOString() },
-        allowRecovery:true,
-      });
+    if (serverHasData) {
+      state = serverState;
+      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+      await queueDeviceStatePersistence(state, { pending:false, label:'cloud-load' }).catch(() => {});
+      await clearDeviceOutboxThrough(Number(state.updatedAt || 0), accountStatesEquivalent(browserState, serverState)).catch(() => {});
+      ensureTrackerSemesters();
+      ensureTravelState();
+      renderAll();
+      setSaveStatus('saved', serverRaw.updatedAt
+        ? `Backed up at ${new Date(serverRaw.updatedAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}`
+        : 'Backed up to cloud');
+      return;
     }
+
+    setSaveStatus('local', 'Saved on this device');
   } catch (e) {
     console.warn('StudyQuest server load failed', e);
+    if (hasUserData(state)) setSaveStatus('local', cloudOutboxPending ? 'Cloud backup pending' : 'Saved on this device');
   }
 }
 
