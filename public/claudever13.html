@@ -407,6 +407,25 @@
   .smart-merge-values small,.smart-merge-choice small { color:var(--text-muted);font:8px/1.4 'Space Mono',monospace;overflow-wrap:anywhere; }
   .smart-merge-choice { display:grid;gap:5px; }
   .smart-merge-choice .form-input { min-height:32px;padding:5px 7px;font-size:10px; }
+  .smart-merge-overview { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0; }
+  .smart-merge-stat { border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.024);padding:10px;display:grid;gap:3px; }
+  .smart-merge-stat strong { color:var(--text);font:700 18px/1 'Space Mono',monospace; }
+  .smart-merge-stat span { color:var(--text-muted);font-size:9px;font-weight:800;text-transform:uppercase; }
+  .smart-merge-stat.is-warning { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.07); }
+  .smart-merge-notice { border:1px solid rgba(106,247,176,.32);border-radius:8px;background:rgba(106,247,176,.055);padding:10px 12px;color:var(--text-dim);font-size:11px;line-height:1.5; }
+  .smart-merge-notice.is-warning { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.07); }
+  .smart-merge-section { margin-top:12px; }
+  .smart-merge-section-title { display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--text);font-size:11px;font-weight:800;margin-bottom:7px; }
+  .smart-merge-section-title span { color:var(--text-muted);font:9px/1.4 'Space Mono',monospace; }
+  .smart-merge-details { margin-top:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden; }
+  .smart-merge-details > summary { list-style:none;cursor:pointer;padding:11px 12px;color:var(--text);font-size:11px;font-weight:800;display:flex;justify-content:space-between;gap:10px; }
+  .smart-merge-details > summary::-webkit-details-marker { display:none; }
+  .smart-merge-details[open] > summary { border-bottom:1px solid var(--border); }
+  .smart-merge-details-body { padding:0 12px 12px; }
+  .smart-merge-winner { color:var(--green);font-size:9px;font-weight:800;text-transform:uppercase; }
+  .smart-merge-winner.medium { color:var(--gold); }
+  .smart-merge-winner.low { color:var(--red); }
+  .smart-merge-winner.manual { color:var(--gold); }
   .sync-code {
     font-family: 'Space Mono', monospace;
     font-size: 22px;
@@ -458,6 +477,7 @@
     .account-recovery-form { grid-template-columns: 1fr; }
     .smart-merge-row { grid-template-columns:1fr; }
     .smart-merge-values { grid-template-columns:1fr; }
+    .smart-merge-overview { grid-template-columns:1fr; }
   }
   .priority-chip,
   .kind-chip,
@@ -6116,6 +6136,10 @@ const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
 const LOCAL_RELEASE_ENDPOINT = '/api/release/v13';
 const LOCAL_RELEASE_STATUS_ENDPOINT = '/api/release/v13/status';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
+const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
+const DEVICE_RECOVERY_DB_VERSION = 1;
+const DEVICE_RECOVERY_COPY_LIMIT = 20;
+const CLOUD_SAVE_QUIET_MS = 500;
 const LIVE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 const STUDYQUEST_MAX_STATE_BYTES = 10 * 1024 * 1024;
 const SYNC_HISTORY_LIMIT = 500;
@@ -6132,6 +6156,10 @@ const SYNC_UI_ONLY_ROOTS = new Set([
 const SYNC_COUNTER_ROOTS = new Set(['totalXP', 'totalDone', 'pomodorosDone']);
 let serverSaveTimer = null;
 let liveSyncScheduleTimer = null;
+let cloudSaveTimer = null;
+let v13DurableSaveQueued = null;
+let v13DurableSaveDrainPromise = null;
+let v13DurableOutboxPending = false;
 let releasePollTimer = null;
 let saveStatusClearTimer = null;
 let pendingServerSync = false;
@@ -6204,6 +6232,166 @@ function safeWriteJson(key, value) {
     return true;
   } catch (e) {
     console.warn('StudyQuest safety write failed', key, e);
+    return false;
+  }
+}
+
+function v13DurableUsername() {
+  return AUTHENTICATED_STORAGE_USERNAME || (isLocalLabHost() ? 'admin' : 'local-v13');
+}
+
+function openV13DeviceRecoveryDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('IndexedDB is unavailable'));
+    const request = indexedDB.open(DEVICE_RECOVERY_DB, DEVICE_RECOVERY_DB_VERSION);
+    request.onerror = () => reject(request.error || new Error('IndexedDB could not be opened'));
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('accountStates')) db.createObjectStore('accountStates', { keyPath:'username' });
+      if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath:'username' });
+      if (!db.objectStoreNames.contains('recovery')) {
+        const store = db.createObjectStore('recovery', { keyPath:'id' });
+        store.createIndex('username', 'username', { unique:false });
+      }
+    };
+  });
+}
+
+function v13IdbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function v13IdbTransactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction was aborted'));
+  });
+}
+
+async function pruneV13DeviceRecoveryCopies(db, username) {
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('recovery', 'readwrite');
+    const store = transaction.objectStore('recovery');
+    const request = store.index('username').getAll(username);
+    request.onerror = () => reject(request.error || new Error('Recovery history could not be read'));
+    request.onsuccess = () => {
+      const rows = Array.isArray(request.result) ? request.result : [];
+      rows.sort((left, right) => Number(right.capturedAtMs || 0) - Number(left.capturedAtMs || 0));
+      let retainedBytes = 0;
+      rows.forEach((row, index) => {
+        const rowBytes = Number(row.stateBytes || 0);
+        const overBudget = index > 0 && retainedBytes + rowBytes > 40 * 1024 * 1024;
+        if (index >= DEVICE_RECOVERY_COPY_LIMIT || overBudget) store.delete(row.id);
+        else retainedBytes += rowBytes;
+      });
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('Recovery cleanup failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('Recovery cleanup was aborted'));
+  });
+}
+
+async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-device-save' } = {}) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const username = v13DurableUsername();
+  const copy = JSON.parse(JSON.stringify(snapshot));
+  const serialized = JSON.stringify(copy);
+  const capturedAtMs = Date.now();
+  const updatedAt = Number(copy.updatedAt || capturedAtMs);
+  const fingerprint = `${updatedAt}:${serialized.length}`;
+  const db = await openV13DeviceRecoveryDb();
+  try {
+    const transaction = db.transaction(['accountStates','outbox','recovery'], 'readwrite');
+    transaction.objectStore('accountStates').put({
+      username, state:copy, updatedAt, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
+    });
+    const outbox = transaction.objectStore('outbox');
+    if (pending) outbox.put({ username, state:copy, updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint });
+    transaction.objectStore('recovery').put({
+      id:`${username}:${fingerprint}`, username, state:copy, label,
+      updatedAt, capturedAtMs, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
+    });
+    await v13IdbTransactionDone(transaction);
+    await pruneV13DeviceRecoveryCopies(db, username);
+    if (pending) v13DurableOutboxPending = true;
+    return true;
+  } finally {
+    db.close();
+  }
+}
+
+function queueV13DeviceStatePersistence(snapshot, options = {}) {
+  v13DurableSaveQueued = { snapshot:JSON.parse(JSON.stringify(snapshot)), options };
+  if (!v13DurableSaveDrainPromise) {
+    v13DurableSaveDrainPromise = (async () => {
+      while (v13DurableSaveQueued) {
+        const queued = v13DurableSaveQueued;
+        v13DurableSaveQueued = null;
+        await persistV13DeviceState(queued.snapshot, queued.options);
+      }
+      return true;
+    })().finally(() => {
+      v13DurableSaveDrainPromise = null;
+      if (v13DurableSaveQueued) queueV13DeviceStatePersistence(v13DurableSaveQueued.snapshot, v13DurableSaveQueued.options);
+    });
+  }
+  return v13DurableSaveDrainPromise;
+}
+
+async function readV13DeviceStateBundle() {
+  const username = v13DurableUsername();
+  const db = await openV13DeviceRecoveryDb();
+  try {
+    const accountState = db.objectStoreNames.contains('accountStates')
+      ? await v13IdbRequest(db.transaction('accountStates', 'readonly').objectStore('accountStates').get(username))
+      : null;
+    const outbox = db.objectStoreNames.contains('outbox')
+      ? await v13IdbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username))
+      : null;
+    return { accountState:accountState || null, outbox:outbox || null };
+  } finally {
+    db.close();
+  }
+}
+
+async function clearV13DeviceOutboxThrough(savedUpdatedAt, force = false) {
+  const username = v13DurableUsername();
+  const db = await openV13DeviceRecoveryDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction('outbox', 'readwrite');
+      const store = transaction.objectStore('outbox');
+      const request = store.get(username);
+      request.onerror = () => reject(request.error || new Error('Cloud outbox could not be read'));
+      request.onsuccess = () => {
+        const pending = request.result;
+        if (force || !pending || Number(pending.updatedAt || 0) <= Number(savedUpdatedAt || 0)) store.delete(username);
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error('Cloud outbox cleanup failed'));
+      transaction.onabort = () => reject(transaction.error || new Error('Cloud outbox cleanup was aborted'));
+    });
+    const remaining = await v13IdbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username));
+    v13DurableOutboxPending = !!remaining;
+  } finally {
+    db.close();
+  }
+}
+
+function writeV13BrowserState(snapshot) {
+  const serialized = JSON.stringify(snapshot);
+  liveSync.stateBytes = syncUtf8Bytes(serialized);
+  try {
+    localStorage.setItem(ACTIVE_STORAGE_KEY, serialized);
+    return true;
+  } catch (error) {
+    console.warn('StudyQuest localStorage is full; IndexedDB recovery remains active', error);
+    recordAppError('local-storage-quota', error);
     return false;
   }
 }
@@ -6517,7 +6705,8 @@ function initializeSyncTracking() {
   if (needsMigration || idsAdded) {
     if (hasUserData(before)) pushAutoBackup('Before smart sync metadata migration', before);
     state._syncMeta.migratedAt = state._syncMeta.migratedAt || new Date().toISOString();
-    try { localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state)); } catch (error) { recordAppError('sync-migration', error); }
+    writeV13BrowserState(state);
+    queueV13DeviceStatePersistence(state, { pending:false, label:'sync-metadata-migration' }).catch(error => recordAppError('sync-migration', error));
   }
   syncBaselineState = syncClone(state);
   liveSync.stateBytes = syncUtf8Bytes(state);
@@ -6884,35 +7073,33 @@ function saveState() {
   const trackedChanges = trackCurrentStateChanges();
   state.updatedAt = Date.now();
   syncSQStateReference();
-  setSaveStatus('saving', 'Saving...');
-  let browserSaved = false;
-  let serializedState = '';
-  try {
-    serializedState = JSON.stringify(state);
-    liveSync.stateBytes = syncUtf8Bytes(serializedState);
-    localStorage.setItem(ACTIVE_STORAGE_KEY, serializedState);
-    browserSaved = true;
-    setSaveMeta({
-      latestLocalSaveAt: new Date().toISOString(),
-      latestLocalUpdatedAt: state.updatedAt,
-      latestStateBytes: liveSync.stateBytes,
-      latestDataChangeAt: trackedChanges.length ? new Date().toISOString() : getSaveMeta().latestDataChangeAt,
-    });
-  } catch (e) {
-    console.warn('StudyQuest browser save failed', e);
-    recordAppError('save', e);
-    setSaveStatus('error', 'Save error');
-    if (!canUseServerStorage()) showToast('Browser storage failed. Open with 127.0.0.1 so StudyQuest can save to disk.', '#f76a6a');
-  }
-  if (!canUseServerStorage()) {
-    if (browserSaved) setSaveStatus('local', 'Saved in Chrome');
-    return;
-  }
-  if (browserSaved && trackedChanges.length && (isHostedAppHost() || liveSync.paired)) {
+  const snapshot = cloneStateForSafety(state);
+  const browserSaved = writeV13BrowserState(snapshot);
+  const savedAt = new Date().toISOString();
+  setSaveMeta({
+    latestLocalSaveAt:savedAt,
+    latestLocalUpdatedAt:state.updatedAt,
+    latestStateBytes:liveSync.stateBytes,
+    latestDataChangeAt:trackedChanges.length ? savedAt : getSaveMeta().latestDataChangeAt,
+    localStorageAvailable:browserSaved,
+  });
+  setSaveStatus('saving', 'Saving on this device...');
+  if (trackedChanges.length && (isHostedAppHost() || liveSync.paired)) {
     liveSync.pending = true;
     setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
   }
-  queueServerStateSave();
+  queueV13DeviceStatePersistence(snapshot, {
+    pending:(trackedChanges.length > 0 || v13DurableOutboxPending)
+      && (isHostedAppHost() || liveSync.paired),
+    label:'v13-edit',
+  }).then(() => {
+    setSaveStatus('local', browserSaved ? 'Saved on this device' : 'Saved in device recovery');
+  }).catch(error => {
+    recordAppError('indexeddb-save', error);
+    setSaveStatus('error', browserSaved ? 'Saved in browser · recovery copy failed' : 'Device save needs attention');
+  }).finally(() => {
+    if (canUseServerStorage()) queueServerStateSave();
+  });
 }
 
 function queueServerStateSave() {
@@ -6932,7 +7119,8 @@ async function saveStateToServer() {
   }
   if (isHostedAppHost()) {
     pendingServerSync = false;
-    queueLiveCloudSave();
+    if (liveSync.pending || getLiveSyncMeta().pending) queueLiveCloudSave();
+    else setSaveStatus('saved', scheduledSyncStatusText());
     return;
   }
   const controller = new AbortController();
@@ -6948,7 +7136,7 @@ async function saveStateToServer() {
     pendingServerSync = false;
     setSaveMeta({ latestServerSaveAt: new Date().toISOString(), latestLocalServerSaveAt: new Date().toISOString() });
     setSaveStatus(liveSync.paired ? 'saving' : 'local', liveSync.paired ? 'Saved locally · admin sync pending' : 'Saved locally · live not paired');
-    if (liveSync.paired) queueLiveCloudSave();
+    if (liveSync.paired && (liveSync.pending || getLiveSyncMeta().pending)) queueLiveCloudSave();
   } catch (e) {
     console.warn('StudyQuest server save failed', e);
     recordAppError('server-save', e);
@@ -6977,8 +7165,8 @@ function syncDirectionText(direction) {
 function scheduledSyncStatusText() {
   const next = liveSync.nextSyncAt || getLiveSyncMeta().nextScheduledSyncAt;
   return liveSync.pending
-    ? `Saved locally · sync at ${syncTimeOnly(next)}`
-    : `Synced · next ${syncTimeOnly(next)}`;
+    ? 'Saved on this device · cloud backup pending'
+    : `Synced · next check ${syncTimeOnly(next)}`;
 }
 
 function scheduleNextLiveSync({ reset = false } = {}) {
@@ -7000,7 +7188,8 @@ function queueLiveCloudSave() {
   if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return;
   liveSync.pending = true;
   setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
-  scheduleNextLiveSync();
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => runLiveSyncCycle({ reason:'edit-save' }), CLOUD_SAVE_QUIET_MS);
   setSaveStatus('local', scheduledSyncStatusText());
   renderRecoveryCenter();
 }
@@ -7027,8 +7216,10 @@ async function saveStateToCloud() {
   const options = arguments[0] || {};
   if ((!liveSync.paired && !isHostedAppHost()) || (liveSync.conflict && !options.allowDuringConflict) || corruptSaveInfo) return { ok: false };
   const meta = getLiveSyncMeta();
+  const snapshot = cloneStateForSafety(state);
+  const uploadedStateUpdatedAt = Number(snapshot.updatedAt || 0);
   const baseRevision = Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
-  const size = stateSizeBreakdown(state);
+  const size = stateSizeBreakdown(snapshot);
   liveSync.stateBytes = size.totalBytes;
   if (size.overLimit) {
     liveSync.pending = true;
@@ -7048,7 +7239,7 @@ async function saveStateToCloud() {
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        state,
+        state:snapshot,
         baseRevision,
         deviceId:getSyncDeviceId(),
         merge:options.mergeApproval || undefined,
@@ -7086,19 +7277,22 @@ async function saveStateToCloud() {
     liveSync.revision = Number(result.revision || baseRevision || 0);
     liveSync.lastCloudRevision = liveSync.revision;
     liveSync.updatedAt = result.savedAt || new Date().toISOString();
-    liveSync.pending = false;
+    const newerLocalChanges = Number(state.updatedAt || 0) > uploadedStateUpdatedAt;
+    liveSync.pending = newerLocalChanges;
     liveSync.status = 'synced';
+    await clearV13DeviceOutboxThrough(uploadedStateUpdatedAt).catch(error => recordAppError('outbox-clear', error));
     setLiveSyncMeta({
       revision: liveSync.revision,
-      pending: false,
-      lastSyncedStateUpdatedAt: state.updatedAt,
+      pending:newerLocalChanges,
+      lastSyncedStateUpdatedAt:uploadedStateUpdatedAt,
       latestCloudSaveAt: liveSync.updatedAt,
     });
     recordSuccessfulLiveSync('browser-to-cloud', liveSync.updatedAt);
     setSaveMeta({ latestCloudSaveAt: liveSync.updatedAt });
-    setSaveStatus('saved', scheduledSyncStatusText());
+    setSaveStatus(newerLocalChanges ? 'local' : 'saved', scheduledSyncStatusText());
     renderRecoveryCenter();
-    return { ok: true, direction: 'browser-to-cloud', at: liveSync.updatedAt };
+    if (newerLocalChanges) queueLiveCloudSave();
+    return { ok:true, direction:'browser-to-cloud', at:liveSync.updatedAt, newerLocalChanges };
   } catch (e) {
     if (!liveSync.conflict) {
       liveSync.pending = true;
@@ -7132,6 +7326,53 @@ function loadState() {
     recordAppError('corrupt-save', e);
   }
   return defaultState();
+}
+
+async function hydrateV13StateFromDeviceRecovery() {
+  try {
+    const bundle = await readV13DeviceStateBundle();
+    v13DurableOutboxPending = !!bundle.outbox;
+    const candidates = [
+      { state, priority:1 },
+      { state:bundle.accountState?.state, priority:2 },
+      { state:bundle.outbox?.state, priority:3 },
+    ].filter(candidate => candidate.state && typeof candidate.state === 'object');
+    candidates.sort((left, right) => {
+      const timeDifference = Number(right.state.updatedAt || 0) - Number(left.state.updatedAt || 0);
+      return timeDifference || right.priority - left.priority;
+    });
+    const latest = bundle.outbox?.state || candidates[0]?.state;
+    if (latest && Number(latest.updatedAt || 0) >= Number(state.updatedAt || 0)) {
+      setSQState(latest, { resetSyncBaseline:true });
+      writeV13BrowserState(state);
+      ensureTrackerSemesters();
+      ensureTravelState();
+      renderAll();
+    }
+    if (bundle.outbox?.state) {
+      liveSync.pending = true;
+      setLiveSyncMeta({ pending:true, localUpdatedAt:Number(bundle.outbox.state.updatedAt || state.updatedAt || 0) });
+      setSaveStatus('local', 'Saved on this device · cloud backup pending');
+    }
+    return bundle;
+  } catch (error) {
+    recordAppError('indexeddb-load', error);
+    return { accountState:null, outbox:null };
+  }
+}
+
+function preserveV13StateBeforeExit() {
+  if (!state || corruptSaveInfo) return;
+  const snapshot = cloneStateForSafety(state);
+  writeV13BrowserState(snapshot);
+  queueV13DeviceStatePersistence(snapshot, {
+    pending:v13DurableOutboxPending,
+    label:'v13-page-exit',
+  }).catch(error => recordAppError('page-exit-save', error));
+  if ((liveSync.pending || getLiveSyncMeta().pending) && !liveSync.conflict) {
+    clearTimeout(cloudSaveTimer);
+    runLiveSyncCycle({ reason:'page-exit' }).catch(() => {});
+  }
 }
 
 function pushUndoSnapshot(label = 'Change') {
@@ -7380,6 +7621,84 @@ function compareSyncStamps(localStamp, cloudStamp) {
   return { winner:localAt > cloudAt ? 'local' : 'cloud', reason:'Newest server-calibrated field update.' };
 }
 
+function syncStampMillis(stamp) {
+  const parsed = Date.parse(stamp?.at || '');
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compareSyncFallbackStamps(localStamp, cloudStamp, label = 'related record') {
+  if (!localStamp || !cloudStamp) return { winner:null, reason:`No reliable ${label} history.`, confidence:null };
+  const localAt = syncStampMillis(localStamp);
+  const cloudAt = syncStampMillis(cloudStamp);
+  if (localAt === null || cloudAt === null || localAt === cloudAt) {
+    return { winner:null, reason:`The ${label} update times are tied or unavailable.`, confidence:null };
+  }
+  return {
+    winner:localAt > cloudAt ? 'local' : 'cloud',
+    reason:`Suggested from the latest ${label} update time.`,
+    confidence:label === 'whole-copy' ? 'low' : 'medium',
+  };
+}
+
+function syncRecordPathForField(path) {
+  const parts = syncPathSegments(path);
+  const recordIndex = parts.map((part, index) => part.startsWith('@') ? index : -1).filter(index => index >= 0).at(-1);
+  if (recordIndex === undefined) return '';
+  return parts.slice(0, recordIndex + 1).reduce((result, part) => syncPathJoin(result, part), '');
+}
+
+function latestVerifiedSyncStamp(source, prefix) {
+  const meta = normalizeSyncMeta(source?._syncMeta);
+  const candidates = [];
+  Object.entries(meta.fields || {}).forEach(([path, stamp]) => {
+    if ((!prefix || path === prefix || path.startsWith(`${prefix}/`)) && stamp?.at) candidates.push(stamp);
+  });
+  Object.entries(meta.tombstones || {}).forEach(([path, stamp]) => {
+    if ((!prefix || path === prefix || path.startsWith(`${prefix}/`)) && stamp?.at) candidates.push(stamp);
+  });
+  return candidates
+    .filter(stamp => stamp.clockVerified !== false && syncStampMillis(stamp) !== null)
+    .sort((left, right) => syncStampMillis(right) - syncStampMillis(left))[0] || null;
+}
+
+function syncCopyUpdatedStamp(source) {
+  const updatedAt = Number(source?.updatedAt || 0);
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return null;
+  return {
+    at:new Date(updatedAt).toISOString(),
+    seq:0,
+    deviceId:'copy',
+    clockVerified:false,
+  };
+}
+
+function recommendSyncDecision(path, localState, cloudState, localStamp, cloudStamp) {
+  const exact = compareSyncStamps(localStamp, cloudStamp);
+  if (exact.winner) return {
+    winner:exact.winner,
+    reason:exact.reason,
+    confidence:'high',
+    source:'field',
+  };
+  const recordPath = syncRecordPathForField(path);
+  if (recordPath) {
+    const record = compareSyncFallbackStamps(
+      latestVerifiedSyncStamp(localState, recordPath),
+      latestVerifiedSyncStamp(cloudState, recordPath),
+      'record'
+    );
+    if (record.winner) return { ...record, source:'record' };
+  }
+  const copy = compareSyncFallbackStamps(syncCopyUpdatedStamp(localState), syncCopyUpdatedStamp(cloudState), 'whole-copy');
+  if (copy.winner) return { ...copy, source:'copy' };
+  return {
+    winner:null,
+    reason:exact.reason || copy.reason || 'No reliable update history; choose manually.',
+    confidence:null,
+    source:null,
+  };
+}
+
 function syncFieldStamp(source, path) {
   return source?._syncMeta?.fields?.[path] || null;
 }
@@ -7476,14 +7795,20 @@ function buildSmartMerge(localInput, cloudInput, selections = {}) {
       : null;
     let recommended = null;
     let reason = '';
+    let recommendationConfidence = null;
+    let recommendationSource = null;
     if (counter) {
       recommended = 'merged';
       reason = 'Combined unique counter changes from both copies.';
+      recommendationConfidence = 'high';
+      recommendationSource = 'counter';
       mergedCounters[path] = counter.counter;
     } else {
-      const compared = compareSyncStamps(localStamp, cloudStamp);
+      const compared = recommendSyncDecision(path, localState, cloudState, localStamp, cloudStamp);
       recommended = compared.winner;
       reason = compared.reason;
+      recommendationConfidence = compared.confidence || null;
+      recommendationSource = compared.source || null;
     }
     const selected = selections[path] || recommended;
     const decision = {
@@ -7499,6 +7824,8 @@ function buildSmartMerge(localInput, cloudInput, selections = {}) {
       recommended,
       selected,
       reason,
+      recommendationConfidence,
+      recommendationSource,
       manual:!recommended,
     };
     decisions.push(decision);
@@ -7606,19 +7933,111 @@ function latestSyncStampForRecord(root, id) {
   return latestSyncStampForPath(syncPathJoin(syncPathJoin('', root), `@${id}`));
 }
 
+function smartMergeRecordLabel(decision) {
+  const segments = syncPathSegments(decision.path);
+  const recordSegment = segments.find(segment => segment.startsWith('@'));
+  if (!recordSegment) return '';
+  const recordId = recordSegment.slice(1);
+  for (const value of [decision.localValue, decision.cloudValue]) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const label = value.title || value.name || value.subject || value.label || value.course || value.filename;
+    if (label) return String(label);
+  }
+  const roots = [liveSync.conflict?.localState, liveSync.conflict?.cloudState, liveSync.preview?.localState, liveSync.preview?.cloudState];
+  for (const source of roots) {
+    const rootValue = source?.[segments[0]];
+    if (!Array.isArray(rootValue)) continue;
+    const found = rootValue.find((item, index) => String(item?.id || item?._syncId || syncRecordId(item, index, segments[0])) === recordId);
+    const label = found?.title || found?.name || found?.subject || found?.label || found?.course || found?.filename;
+    if (label) return String(label);
+  }
+  return recordId.replace(/^sync_/, '').replace(/[-_]+/g, ' ');
+}
+
+function smartMergeFieldLabel(decision) {
+  const segments = syncPathSegments(decision.path);
+  if (decision.kind === 'record') return decision.localExists ? 'Removed record' : 'Added record';
+  const raw = segments[segments.length - 1] || decision.section || 'Value';
+  const labels = {
+    date:'Date', endDate:'End date', dueDate:'Due date', title:'Title', name:'Name', done:'Completion',
+    completed:'Completion', status:'Status', order:'Order', recurrence:'Recurrence', notes:'Notes', note:'Note',
+    time:'Time', startTime:'Start time', endTime:'End time', room:'Room', grade:'Grade', score:'Score',
+    category:'Category', priority:'Priority', dayKey:'Weekday', weekStart:'Week', color:'Color', subject:'Subject',
+  };
+  return labels[raw] || raw.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').replace(/^./, char => char.toUpperCase());
+}
+
+function smartMergeDecisionTitle(decision) {
+  const record = smartMergeRecordLabel(decision);
+  const field = smartMergeFieldLabel(decision);
+  return record ? `${record} - ${field}` : field;
+}
+
+function renderSmartMergeDecision(decision, index, otherLabel) {
+  const browserLabel = smartMergeBrowserLabel();
+  const manuallyOverridden = decision.selected && decision.selected !== decision.recommended;
+  const confidence = decision.selected && !manuallyOverridden ? decision.recommendationConfidence || 'manual' : 'manual';
+  const confidenceLabel = confidence === 'high' ? 'High confidence'
+    : confidence === 'medium' ? 'Medium confidence'
+      : confidence === 'low' ? 'Low confidence' : 'Manual review';
+  const selectedLabel = decision.selected === 'local' ? `${browserLabel} selected`
+    : decision.selected === 'cloud' ? `${otherLabel} selected`
+      : decision.selected === 'merged' ? 'Combined changes' : 'Your choice needed';
+  return `<div class="smart-merge-row${decision.selected ? '' : ' needs-choice'}">
+    <div class="smart-merge-path"><strong>${escapeHtml(smartMergeDecisionTitle(decision))}</strong><span>${escapeHtml(decision.section)}</span><span class="smart-merge-winner ${escapeHtml(confidence)}">${escapeHtml(selectedLabel)} · ${escapeHtml(confidenceLabel)}</span></div>
+    <div class="smart-merge-values">
+      <div><span>${escapeHtml(browserLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.localValue, 120))}</strong><small>Compared using ${escapeHtml(syncStampText(decision.localDecisionStamp || decision.localStamp))}</small></div>
+      <div><span>${escapeHtml(otherLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.cloudValue, 120))}</strong><small>Compared using ${escapeHtml(syncStampText(decision.cloudDecisionStamp || decision.cloudStamp))}</small></div>
+    </div>
+    <div class="smart-merge-choice"><select class="form-input" aria-label="Choose value for ${escapeHtml(smartMergeDecisionTitle(decision))}" onchange="setSmartMergeFieldChoice(${index},this.value)">
+      <option value=""${decision.selected ? '' : ' selected'}>Choose manually</option>
+      <option value="local"${decision.selected === 'local' ? ' selected' : ''}>Use ${escapeHtml(browserLabel)}</option>
+      <option value="cloud"${decision.selected === 'cloud' ? ' selected' : ''}>Use ${escapeHtml(otherLabel)}</option>
+      ${decision.recommended === 'merged' ? `<option value="merged"${decision.selected === 'merged' ? ' selected' : ''}>Combine increments</option>` : ''}
+    </select><small>${escapeHtml(decision.reason)}</small></div>
+  </div>`;
+}
+
+function renderSmartMergeGroups(items, otherLabel) {
+  const groups = new Map();
+  items.forEach(item => {
+    const section = item.decision.section || 'Other';
+    if (!groups.has(section)) groups.set(section, []);
+    groups.get(section).push(item);
+  });
+  return [...groups.entries()].map(([section, rows]) => `<div class="smart-merge-section">
+    <div class="smart-merge-section-title">${escapeHtml(section)}<span>${rows.length} change${rows.length === 1 ? '' : 's'}</span></div>
+    <div class="smart-merge-list">${rows.map(item => renderSmartMergeDecision(item.decision, item.index, otherLabel)).join('')}</div>
+  </div>`).join('');
+}
+
 function renderSmartMergeReport(preview) {
   if (!preview?.smartMerge) return '<div class="recovery-empty">Smart merge preview unavailable.</div>';
   const smart = preview.smartMerge;
   const otherLabel = preview.cloudLabel || 'Live admin';
   const browserLabel = smartMergeBrowserLabel();
-  const unresolved = smart.decisions.filter(decision => !decision.selected);
-  const shown = smart.decisions.slice(0, 300);
+  const indexed = smart.decisions.map((decision, index) => ({ decision, index }));
+  const unresolved = indexed.filter(item => !item.decision.selected);
+  const resolved = indexed.filter(item => item.decision.selected);
+  const localCount = resolved.filter(item => item.decision.selected === 'local').length;
+  const cloudCount = resolved.filter(item => item.decision.selected === 'cloud').length;
+  const combinedCount = resolved.filter(item => item.decision.selected === 'merged').length;
   const size = smart.size;
   return `
     <div class="sync-compare-summary${smart.different ? '' : ' is-equal'}">
-      <strong>${smart.different ? `${smart.decisions.length} field decision${smart.decisions.length === 1 ? '' : 's'}` : 'Both versions match'}</strong><br>
-      ${smart.different ? `${unresolved.length} need manual choice. Suggested winners use the latest reliable field time.` : 'No cross-copy changes are needed.'}<br>
+      <strong>${smart.different ? 'Suggested merge is ready to review' : 'Both versions match'}</strong><br>
+      ${smart.different ? 'Latest trustworthy update times are already selected. Review the summary, resolve any uncertain values, then approve.' : 'No cross-copy changes are needed.'}<br>
       <span class="recovery-row-meta" style="white-space:normal;">Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</span>
+    </div>
+    <div class="smart-merge-overview">
+      <div class="smart-merge-stat"><strong>${localCount}</strong><span>Use ${escapeHtml(browserLabel)}</span></div>
+      <div class="smart-merge-stat"><strong>${cloudCount}${combinedCount ? ` + ${combinedCount}` : ''}</strong><span>Use ${escapeHtml(otherLabel)}${combinedCount ? ' / combined' : ''}</span></div>
+      <div class="smart-merge-stat${unresolved.length ? ' is-warning' : ''}"><strong>${unresolved.length}</strong><span>Need your choice</span></div>
+    </div>
+    <div class="smart-merge-notice${unresolved.length || size.overLimit ? ' is-warning' : ''}">
+      ${size.overLimit ? 'This proposed merge is over the 10 MiB limit and cannot be approved.'
+        : unresolved.length ? `${unresolved.length} uncertain change${unresolved.length === 1 ? '' : 's'} must be selected below. Nothing will be changed before approval.`
+          : 'Every change has a reliable suggested winner. Nothing will be changed until you click Approve Merge.'}
     </div>
     <div class="sync-conflict-grid">
       <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div></div>
@@ -7626,21 +8045,8 @@ function renderSmartMergeReport(preview) {
     </div>
     ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;">This live-site browser is separate from 127.0.0.1. Localhost reaches this page through the admin cloud copy.</div>' : ''}
     ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose ${escapeHtml(browserLabel)} for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose ${escapeHtml(otherLabel)} for all manual</button></div>` : ''}
-    <div class="smart-merge-list">${shown.map((decision, index) => `
-      <div class="smart-merge-row${decision.manual && !decision.selected ? ' needs-choice' : ''}">
-        <div class="smart-merge-path"><strong>${escapeHtml(decision.section)}</strong><span>${escapeHtml(syncPathSegments(decision.path).join(' / '))}</span></div>
-        <div class="smart-merge-values">
-          <div><span>${escapeHtml(browserLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.localValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.localStamp))}</small></div>
-          <div><span>${escapeHtml(otherLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.cloudValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.cloudStamp))}</small></div>
-        </div>
-        <div class="smart-merge-choice"><select class="form-input" onchange="setSmartMergeFieldChoice(${index},this.value)">
-          <option value=""${decision.selected ? '' : ' selected'}>Choose manually</option>
-          <option value="local"${decision.selected === 'local' ? ' selected' : ''}>Use ${escapeHtml(browserLabel)}</option>
-          <option value="cloud"${decision.selected === 'cloud' ? ' selected' : ''}>Use ${escapeHtml(otherLabel)}</option>
-          ${decision.recommended === 'merged' ? `<option value="merged"${decision.selected === 'merged' ? ' selected' : ''}>Combine increments</option>` : ''}
-        </select><small>${escapeHtml(decision.reason)}</small></div>
-      </div>`).join('')}</div>
-    ${smart.decisions.length > shown.length ? `<div class="recovery-empty" style="margin-top:10px;">Showing the first ${shown.length} decisions. Export the full report or use the bulk manual controls.</div>` : ''}`;
+    ${unresolved.length ? renderSmartMergeGroups(unresolved, otherLabel) : ''}
+    ${resolved.length ? `<details class="smart-merge-details"><summary><span>Review selected details</span><span>${resolved.length} suggested change${resolved.length === 1 ? '' : 's'}</span></summary><div class="smart-merge-details-body">${renderSmartMergeGroups(resolved, otherLabel)}</div></details>` : ''}`;
 }
 
 function smartMergeBrowserLabel() {
@@ -7710,7 +8116,8 @@ function restoreSafetySnapshot(snapshot, title = 'Restore Backup?') {
       setSQState(snapshot.state);
       trackCurrentStateChanges('Restored backup');
       state.updatedAt = Date.now();
-      localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
+      writeV13BrowserState(state);
+      queueV13DeviceStatePersistence(state, { pending:true, label:'restored-backup' }).catch(error => recordAppError('restore-save', error));
       setSaveMeta({ latestLocalSaveAt: new Date().toISOString(), latestRestoreAt: new Date().toISOString() });
       ensureTrackerSemesters();
       ensureTravelState();
@@ -8070,7 +8477,11 @@ async function applySmartMerge() {
       pushAutoBackup(isLocalServerMerge ? 'Before local-server smart merge' : 'Before imported smart merge', state);
       if (isLocalServerMerge) pushAutoBackup('Local-server copy before smart merge', preview.cloudState);
       setSQState(approvedState, { resetSyncBaseline:true });
-      localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
+      await queueV13DeviceStatePersistence(state, {
+        pending:liveSync.paired || isHostedAppHost(),
+        label:isLocalServerMerge ? 'local-server-smart-merge' : 'import-smart-merge',
+      });
+      writeV13BrowserState(state);
       liveSync.stateBytes = approvedSize.totalBytes;
       liveSync.pending = liveSync.paired || isHostedAppHost();
       setLiveSyncMeta({ pending:liveSync.pending, localUpdatedAt:state.updatedAt });
@@ -8130,7 +8541,8 @@ async function applySmartMerge() {
     pushAutoBackup('Before smart merge - Live', preview.cloudState);
     pushAutoBackup('Smart merge proposal', approvedState);
     setSQState(approvedState, { resetSyncBaseline:true });
-    localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
+    await queueV13DeviceStatePersistence(state, { pending:true, label:'approved-smart-merge' });
+    writeV13BrowserState(state);
     liveSync.stateBytes = approvedSize.totalBytes;
     liveSync.revision = latestRevision;
     liveSync.lastCloudRevision = latestRevision;
@@ -9007,13 +9419,15 @@ function statesEquivalent(a, b) {
   try { return !buildStateComparison(a || {}, b || {}).different; } catch { return false; }
 }
 
-function applyCloudState(cloudState, revision, updatedAt, label = 'Before live cloud load', { recordCloudSync = true } = {}) {
+async function applyCloudState(cloudState, revision, updatedAt, label = 'Before live cloud load', { recordCloudSync = true } = {}) {
   if (hasUserData(state)) {
     pushUndoSnapshot(label);
     pushAutoBackup(label, state);
   }
   setSQState(cloudState, { resetSyncBaseline:true });
-  localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
+  await queueV13DeviceStatePersistence(state, { pending:false, label:'cloud-load' });
+  writeV13BrowserState(state);
+  await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
   liveSync.revision = Number(revision || 0);
   liveSync.lastCloudRevision = liveSync.revision;
   liveSync.updatedAt = updatedAt || null;
@@ -9061,8 +9475,12 @@ async function syncLiveState(options = {}) {
     const cloudState = normalizeState(result.state || defaultState());
     const cloudRevision = Number(result.revision || 0);
     const statesDiffer = !statesEquivalent(state, cloudState);
+    const meta = getLiveSyncMeta();
+    const knownRevision = Number.isInteger(liveSync.revision)
+      ? liveSync.revision
+      : Number.isInteger(meta.revision) ? meta.revision : null;
+    const cloudRevisionChanged = knownRevision !== null && cloudRevision !== knownRevision;
 
-    liveSync.revision = cloudRevision;
     liveSync.lastCloudRevision = cloudRevision;
     liveSync.updatedAt = result.updatedAt || null;
     liveSync.paired = true;
@@ -9070,6 +9488,29 @@ async function syncLiveState(options = {}) {
     if (options.initialPair) {
       await createFirstPairingSafetyBundle(cloudState, cloudRevision, result.updatedAt || null);
     }
+
+    if (!options.initialPair && v13DurableOutboxPending && knownRevision !== null && !cloudRevisionChanged) {
+      liveSync.revision = knownRevision;
+      if (!statesDiffer) {
+        liveSync.pending = false;
+        await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
+      } else {
+        return await saveStateToCloud();
+      }
+    }
+
+    if (!options.initialPair && v13DurableOutboxPending && knownRevision === null) {
+      openLiveSyncConflict({
+        localState:cloneStateForSafety(state),
+        cloudState,
+        revision:cloudRevision,
+        cloudUpdatedAt:result.updatedAt || null,
+        reason:'durable-outbox-without-known-revision',
+      });
+      return { ok:false, conflict:true, previewReady:true };
+    }
+
+    liveSync.revision = cloudRevision;
 
     if (statesDiffer) {
       const reviewOpened = openLiveSyncConflict({
@@ -9084,6 +9525,7 @@ async function syncLiveState(options = {}) {
     }
     liveSync.pending = false;
     liveSync.status = 'synced';
+    await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
     const syncedAt = new Date().toISOString();
     setLiveSyncMeta({ revision:cloudRevision, pending:false, lastSyncedStateUpdatedAt:state.updatedAt });
     recordSuccessfulLiveSync('no-change', syncedAt);
@@ -9133,6 +9575,7 @@ async function runLiveSyncCycle(options = {}) {
 }
 
 async function syncStateFromServer() {
+  await hydrateV13StateFromDeviceRecovery();
   if (!canUseServerStorage()) {
     setTimeout(() => showToast('Use http://127.0.0.1:3000/claudever13.html for Spotify and stronger saving.', '#d4af37'), 900);
     return;
@@ -9197,8 +9640,10 @@ function retryPendingServerSync() {
 
 window.addEventListener('online', retryPendingServerSync);
 window.addEventListener('focus', retryPendingServerSync);
+window.addEventListener('pagehide', preserveV13StateBeforeExit);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') retryPendingServerSync();
+  else preserveV13StateBeforeExit();
 });
 setInterval(retryPendingServerSync, 60 * 1000);
 

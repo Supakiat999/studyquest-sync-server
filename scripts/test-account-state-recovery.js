@@ -94,14 +94,24 @@ assert.ok(syncSource.includes('openAccountStateRecovery('),
   'Different browser and cloud copies must open recovery review');
 assert.ok(!syncSource.includes('await saveStateToServer({'),
   'Authenticated startup must never upload a browser copy automatically');
-assert.ok(html.includes("const CLOUD_SAVE_QUIET_MS = 2000;"),
-  'Normal cloud saves must wait for the two-second quiet period');
+assert.ok(html.includes("const CLOUD_SAVE_QUIET_MS = 500;"),
+  'Normal cloud saves must begin promptly after a short quiet period');
 assert.ok(html.includes("const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';"),
   'Stable saves must retain an IndexedDB device recovery copy');
 assert.ok(html.includes("'Cloud backup pending'"),
   'Offline saves must report a pending cloud backup instead of a generic save error');
 assert.ok(html.includes("'Conflict - both copies preserved'"),
   'Conflicts must state that both copies are preserved');
+assert.ok(html.includes("window.addEventListener('pagehide', bestEffortSaveBeforePageExit);"),
+  'Closing the page must preserve a final account-scoped device copy');
+assert.ok(html.includes("saveStateToServer({ keepalive:true, silent:true })"),
+  'Closing the page must attempt a revision-protected final cloud backup');
+assert.ok(html.includes('durableSaveQueued = { snapshot:copy, options };'),
+  'Rapid edits must coalesce to the newest IndexedDB recovery copy');
+assert.ok(html.includes("deviceBundle.outbox?.state\n      ? normalizeState(deviceBundle.outbox.state)"),
+  'An unsent device outbox must take precedence over cache timestamps');
+assert.ok(html.includes("label:'browser-copy-before-choosing-cloud'"),
+  'Choosing Cloud must first preserve the browser copy in IndexedDB');
 assert.ok(deviceRecovery.includes('indexedDB.open(DB_NAME);'),
   'The read-only recovery page must open the existing IndexedDB version without upgrading it');
 assert.ok(deviceRecovery.includes('request.transaction.abort();'),

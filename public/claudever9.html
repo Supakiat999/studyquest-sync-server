@@ -3530,7 +3530,7 @@ const SERVER_STATE_ENDPOINT = '/api/v2/state';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
 const DEVICE_RECOVERY_DB_VERSION = 1;
-const CLOUD_SAVE_QUIET_MS = 2000;
+const CLOUD_SAVE_QUIET_MS = 500;
 const CLOUD_SAVE_TIMEOUT_MS = 75000;
 let serverSaveTimer = null;
 let saveStatusClearTimer = null;
@@ -3538,6 +3538,8 @@ let lastServerSaveStartedAt = 0;
 let serverStateRevision = null;
 let accountStateRecovery = null;
 let durableSaveChain = Promise.resolve();
+let durableSaveQueued = null;
+let durableSaveDrainPromise = null;
 let serverSaveInFlight = null;
 let cloudSaveRequested = false;
 let cloudOutboxPending = false;
@@ -3638,10 +3640,22 @@ async function persistDeviceState(snapshot, { pending = true, label = 'device-sa
 
 function queueDeviceStatePersistence(snapshot, options = {}) {
   const copy = cloneAccountState(snapshot);
-  durableSaveChain = durableSaveChain
-    .catch(() => {})
-    .then(() => persistDeviceState(copy, options));
-  return durableSaveChain;
+  durableSaveQueued = { snapshot:copy, options };
+  if (!durableSaveDrainPromise) {
+    durableSaveDrainPromise = (async () => {
+      while (durableSaveQueued) {
+        const queued = durableSaveQueued;
+        durableSaveQueued = null;
+        await persistDeviceState(queued.snapshot, queued.options);
+      }
+      return true;
+    })().finally(() => {
+      durableSaveDrainPromise = null;
+      if (durableSaveQueued) queueDeviceStatePersistence(durableSaveQueued.snapshot, durableSaveQueued.options);
+    });
+    durableSaveChain = durableSaveDrainPromise;
+  }
+  return durableSaveDrainPromise;
 }
 
 async function clearDeviceOutboxThrough(savedUpdatedAt, force = false) {
@@ -3706,7 +3720,11 @@ function readServerRevision() {
 
 function storeServerRevision(value) {
   serverStateRevision = Number(value || 0);
-  localStorage.setItem(serverRevisionKey(), String(serverStateRevision));
+  try {
+    localStorage.setItem(serverRevisionKey(), String(serverStateRevision));
+  } catch (error) {
+    console.warn('StudyQuest revision marker could not be stored in localStorage', error);
+  }
 }
 
 function canUseServerStorage() {
@@ -3724,6 +3742,16 @@ function currentStorageKey() {
 
 function cloneAccountState(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function writeAccountBrowserState(snapshot) {
+  try {
+    localStorage.setItem(currentStorageKey(), JSON.stringify(snapshot));
+    return true;
+  } catch (error) {
+    console.warn('StudyQuest browser storage is full or unavailable', error);
+    return false;
+  }
 }
 
 function readAuthenticatedAccountState() {
@@ -3845,7 +3873,7 @@ function openAccountStateRecovery(browserState, cloudState, revision, reason = '
   preserveAccountRecoveryCopy('Browser copy before recovery choice', safeBrowser, { revision:Number(revision || 0) });
   preserveAccountRecoveryCopy('Cloud copy before recovery choice', safeCloud, { revision:Number(revision || 0) });
   state = safeBrowser;
-  localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  writeAccountBrowserState(state);
   queueDeviceStatePersistence(state, { pending:true, label:'conflict-browser-copy' }).catch(() => {});
   ensureTrackerSemesters();
   ensureTravelState();
@@ -3873,19 +3901,25 @@ function exportAccountStateCopies() {
   document.getElementById('accountRecoveryStatus').textContent = 'Both copies exported. No StudyQuest data was changed.';
 }
 
-function useAccountCloudCopy() {
+async function useAccountCloudCopy() {
   if (!accountStateRecovery) return;
   const recovery = accountStateRecovery;
-  const browserPreserved = preserveAccountRecoveryCopy('Browser copy before choosing cloud', recovery.browserState, { revision:recovery.revision });
-  if (!browserPreserved) {
-    document.getElementById('accountRecoveryStatus').textContent = 'The browser copy could not be backed up. Export Both before choosing Cloud.';
+  const status = document.getElementById('accountRecoveryStatus');
+  if (status) status.textContent = 'Preserving the browser copy on this device before loading Cloud...';
+  preserveAccountRecoveryCopy('Browser copy before choosing cloud', recovery.browserState, { revision:recovery.revision });
+  const durablePreserved = await queueDeviceStatePersistence(recovery.browserState, {
+    pending:true,
+    label:'browser-copy-before-choosing-cloud',
+  }).catch(() => false);
+  if (!durablePreserved) {
+    if (status) status.textContent = 'The browser copy could not be stored safely. Export Both before choosing Cloud.';
     return;
   }
   preserveAccountRecoveryCopy('Chosen cloud copy', recovery.cloudState, { revision:recovery.revision });
   state = normalizeState(recovery.cloudState);
-  localStorage.setItem(currentStorageKey(), JSON.stringify(state));
-  queueDeviceStatePersistence(state, { pending:false, label:'chosen-cloud-copy' }).catch(() => {});
-  clearDeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(() => {});
+  writeAccountBrowserState(state);
+  await queueDeviceStatePersistence(state, { pending:false, label:'chosen-cloud-copy' }).catch(() => {});
+  await clearDeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(() => {});
   storeServerRevision(recovery.revision);
   accountStateRecovery = null;
   closeModal('accountStateRecoveryModal');
@@ -3919,7 +3953,7 @@ async function useAccountBrowserCopy() {
     return;
   }
   accountStateRecovery = null;
-  localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  writeAccountBrowserState(state);
   closeModal('accountStateRecoveryModal');
   renderAll();
   setSaveStatus('saved', 'Browser copy recovered');
@@ -4111,8 +4145,8 @@ function saveState() {
   setSaveStatus('saving', 'Saving on this device...');
   let browserSaved = false;
   try {
-    localStorage.setItem(currentStorageKey(), JSON.stringify(snapshot));
-    browserSaved = true;
+    browserSaved = writeAccountBrowserState(snapshot);
+    if (!browserSaved) throw new Error('Browser storage is full or unavailable');
     setSaveStatus('local', 'Saved on this device');
   } catch (e) {
     console.warn('StudyQuest browser save failed', e);
@@ -4251,13 +4285,20 @@ async function flushStateToServerBeforeExit() {
 function bestEffortSaveBeforePageExit() {
   if (!canUseServerStorage()) return;
   if (accountStateRecovery) return;
-  if (!state || Date.now() - lastServerSaveStartedAt < 300) return;
+  if (!state) return;
+  const snapshot = cloneAccountState(state);
   try {
-    const stateBody = JSON.stringify(state);
-    localStorage.setItem(currentStorageKey(), stateBody);
-    queueDeviceStatePersistence(state, { pending:true, label:'page-exit' }).catch(() => {});
+    writeAccountBrowserState(snapshot);
   } catch (e) {
     console.warn('StudyQuest final save failed', e);
+  }
+  queueDeviceStatePersistence(snapshot, { pending:true, label:'page-exit' }).catch(error => {
+    console.warn('StudyQuest final IndexedDB save failed', error);
+  });
+  if (Date.now() - lastServerSaveStartedAt >= 300) {
+    clearTimeout(serverSaveTimer);
+    serverSaveTimer = null;
+    saveStateToServer({ keepalive:true, silent:true }).catch(() => {});
   }
 }
 
@@ -4276,7 +4317,7 @@ async function retryPendingCloudBackup() {
     if (!pending?.state) return false;
     if (Number(pending.updatedAt || 0) > Number(state.updatedAt || 0)) {
       state = normalizeState(pending.state);
-      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+      writeAccountBrowserState(state);
       ensureTrackerSemesters();
       ensureTravelState();
       renderAll();
@@ -4322,16 +4363,17 @@ async function syncStateFromServer() {
     const deviceCandidates = [
       { state:localStorageState, priority:1, label:'browser storage' },
       { state:deviceBundle.accountState?.state, priority:2, label:'IndexedDB recovery' },
-      { state:deviceBundle.outbox?.state, priority:3, label:'offline outbox' },
     ].filter(candidate => candidate.state && typeof candidate.state === 'object');
     deviceCandidates.sort((left, right) => {
       const timeDifference = Number(right.state.updatedAt || 0) - Number(left.state.updatedAt || 0);
       return timeDifference || right.priority - left.priority;
     });
-    const accountBrowserState = deviceCandidates[0]?.state ? normalizeState(deviceCandidates[0].state) : null;
+    const accountBrowserState = deviceBundle.outbox?.state
+      ? normalizeState(deviceBundle.outbox.state)
+      : deviceCandidates[0]?.state ? normalizeState(deviceCandidates[0].state) : null;
     if (accountBrowserState) {
       state = accountBrowserState;
-      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+      writeAccountBrowserState(state);
       ensureTrackerSemesters();
       ensureTravelState();
       renderAll();
@@ -4375,7 +4417,7 @@ async function syncStateFromServer() {
 
     if (serverHasData) {
       state = serverState;
-      localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+      writeAccountBrowserState(state);
       await queueDeviceStatePersistence(state, { pending:false, label:'cloud-load' }).catch(() => {});
       await clearDeviceOutboxThrough(Number(state.updatedAt || 0), accountStatesEquivalent(browserState, serverState)).catch(() => {});
       ensureTrackerSemesters();

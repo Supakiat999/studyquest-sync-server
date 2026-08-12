@@ -93,5 +93,17 @@ assert.ok(v13.includes("function buildBulkSelectedSmartMerge("),
   "Bulk merge choices must resolve fields revealed by earlier choices");
 assert.ok(v13.includes("for (let pass = 0; pass < 25; pass += 1)"),
   "Bulk merge selection must iterate to a stable reviewed result");
+assert.ok(v13.includes("const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';"),
+  "v13 must keep an IndexedDB device recovery copy");
+assert.ok(v13.includes("const CLOUD_SAVE_QUIET_MS = 500;"),
+  "v13 edits must start cloud backup promptly");
+assert.ok(v13.includes("window.addEventListener('pagehide', preserveV13StateBeforeExit);"),
+  "v13 must preserve a final device copy when the page closes");
+assert.ok(v13.includes("StudyQuest localStorage is full; IndexedDB recovery remains active"),
+  "A full localStorage quota must fall back to IndexedDB instead of losing the edit");
+assert.ok(v13.includes("if (!options.initialPair && v13DurableOutboxPending && knownRevision === null)"),
+  "An outbox without a trusted revision must require comparison instead of auto-uploading");
+assert.ok(v13.includes("const latest = bundle.outbox?.state || candidates[0]?.state;"),
+  "An unsent v13 outbox must outrank cache timestamps during recovery");
 
 console.log("Save-safety helpers passed.");

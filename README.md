@@ -38,9 +38,10 @@ Deployment behavior:
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` uses revisions and returns `409 STATE_CONFLICT` instead of silently replacing a newer account save.
 - Hosted `POST /api/state` is disabled. Every cloud write must include its known base revision through `/api/v2/state`.
-- Stable-app edits save first to `studyquest_v3_<username>` and IndexedDB, with a durable offline outbox and rolling device recovery copies. Cloud backup starts after a two-second quiet period.
+- Every stable-app edit saves first to `studyquest_v3_<username>` and IndexedDB, with a durable offline outbox and rolling device recovery copies. Cloud backup starts after a 500 ms quiet period, and page exit performs a final device save plus a best-effort revision-protected upload.
+- Admin v13 uses the same IndexedDB recovery database and durable outbox. If localStorage reaches its quota, edits and approved merges remain recoverable in IndexedDB instead of failing; unknown cloud revisions still require comparison.
 - Every unique accepted cloud revision is retained as a compressed immutable `state_versions` record. Accepted, unchanged, conflicted, rejected, and oversized attempts are recorded in `state_save_events` without passwords or state contents.
-- Paired Chrome and live admin v13 compare changes every 30 minutes. Chrome-versus-local-server, imported, and live differences all require a per-field Smart Merge preview; browser and local-disk saves remain immediate.
+- Admin v13 sends saved edits after a 500 ms quiet period and retries its durable outbox after reopen, reconnect, focus, and visibility changes. Periodic checks remain a fallback; Chrome-versus-local-server, imported, and live differences still require a per-field Smart Merge preview.
 - `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy/tied/unverified differences require a manual choice.
 - Recovery Center reports sync times, per-field decisions, change history, and saved-state usage. Chrome, Live, and the proposed merge can be exported together before applying.
 - Weekly curriculum is stored inside each account's state. New Weekly users choose ICE, BALAC, Industrial Pharmacy, a custom curriculum, or a blank program instead of receiving ICE automatically.
