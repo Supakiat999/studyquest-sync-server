@@ -58,6 +58,32 @@ Deployment behavior:
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
 - Render's own Free Postgres is not a forever database plan because it expires after 30 days. For long-term no-monthly-cost storage, use Neon Free Postgres or another durable database/export plan.
 
+## Save Locations and Statuses
+
+StudyQuest saves to the current device first. Cloud backup is a separate, revision-protected step.
+
+| Location | Purpose | Survives close/offline use | Visible on another device |
+| --- | --- | --- | --- |
+| Account-scoped `localStorage` | Latest signed-in account state | Yes, in that browser profile | No |
+| IndexedDB | Latest device copy, durable upload outbox, and rolling recovery copies | Yes, in that browser profile | No |
+| Cloud account state | Latest revision accepted by `/api/v2/state` | Yes | Yes, for the same signed-in account |
+| Immutable versions and snapshots | Recovery history for accepted cloud revisions | Yes | Restored through recovery tools |
+
+- `Saved on this device` or `Saved in Chrome`: the edit is durable on that device and the tab may be closed.
+- `Cloud backup pending`: the device copy is safe, but another device may not see it yet. The outbox retries after reopen, reconnect, startup, focus, and visibility changes.
+- `Backed up at <time>` or `Synced to admin`: the cloud accepted the revision and other devices can load it.
+- `Conflict - both copies preserved`: uploads pause because two copies changed independently. The app retains both until the user reviews and approves a copy or merge.
+
+Every edit writes to browser storage and IndexedDB immediately. Cloud backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale browser cannot replace a newer cloud revision silently. Normal accounts remain isolated and never receive the admin laptop bridge.
+
+### Verified Live Release - August 12, 2026
+
+- Commit `b4c7768d6e5c81d766ce5183e94796b010d0da51` deployed successfully from `main`.
+- `/api/version` reported `1d5888ff215269bba9800252f36104d7ea55c3836f40fa9776c8240528a1d75f`, matching the tested v13 file.
+- Live health reported the 10 MiB state limit and no sync error.
+- Deployment verification performed no account merge or content edit; pre- and post-deployment account summaries were unchanged.
+- Stable recovery tests, save-safety tests, v13 merge/size checks, local bridge checks, inline script parsing, and a live browser console check passed.
+
 ## Best Free Long-Term Setup
 
 Use:
