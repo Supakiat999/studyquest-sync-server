@@ -1,0 +1,94 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'claudever9.html'), 'utf8');
+
+function extractFunction(name) {
+  const marker = `function ${name}(`;
+  const start = html.indexOf(marker);
+  assert.notEqual(start, -1, `Missing ${marker}`);
+  const braceStart = html.indexOf('{', html.indexOf(')', start));
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = braceStart; index < html.length; index += 1) {
+    const char = html[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (quote) {
+      if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return html.slice(start, index + 1);
+    }
+  }
+  throw new Error(`Could not extract ${name}`);
+}
+
+const functions = [
+  'currentStorageKey', 'cloneAccountState', 'readAuthenticatedAccountState',
+  'recoveryComparableState', 'stableRecoveryString', 'accountStatesEquivalent',
+  'accountStateSummary',
+];
+
+const harness = `
+const STORAGE_KEY = 'studyquest_v3';
+const window = { __STUDYQUEST_MULTI_ACCOUNT__:true, __STUDYQUEST_AUTH_USER__:{ username:'Anya' } };
+const saved = new Map();
+const localStorage = {
+  getItem:key => saved.has(key) ? saved.get(key) : null,
+  setItem:(key, value) => saved.set(key, String(value)),
+};
+function normalizeState(value) { return value; }
+${functions.map(extractFunction).join('\n')}
+globalThis.recoveryTest = { saved, currentStorageKey, readAuthenticatedAccountState, accountStatesEquivalent, accountStateSummary };
+`;
+
+const context = { console };
+vm.runInNewContext(harness, context, { filename:'stable-account-recovery-core.js' });
+const recovery = context.recoveryTest;
+
+assert.equal(recovery.currentStorageKey(), 'studyquest_v3_anya');
+const browserCopy = {
+  tasks:[{ id:'task-1', title:'Anya work' }], notes:[], fileLinks:[], grades:{ math:{} }, trips:[],
+  updatedAt:1000, activeTripId:'trip-1', _syncMeta:{ fields:{ example:true } },
+};
+recovery.saved.set('studyquest_v3_anya', JSON.stringify(browserCopy));
+recovery.saved.set('studyquest_v3_locked', JSON.stringify({ tasks:[] }));
+assert.equal(recovery.readAuthenticatedAccountState().tasks[0].title, 'Anya work',
+  'Authenticated startup must read Anya account storage, not the locked key');
+
+const sameUserData = structuredClone(browserCopy);
+sameUserData.updatedAt = 5000;
+sameUserData.activeTripId = null;
+sameUserData._syncMeta = { fields:{ differentMetadata:true } };
+assert.equal(recovery.accountStatesEquivalent(browserCopy, sameUserData), true,
+  'UI state, timestamps, and v13 metadata must not create a false recovery conflict');
+
+const changedUserData = structuredClone(sameUserData);
+changedUserData.tasks[0].title = 'Different cloud title';
+assert.equal(recovery.accountStatesEquivalent(browserCopy, changedUserData), false,
+  'Real task changes must open recovery comparison');
+assert.match(recovery.accountStateSummary(browserCopy), /1 tasks/);
+
+const syncStart = html.indexOf('async function syncStateFromServer()');
+const syncEnd = html.indexOf('\n// ═', syncStart);
+const syncSource = html.slice(syncStart, syncEnd);
+assert.ok(syncSource.indexOf('readAuthenticatedAccountState()') < syncSource.indexOf('fetch(SERVER_STATE_ENDPOINT'),
+  'Authenticated browser storage must load before the cloud request');
+assert.ok(syncSource.includes('openAccountStateRecovery('),
+  'Different browser and cloud copies must open recovery review');
+
+console.log('Stable account recovery tests passed.');

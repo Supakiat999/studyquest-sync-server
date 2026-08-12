@@ -46,9 +46,16 @@ for (const marker of [
   check(schema.includes(marker), `Recovery schema marker missing: ${marker}`);
 }
 
-for (const marker of ["Forgot password?", "/api/recovery/requests", "/api/recovery/complete", "PASSWORD_CHANGE_REQUIRED"]) {
+for (const marker of [
+  "Forgot password?", "/api/recovery/requests", "/api/recovery/complete", "PASSWORD_CHANGE_REQUIRED",
+  "Unsynced work found", "readAuthenticatedAccountState", "openAccountStateRecovery",
+  "Export Both", "stable-account-recovery",
+]) {
   check(stableHtml.includes(marker), `Stable recovery UI marker missing: ${marker}`);
 }
+
+check(server.includes('new Set(["v13-smart-merge", "stable-account-recovery"])'),
+  "Stable account recovery must create a pre-recovery server snapshot.");
 
 for (const marker of ["Password Recovery Requests", "Manual User Reset", "Cloud Account Snapshots", "restoreAccountSnapshot"]) {
   check(v13Html.includes(marker), `Admin Recovery Center marker missing: ${marker}`);

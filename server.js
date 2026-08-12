@@ -1048,7 +1048,8 @@ async function handleVersionedState(req, res) {
       return;
     }
 
-    const mergeApproved = body?.merge?.source === "v13-smart-merge" && body?.merge?.approvedAt;
+    const approvedRecoverySources = new Set(["v13-smart-merge", "stable-account-recovery"]);
+    const mergeApproved = approvedRecoverySources.has(body?.merge?.source) && body?.merge?.approvedAt;
     const preMergeBackupCreated = mergeApproved ? await createMergeStateBackup(client, row) : false;
     await createDailyStateBackup(client, row);
     const saved = await client.query(

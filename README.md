@@ -153,6 +153,14 @@ Approval replaces only the password record, requires a permanent password change
 
 The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_PASSWORD` in Render and redeploy instead.
 
+## Account Save Recovery
+
+- After authentication, the stable app reloads the signed-in user's browser key, such as `studyquest_v3_anya`, before accepting edits.
+- When browser and cloud contain different user data, neither copy is silently applied. The user sees `Unsynced work found` and can choose `Export Both`, `Use Cloud`, or `Use This Browser`.
+- Recovery copies use an auxiliary per-account browser key. The main `studyquest_v3` data family is never cleared automatically.
+- `Use This Browser` sends an explicit `stable-account-recovery` approval and creates a server-side `pre_merge` snapshot before cloud replacement.
+- Revision conflicts open the same recovery comparison for non-admin users instead of directing them to an admin-only screen.
+
 ## Migrating Current Admin Data
 
 The hosted server starts with an empty admin state unless you import your local data.

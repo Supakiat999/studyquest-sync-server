@@ -60,12 +60,14 @@
       if (user.legacy) {
         try { sessionStorage.setItem(LEGACY_SESSION_KEY, "1"); } catch (error) {}
       }
+      document.documentElement.classList.add("studyquest-account-loading");
       document.documentElement.classList.remove("studyquest-locked");
       document.getElementById("studyquestLoginGate")?.remove();
       renderAccountBadge(user);
-      setTimeout(() => {
+      setTimeout(async () => {
         if (typeof window.syncStateFromServer === "function") {
-          window.syncStateFromServer();
+          await window.syncStateFromServer().catch(() => {});
+          document.documentElement.classList.remove("studyquest-account-loading");
         } else {
           window.__STUDYQUEST_SYNC_AFTER_LOGIN__ = true;
         }
@@ -378,6 +380,14 @@
 </script>
 <style>
   html.studyquest-locked body > *:not(#studyquestLoginGate) { display: none !important; }
+  html.studyquest-account-loading body { overflow: hidden !important; }
+  html.studyquest-account-loading body::before {
+    content: "Loading your StudyQuest account...";
+    position: fixed; inset: 0; z-index: 2147483646;
+    display: grid; place-items: center;
+    background: #0b0d17; color: #e8eaf6;
+    font: 800 15px/1.4 'Syne', system-ui, sans-serif;
+  }
   #v13BetaHeaderButton { display: none; }
   html[data-studyquest-account="admin"] #v13BetaHeaderButton { display: inline-flex; }
   #studyquestLoginGate {
@@ -1127,6 +1137,19 @@
   }
   @keyframes modalIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
   .modal-title { font-size: 20px; font-weight: 800; margin-bottom: 20px; }
+  .account-recovery-modal { width: 620px; max-height: calc(100dvh - 32px); overflow: auto; border-radius: 8px; }
+  .account-recovery-lead { color: var(--text-dim); font-size: 13px; line-height: 1.6; margin: -8px 0 16px; }
+  .account-recovery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .account-recovery-copy { border: 1px solid var(--border); background: var(--surface2); padding: 12px; border-radius: 8px; min-width: 0; }
+  .account-recovery-copy strong { display: block; color: var(--text); font-size: 13px; margin-bottom: 5px; }
+  .account-recovery-copy span { display: block; color: var(--text-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+  .account-recovery-note { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--gold); background: rgba(247,192,106,0.08); color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+  .account-recovery-status { min-height: 18px; margin-top: 10px; color: var(--text-muted); font-size: 11px; }
+  @media (max-width: 620px) {
+    .account-recovery-modal { width: calc(100vw - 20px); max-width: none; padding: 18px; }
+    .account-recovery-grid { grid-template-columns: 1fr; }
+    .account-recovery-modal .modal-btns { position: sticky; bottom: -18px; margin: 16px -18px -18px; padding: 12px 18px; background: var(--surface); border-top: 1px solid var(--border); }
+  }
 
   .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
   .form-group label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
@@ -3280,6 +3303,34 @@
   </div>
 </div>
 
+<!-- ACCOUNT COPY RECOVERY MODAL -->
+<div class="modal-overlay" id="accountStateRecoveryModal" role="dialog" aria-modal="true" aria-labelledby="accountStateRecoveryTitle">
+  <div class="modal account-recovery-modal">
+    <div class="modal-title" id="accountStateRecoveryTitle">Unsynced work found</div>
+    <div class="account-recovery-lead">This browser and your StudyQuest account contain different information. Nothing has been overwritten. Review both copies before choosing.</div>
+    <div class="account-recovery-grid">
+      <div class="account-recovery-copy">
+        <strong>This Browser</strong>
+        <span id="accountRecoveryBrowserSummary">Checking...</span>
+        <span id="accountRecoveryBrowserTime"></span>
+      </div>
+      <div class="account-recovery-copy">
+        <strong>Cloud Account</strong>
+        <span id="accountRecoveryCloudSummary">Checking...</span>
+        <span id="accountRecoveryCloudTime"></span>
+      </div>
+    </div>
+    <div class="account-recovery-note" id="accountRecoveryRecommendation">Choose the copy that contains the work you recognize. Export Both is the safest first step when unsure.</div>
+    <div class="account-recovery-status" id="accountRecoveryStatus" aria-live="polite"></div>
+    <div class="modal-btns" style="flex-wrap:wrap;">
+      <button class="btn btn-ghost" type="button" onclick="closeAccountStateRecovery()">Not Now</button>
+      <button class="btn btn-ghost" type="button" onclick="exportAccountStateCopies()">Export Both</button>
+      <button class="btn btn-ghost" type="button" id="accountRecoveryCloudBtn" onclick="useAccountCloudCopy()">Use Cloud</button>
+      <button class="btn btn-primary" type="button" id="accountRecoveryBrowserBtn" onclick="useAccountBrowserCopy()">Use This Browser</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════
 
@@ -3475,6 +3526,8 @@ let serverSaveTimer = null;
 let saveStatusClearTimer = null;
 let lastServerSaveStartedAt = 0;
 let serverStateRevision = null;
+let accountStateRecovery = null;
+const ACCOUNT_RECOVERY_COPY_LIMIT = 4;
 
 function serverRevisionKey() {
   return `${currentStorageKey()}_server_revision`;
@@ -3501,6 +3554,204 @@ function currentStorageKey() {
     return username ? `${STORAGE_KEY}_${username}` : `${STORAGE_KEY}_locked`;
   }
   return STORAGE_KEY;
+}
+
+function cloneAccountState(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function readAuthenticatedAccountState() {
+  const user = window.__STUDYQUEST_AUTH_USER__;
+  if (!user || !user.username) return null;
+  try {
+    const raw = localStorage.getItem(currentStorageKey());
+    return raw ? normalizeState(JSON.parse(raw)) : null;
+  } catch (error) {
+    console.warn('StudyQuest account browser copy could not be read', error);
+    return null;
+  }
+}
+
+function recoveryComparableState(value) {
+  const copy = cloneAccountState(value || {});
+  [
+    'updatedAt', '_syncMeta', 'checklistFilter', 'calendarView', 'calendarDate',
+    'activeTripId', 'travelSubtab', 'travelItineraryView', 'travelCalendarAxis',
+    'travelPlaceFilter', 'travelPlaceSearch', 'activeTravelPlaceId',
+    'activeTravelDayId', 'activeTravelActivityId', 'activeSemTracker',
+    'activeCurriculumId', 'activeSemesterByCurriculum'
+  ].forEach(key => delete copy[key]);
+  return copy;
+}
+
+function stableRecoveryString(value) {
+  if (Array.isArray(value)) return `[${value.map(stableRecoveryString).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableRecoveryString(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function accountStatesEquivalent(left, right) {
+  return stableRecoveryString(recoveryComparableState(left)) === stableRecoveryString(recoveryComparableState(right));
+}
+
+function accountStateSummary(value) {
+  const source = value || {};
+  const gradeCount = source.grades && typeof source.grades === 'object' ? Object.keys(source.grades).length : 0;
+  return `${Array.isArray(source.tasks) ? source.tasks.length : 0} tasks · ${Array.isArray(source.notes) ? source.notes.length : 0} notes · ${Array.isArray(source.fileLinks) ? source.fileLinks.length : 0} files · ${gradeCount} grade records · ${Array.isArray(source.trips) ? source.trips.length : 0} trips`;
+}
+
+function accountStateTime(value) {
+  const time = Number(value?.updatedAt || 0);
+  return time > 0 ? `Last browser edit ${new Date(time).toLocaleString()}` : 'No reliable browser edit time';
+}
+
+function accountRecoveryStorageKey() {
+  return `${currentStorageKey()}_recovery_copies`;
+}
+
+function preserveAccountRecoveryCopy(label, value, details = {}) {
+  if (!value || typeof value !== 'object') return false;
+  try {
+    const key = accountRecoveryStorageKey();
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const fingerprint = `${label}:${Number(value.updatedAt || 0)}:${JSON.stringify(value).length}`;
+    const next = [{
+      id:`recovery_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      label,
+      capturedAt:new Date().toISOString(),
+      fingerprint,
+      summary:accountStateSummary(value),
+      details,
+      state:cloneAccountState(value),
+    }, ...(Array.isArray(existing) ? existing.filter(item => item?.fingerprint !== fingerprint) : [])].slice(0, ACCOUNT_RECOVERY_COPY_LIMIT);
+    localStorage.setItem(key, JSON.stringify(next));
+    return true;
+  } catch (error) {
+    console.warn('StudyQuest recovery copy could not be preserved', error);
+    return false;
+  }
+}
+
+function downloadAccountRecoveryJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function renderAccountStateRecovery() {
+  if (!accountStateRecovery) return;
+  const browser = accountStateRecovery.browserState;
+  const cloud = accountStateRecovery.cloudState;
+  const browserTime = Number(browser?.updatedAt || 0);
+  const cloudTime = Number(cloud?.updatedAt || 0);
+  document.getElementById('accountRecoveryBrowserSummary').textContent = accountStateSummary(browser);
+  document.getElementById('accountRecoveryCloudSummary').textContent = accountStateSummary(cloud);
+  document.getElementById('accountRecoveryBrowserTime').textContent = accountStateTime(browser);
+  document.getElementById('accountRecoveryCloudTime').textContent = accountStateTime(cloud).replace('browser edit', 'cloud-copy edit');
+  const recommendation = browserTime > cloudTime
+    ? 'This Browser has the later edit time. Check its counts and titles, then choose it if it contains Anya\'s missing work.'
+    : cloudTime > browserTime
+      ? 'Cloud has the later edit time. Check both copies; a later time does not prove it contains every edit.'
+      : 'The edit times do not identify a clear winner. Export Both before choosing.';
+  document.getElementById('accountRecoveryRecommendation').textContent = recommendation;
+  document.getElementById('accountRecoveryStatus').textContent = accountStateRecovery.reason || '';
+}
+
+function openAccountStateRecovery(browserState, cloudState, revision, reason = 'Choose which copy should become current.') {
+  const safeBrowser = normalizeState(browserState || defaultState());
+  const safeCloud = normalizeState(cloudState || defaultState());
+  accountStateRecovery = {
+    browserState:cloneAccountState(safeBrowser),
+    cloudState:cloneAccountState(safeCloud),
+    revision:Number(revision || 0),
+    reason,
+  };
+  preserveAccountRecoveryCopy('Browser copy before recovery choice', safeBrowser, { revision:Number(revision || 0) });
+  preserveAccountRecoveryCopy('Cloud copy before recovery choice', safeCloud, { revision:Number(revision || 0) });
+  state = safeBrowser;
+  localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  ensureTrackerSemesters();
+  ensureTravelState();
+  renderAll();
+  renderAccountStateRecovery();
+  openModal('accountStateRecoveryModal');
+  setSaveStatus('error', 'Sync choice needed');
+}
+
+function closeAccountStateRecovery() {
+  closeModal('accountStateRecoveryModal');
+  if (accountStateRecovery) setSaveStatus('error', 'Sync choice needed');
+}
+
+function exportAccountStateCopies() {
+  if (!accountStateRecovery) return;
+  const username = window.__STUDYQUEST_AUTH_USER__?.username || 'account';
+  downloadAccountRecoveryJson(`studyquest-${username}-recovery-${new Date().toISOString().slice(0,10)}.json`, {
+    exportedAt:new Date().toISOString(),
+    username,
+    cloudRevision:accountStateRecovery.revision,
+    browser:accountStateRecovery.browserState,
+    cloud:accountStateRecovery.cloudState,
+  });
+  document.getElementById('accountRecoveryStatus').textContent = 'Both copies exported. No StudyQuest data was changed.';
+}
+
+function useAccountCloudCopy() {
+  if (!accountStateRecovery) return;
+  const recovery = accountStateRecovery;
+  const browserPreserved = preserveAccountRecoveryCopy('Browser copy before choosing cloud', recovery.browserState, { revision:recovery.revision });
+  if (!browserPreserved) {
+    document.getElementById('accountRecoveryStatus').textContent = 'The browser copy could not be backed up. Export Both before choosing Cloud.';
+    return;
+  }
+  preserveAccountRecoveryCopy('Chosen cloud copy', recovery.cloudState, { revision:recovery.revision });
+  state = normalizeState(recovery.cloudState);
+  localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  storeServerRevision(recovery.revision);
+  accountStateRecovery = null;
+  closeModal('accountStateRecoveryModal');
+  ensureTrackerSemesters();
+  ensureTravelState();
+  renderAll();
+  setSaveStatus('saved', 'Cloud copy restored');
+  showToast('Cloud copy restored. The browser copy remains in recovery storage.', '#6af7b0');
+}
+
+async function useAccountBrowserCopy() {
+  if (!accountStateRecovery) return;
+  const recovery = accountStateRecovery;
+  const status = document.getElementById('accountRecoveryStatus');
+  const buttons = ['accountRecoveryCloudBtn','accountRecoveryBrowserBtn'].map(id => document.getElementById(id));
+  buttons.forEach(button => { if (button) button.disabled = true; });
+  if (status) status.textContent = 'Creating a cloud safety snapshot and saving this browser copy...';
+  preserveAccountRecoveryCopy('Chosen browser copy', recovery.browserState, { revision:recovery.revision });
+  preserveAccountRecoveryCopy('Cloud copy before browser recovery', recovery.cloudState, { revision:recovery.revision });
+  state = normalizeState(recovery.browserState);
+  storeServerRevision(recovery.revision);
+  const saved = await saveStateToServer({
+    baseRevisionOverride:recovery.revision,
+    mergeApproval:{ source:'stable-account-recovery', approvedAt:new Date().toISOString() },
+    allowRecovery:true,
+  });
+  buttons.forEach(button => { if (button) button.disabled = false; });
+  if (!saved) {
+    if (status) status.textContent = 'The cloud changed again. Both copies are still preserved; review the refreshed comparison.';
+    return;
+  }
+  accountStateRecovery = null;
+  localStorage.setItem(currentStorageKey(), JSON.stringify(state));
+  closeModal('accountStateRecoveryModal');
+  renderAll();
+  setSaveStatus('saved', 'Browser copy recovered');
+  showToast('This browser copy is now safely saved to the account.', '#6af7b0');
 }
 
 async function sendPageHeartbeat() {
@@ -3698,6 +3949,12 @@ function saveState() {
     if (browserSaved) setSaveStatus('local', 'Local only');
     return;
   }
+  if (accountStateRecovery) {
+    accountStateRecovery.browserState = cloneAccountState(state);
+    renderAccountStateRecovery();
+    setSaveStatus('error', 'Sync choice needed');
+    return;
+  }
   queueServerStateSave();
 }
 
@@ -3706,34 +3963,62 @@ function queueServerStateSave() {
     setSaveStatus('local', 'Local only');
     return;
   }
+  if (accountStateRecovery) {
+    setSaveStatus('error', 'Sync choice needed');
+    return;
+  }
   setSaveStatus('saving', 'Saving...');
   clearTimeout(serverSaveTimer);
   serverSaveTimer = setTimeout(() => saveStateToServer(), 350);
 }
 
 async function saveStateToServer(options = {}) {
-  const { keepalive = false, silent = false } = options;
+  const {
+    keepalive = false,
+    silent = false,
+    baseRevisionOverride = null,
+    mergeApproval = null,
+    allowRecovery = false,
+  } = options;
   if (!canUseServerStorage()) {
     if (!silent) setSaveStatus('local', 'Local only');
+    return false;
+  }
+  if (accountStateRecovery && !allowRecovery) {
+    if (!silent) setSaveStatus('error', 'Sync choice needed');
     return false;
   }
   clearTimeout(serverSaveTimer);
   serverSaveTimer = null;
   lastServerSaveStartedAt = Date.now();
   try {
-    const baseRevision = serverStateRevision ?? readServerRevision() ?? 0;
+    const baseRevision = Number.isInteger(baseRevisionOverride)
+      ? baseRevisionOverride
+      : serverStateRevision ?? readServerRevision() ?? 0;
     const res = await fetch(SERVER_STATE_ENDPOINT, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, baseRevision, deviceId: 'stable-app' }),
+      body: JSON.stringify({
+        state,
+        baseRevision,
+        deviceId:'stable-app',
+        merge:mergeApproval || undefined,
+      }),
       keepalive,
     });
     const result = await res.json().catch(() => ({}));
     if (res.status === 409 && result.error === 'STATE_CONFLICT') {
+      storeServerRevision(result.revision);
+      openAccountStateRecovery(
+        state,
+        result.state || defaultState(),
+        result.revision,
+        'The cloud changed after this browser loaded. Both copies are preserved; choose before syncing.'
+      );
       if (!silent) {
         setSaveStatus('error', 'Sync choice needed');
-        showToast('Another version changed your account. Your browser copy was kept. Open admin v13 Recovery Center to choose safely.', '#f76a6a');
+        showToast('Another version changed your account. Both copies are preserved for review.', '#f76a6a');
       }
       return false;
     }
@@ -3755,6 +4040,7 @@ async function flushStateToServerBeforeExit() {
 
 function bestEffortSaveBeforePageExit() {
   if (!canUseServerStorage()) return;
+  if (accountStateRecovery) return;
   if (!state || Date.now() - lastServerSaveStartedAt < 300) return;
   try {
     const stateBody = JSON.stringify(state);
@@ -3802,6 +4088,13 @@ async function syncStateFromServer() {
   }
 
   try {
+    const accountBrowserState = readAuthenticatedAccountState();
+    if (accountBrowserState) {
+      state = accountBrowserState;
+      ensureTrackerSemesters();
+      ensureTravelState();
+      renderAll();
+    }
     const res = await fetch(SERVER_STATE_ENDPOINT, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('Server state request failed');
     const serverRaw = await res.json();
@@ -3809,9 +4102,21 @@ async function syncStateFromServer() {
     storeServerRevision(serverRaw.revision);
     const serverState = serverRaw.state ? normalizeState(serverRaw.state) : null;
     const serverHasData = hasUserData(serverState);
-    const localHasData = hasUserData(state);
+    const browserState = accountBrowserState || state;
+    const localHasData = hasUserData(browserState);
 
-    if (serverHasData && (!localHasData || Number(serverState.updatedAt || 0) > Number(state.updatedAt || 0))) {
+    if (serverHasData && localHasData && !accountStatesEquivalent(browserState, serverState)) {
+      openAccountStateRecovery(
+        browserState,
+        serverState,
+        serverRaw.revision,
+        'This browser and the cloud contain different StudyQuest information. Nothing was overwritten.'
+      );
+      showToast('Unsynced browser work found. Review both copies before choosing.', '#f7c06a');
+      return;
+    }
+
+    if (serverHasData) {
       state = serverState;
       localStorage.setItem(currentStorageKey(), JSON.stringify(state));
       ensureTrackerSemesters();
@@ -3821,7 +4126,14 @@ async function syncStateFromServer() {
       return;
     }
 
-    if (localHasData && !serverHasData) saveStateToServer();
+    if (localHasData && !serverHasData) {
+      state = browserState;
+      await saveStateToServer({
+        baseRevisionOverride:serverRaw.revision,
+        mergeApproval:{ source:'stable-account-recovery', approvedAt:new Date().toISOString() },
+        allowRecovery:true,
+      });
+    }
   } catch (e) {
     console.warn('StudyQuest server load failed', e);
   }
@@ -5164,6 +5476,7 @@ function closeAppConfirm(confirmed) {
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => {
     if (e.target !== el) return;
+    if (el.id === 'accountStateRecoveryModal') return;
     if (el.id === 'appConfirmModal') pendingConfirmAction = null;
     el.classList.remove('open');
   });
@@ -13913,7 +14226,12 @@ if (!state.sessionGoals) state.sessionGoals = {};
 
 renderAll();
 updateTimerDisplay();
-syncStateFromServer();
+if (window.__STUDYQUEST_AUTH_USER__) {
+  syncStateFromServer().finally(() => {
+    window.__STUDYQUEST_SYNC_AFTER_LOGIN__ = false;
+    document.documentElement.classList.remove('studyquest-account-loading');
+  });
+}
 
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
