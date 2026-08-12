@@ -162,6 +162,7 @@ The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_
 ## Account Save Recovery
 
 - After authentication, the stable app reloads the signed-in user's browser key, such as `studyquest_v3_anya`, before accepting edits.
+- Hosted v13 uses that same authenticated per-account key. The `onrender.com` browser store and `127.0.0.1` browser store are separate browser origins; localhost reaches the admin account through the revision-protected cloud bridge rather than by exposing localhost storage to the website.
 - When browser and cloud contain different user data, neither copy is silently applied. The user sees `Unsynced work found` and can choose `Export Both`, `Use Cloud`, or `Use This Browser`.
 - Recovery copies use an auxiliary per-account browser key. The main `studyquest_v3` data family is never cleared automatically.
 - The browser also stores the current account copy, offline outbox, and rolling recovery records in IndexedDB. Failed requests remain `Cloud backup pending` and retry after reconnect, focus, startup, and returning to the tab.

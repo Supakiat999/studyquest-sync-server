@@ -5867,7 +5867,7 @@
     <div class="task-modal-head" style="padding:0 0 12px;border-bottom:1px solid var(--border);">
       <div>
         <div class="modal-title" id="liveSyncConflictTitle" style="margin-bottom:4px;">Review Smart Merge</div>
-        <div id="liveSyncConflictCopy" style="font-size:12px;color:var(--text-dim);line-height:1.5;">Review each proposed field winner. Nothing changes until Apply Smart Merge.</div>
+        <div id="liveSyncConflictCopy" style="font-size:12px;color:var(--text-dim);line-height:1.5;">Review each proposed field winner. Nothing changes until you approve.</div>
       </div>
       <button class="task-modal-close" type="button" onclick="closeModal('liveSyncConflictModal')" title="Close merge preview" aria-label="Close merge preview">×</button>
     </div>
@@ -5877,7 +5877,7 @@
       <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Export Chrome + Live + Merged</button>
       <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Use Live</button>
       <button class="btn btn-ghost" onclick="resolveLiveSyncConflict('local')">Use Chrome</button>
-      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Apply Smart Merge</button>
+      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Approve Merge</button>
     </div>
   </div>
 </div>
@@ -6094,14 +6094,20 @@ function defaultState() {
 }
 
 const STORAGE_KEY = 'studyquest_v3';
-const UNDO_STORAGE_KEY = `${STORAGE_KEY}_last_undo`;
-const UNDO_HISTORY_STORAGE_KEY = `${STORAGE_KEY}_undo_history`;
-const AUTO_BACKUP_STORAGE_KEY = `${STORAGE_KEY}_auto_backups`;
-const ERROR_LOG_STORAGE_KEY = `${STORAGE_KEY}_error_log`;
-const SAVE_META_STORAGE_KEY = `${STORAGE_KEY}_save_meta`;
-const CORRUPT_SAVE_STORAGE_KEY = `${STORAGE_KEY}_corrupt_save`;
-const LIVE_SYNC_META_STORAGE_KEY = `${STORAGE_KEY}_live_sync_meta`;
-const DEVICE_ID_STORAGE_KEY = `${STORAGE_KEY}_device_id`;
+const AUTHENTICATED_STORAGE_USERNAME = window.__STUDYQUEST_MULTI_ACCOUNT__
+  ? String(window.__STUDYQUEST_AUTH_USER__?.username || '').trim().toLowerCase()
+  : '';
+const ACTIVE_STORAGE_KEY = AUTHENTICATED_STORAGE_USERNAME
+  ? `${STORAGE_KEY}_${AUTHENTICATED_STORAGE_USERNAME}`
+  : STORAGE_KEY;
+const UNDO_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_last_undo`;
+const UNDO_HISTORY_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_undo_history`;
+const AUTO_BACKUP_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_auto_backups`;
+const ERROR_LOG_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_error_log`;
+const SAVE_META_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_save_meta`;
+const CORRUPT_SAVE_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_corrupt_save`;
+const LIVE_SYNC_META_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_live_sync_meta`;
+const DEVICE_ID_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_device_id`;
 const SERVER_STATE_ENDPOINT = '/api/state';
 const CLOUD_STATE_ENDPOINT = '/api/v2/state';
 const LOCAL_LIVE_STATE_ENDPOINT = '/api/live-state';
@@ -6511,7 +6517,7 @@ function initializeSyncTracking() {
   if (needsMigration || idsAdded) {
     if (hasUserData(before)) pushAutoBackup('Before smart sync metadata migration', before);
     state._syncMeta.migratedAt = state._syncMeta.migratedAt || new Date().toISOString();
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (error) { recordAppError('sync-migration', error); }
+    try { localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state)); } catch (error) { recordAppError('sync-migration', error); }
   }
   syncBaselineState = syncClone(state);
   liveSync.stateBytes = syncUtf8Bytes(state);
@@ -6884,7 +6890,7 @@ function saveState() {
   try {
     serializedState = JSON.stringify(state);
     liveSync.stateBytes = syncUtf8Bytes(serializedState);
-    localStorage.setItem(STORAGE_KEY, serializedState);
+    localStorage.setItem(ACTIVE_STORAGE_KEY, serializedState);
     browserSaved = true;
     setSaveMeta({
       latestLocalSaveAt: new Date().toISOString(),
@@ -7110,13 +7116,13 @@ async function saveStateToCloud() {
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(ACTIVE_STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
       return normalizeState(s);
     }
   } catch(e) {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(ACTIVE_STORAGE_KEY);
     corruptSaveInfo = {
       raw,
       error: String(e?.message || e),
@@ -7604,6 +7610,7 @@ function renderSmartMergeReport(preview) {
   if (!preview?.smartMerge) return '<div class="recovery-empty">Smart merge preview unavailable.</div>';
   const smart = preview.smartMerge;
   const otherLabel = preview.cloudLabel || 'Live admin';
+  const browserLabel = smartMergeBrowserLabel();
   const unresolved = smart.decisions.filter(decision => !decision.selected);
   const shown = smart.decisions.slice(0, 300);
   const size = smart.size;
@@ -7614,25 +7621,49 @@ function renderSmartMergeReport(preview) {
       <span class="recovery-row-meta" style="white-space:normal;">Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</span>
     </div>
     <div class="sync-conflict-grid">
-      <div class="sync-conflict-card"><strong>Chrome</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div></div>
+      <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div></div>
       <div class="sync-conflict-card"><strong>${escapeHtml(otherLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.cloudState))}</div></div>
     </div>
-    ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose Chrome for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose Live for all manual</button></div>` : ''}
+    ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;">This live-site browser is separate from 127.0.0.1. Localhost reaches this page through the admin cloud copy.</div>' : ''}
+    ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose ${escapeHtml(browserLabel)} for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose ${escapeHtml(otherLabel)} for all manual</button></div>` : ''}
     <div class="smart-merge-list">${shown.map((decision, index) => `
       <div class="smart-merge-row${decision.manual && !decision.selected ? ' needs-choice' : ''}">
         <div class="smart-merge-path"><strong>${escapeHtml(decision.section)}</strong><span>${escapeHtml(syncPathSegments(decision.path).join(' / '))}</span></div>
         <div class="smart-merge-values">
-          <div><span>Chrome</span><strong>${escapeHtml(describeComparisonValue(decision.localValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.localStamp))}</small></div>
+          <div><span>${escapeHtml(browserLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.localValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.localStamp))}</small></div>
           <div><span>${escapeHtml(otherLabel)}</span><strong>${escapeHtml(describeComparisonValue(decision.cloudValue, 120))}</strong><small>${escapeHtml(syncStampText(decision.cloudStamp))}</small></div>
         </div>
         <div class="smart-merge-choice"><select class="form-input" onchange="setSmartMergeFieldChoice(${index},this.value)">
           <option value=""${decision.selected ? '' : ' selected'}>Choose manually</option>
-          <option value="local"${decision.selected === 'local' ? ' selected' : ''}>Use Chrome</option>
+          <option value="local"${decision.selected === 'local' ? ' selected' : ''}>Use ${escapeHtml(browserLabel)}</option>
           <option value="cloud"${decision.selected === 'cloud' ? ' selected' : ''}>Use ${escapeHtml(otherLabel)}</option>
           ${decision.recommended === 'merged' ? `<option value="merged"${decision.selected === 'merged' ? ' selected' : ''}>Combine increments</option>` : ''}
         </select><small>${escapeHtml(decision.reason)}</small></div>
       </div>`).join('')}</div>
     ${smart.decisions.length > shown.length ? `<div class="recovery-empty" style="margin-top:10px;">Showing the first ${shown.length} decisions. Export the full report or use the bulk manual controls.</div>` : ''}`;
+}
+
+function smartMergeBrowserLabel() {
+  return isHostedAppHost() ? 'This live-site browser' : 'Local Chrome';
+}
+
+function updateSmartMergeApplyButton(preview) {
+  const button = document.getElementById('applySmartMergeBtn');
+  if (!button || !preview?.smartMerge) return;
+  const unresolved = Number(preview.smartMerge.unresolved || 0);
+  button.disabled = preview.smartMerge.size.overLimit;
+  button.textContent = unresolved ? `Choose ${unresolved} field${unresolved === 1 ? '' : 's'} first` : 'Approve Merge';
+  button.title = preview.smartMerge.size.overLimit
+    ? 'The merged save exceeds the 10 MiB cloud limit.'
+    : unresolved ? 'Click to jump to the first unresolved field.' : 'Approve the reviewed field merge.';
+}
+
+function explainUnresolvedSmartMerge(preview) {
+  const unresolved = Number(preview?.smartMerge?.unresolved || 0);
+  showToast(`Choose a source for the ${unresolved} uncertain field${unresolved === 1 ? '' : 's'} first.`, '#f7c06a');
+  const row = document.querySelector('#liveSyncConflictBody .smart-merge-row.needs-choice');
+  row?.scrollIntoView({ behavior:'smooth', block:'center' });
+  setTimeout(() => row?.querySelector('select')?.focus({ preventScroll:true }), 250);
 }
 
 function renderComparisonNameList(title, values) {
@@ -7679,7 +7710,7 @@ function restoreSafetySnapshot(snapshot, title = 'Restore Backup?') {
       setSQState(snapshot.state);
       trackCurrentStateChanges('Restored backup');
       state.updatedAt = Date.now();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
       setSaveMeta({ latestLocalSaveAt: new Date().toISOString(), latestRestoreAt: new Date().toISOString() });
       ensureTrackerSemesters();
       ensureTravelState();
@@ -7771,8 +7802,9 @@ function openLiveSyncConflict(conflict) {
   liveSync.pending = false;
   liveSync.status = 'conflict';
   const otherLabel = conflict.cloudLabel || 'Live';
+  const browserLabel = smartMergeBrowserLabel();
   if (!conflict.snapshotsPrepared) {
-    pushAutoBackup(`${otherLabel} comparison - Chrome copy`, conflict.localState);
+    pushAutoBackup(`${otherLabel} comparison - browser copy`, conflict.localState);
     pushAutoBackup(`${otherLabel} comparison - other copy`, conflict.cloudState);
   }
   setLiveSyncMeta({ pending: false, conflictAt: new Date().toISOString() });
@@ -7781,20 +7813,14 @@ function openLiveSyncConflict(conflict) {
   if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Review Smart Merge';
   if (copy) copy.textContent = conflict.reason === 'initial-pair'
     ? 'First pairing preserves every copy. Review the proposed field winners before anything is written.'
-    : `Chrome and ${otherLabel} are both preserved. Review field times and choices, then apply once.`;
+    : `${browserLabel} and ${otherLabel} are both preserved. Review field times and choices, then approve once.`;
   const exportButton = document.getElementById('exportSmartMergeBtn');
   const otherButton = document.getElementById('useOtherMergeBtn');
-  if (exportButton) exportButton.textContent = `Export Chrome + ${otherLabel} + Merged`;
+  if (exportButton) exportButton.textContent = `Export Browser + ${otherLabel} + Merged`;
   if (otherButton) otherButton.textContent = `Use ${otherLabel}`;
   const body = document.getElementById('liveSyncConflictBody');
   if (body) body.innerHTML = renderSmartMergeReport(conflict);
-  const applyButton = document.getElementById('applySmartMergeBtn');
-  if (applyButton) {
-    applyButton.disabled = conflict.smartMerge.unresolved > 0 || conflict.smartMerge.size.overLimit;
-    applyButton.title = conflict.smartMerge.size.overLimit
-      ? 'The merged save exceeds the 10 MiB cloud limit.'
-      : conflict.smartMerge.unresolved ? 'Resolve every manual field first.' : 'Apply the reviewed field merge.';
-  }
+  updateSmartMergeApplyButton(conflict);
   openModal('liveSyncConflictModal');
   setSaveStatus('error', 'Sync choice needed');
   renderRecoveryCenter();
@@ -7822,7 +7848,7 @@ function exportSmartMergeBundle() {
     merged:preview.smartMerge.mergedState,
     decisions:preview.smartMerge.decisions,
   });
-  showToast(`Chrome, ${preview.cloudLabel || 'Live'}, and merged copies exported together.`, '#6af7b0');
+  showToast(`Browser, ${preview.cloudLabel || 'Live'}, and merged copies exported together.`, '#6af7b0');
 }
 
 function refreshSmartMergePreview() {
@@ -7832,8 +7858,7 @@ function refreshSmartMergePreview() {
   preview.selections = preview.smartMerge.selections;
   const body = document.getElementById('liveSyncConflictBody');
   if (body) body.innerHTML = renderSmartMergeReport(preview);
-  const applyButton = document.getElementById('applySmartMergeBtn');
-  if (applyButton) applyButton.disabled = preview.smartMerge.unresolved > 0 || preview.smartMerge.size.overLimit;
+  updateSmartMergeApplyButton(preview);
 }
 
 function setSmartMergeFieldChoice(index, choice) {
@@ -8015,7 +8040,7 @@ function finalizeSmartMergeState(preview) {
 async function applySmartMerge() {
   const preview = liveSync.conflict || liveSync.preview;
   if (!preview?.smartMerge) return showToast('Run the comparison first.', '#f7c06a');
-  if (preview.smartMerge.unresolved) return showToast('Choose Chrome or Live for every manual field first.', '#f7c06a');
+  if (preview.smartMerge.unresolved) return explainUnresolvedSmartMerge(preview);
   if (preview.smartMerge.size.overLimit) return showToast('Merged save exceeds the 10 MiB cloud limit. Export it before cleanup.', '#f76a6a');
   const button = document.getElementById('applySmartMergeBtn');
   if (button) button.disabled = true;
@@ -8028,7 +8053,7 @@ async function applySmartMerge() {
       pushAutoBackup(isLocalServerMerge ? 'Before local-server smart merge' : 'Before imported smart merge', state);
       if (isLocalServerMerge) pushAutoBackup('Local-server copy before smart merge', preview.cloudState);
       setSQState(approvedState, { resetSyncBaseline:true });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
       liveSync.stateBytes = approvedSize.totalBytes;
       liveSync.pending = liveSync.paired || isHostedAppHost();
       setLiveSyncMeta({ pending:liveSync.pending, localUpdatedAt:state.updatedAt });
@@ -8088,7 +8113,7 @@ async function applySmartMerge() {
     pushAutoBackup('Before smart merge - Live', preview.cloudState);
     pushAutoBackup('Smart merge proposal', approvedState);
     setSQState(approvedState, { resetSyncBaseline:true });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
     liveSync.stateBytes = approvedSize.totalBytes;
     liveSync.revision = latestRevision;
     liveSync.lastCloudRevision = latestRevision;
@@ -8971,7 +8996,7 @@ function applyCloudState(cloudState, revision, updatedAt, label = 'Before live c
     pushAutoBackup(label, state);
   }
   setSQState(cloudState, { resetSyncBaseline:true });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify(state));
   liveSync.revision = Number(revision || 0);
   liveSync.lastCloudRevision = liveSync.revision;
   liveSync.updatedAt = updatedAt || null;

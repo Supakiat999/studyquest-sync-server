@@ -106,6 +106,12 @@ function sendJson(req, res, status, data, headers = {}) {
   });
 }
 
+function authenticatedV13Html(user) {
+  const html = fs.readFileSync(V13_HTML_PATH, "utf8");
+  const bootstrap = `<script>window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
+  return html.replace("</head>", `${bootstrap}\n</head>`);
+}
+
 function readBody(req, maxBytes = MAX_AUTH_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const declaredSize = Number(req.headers["content-length"] || 0);
@@ -1727,7 +1733,7 @@ const server = http.createServer(async (req, res) => {
         send(req, res, 302, "Admin v13 only", { location: "/app.html?stable=1" });
         return;
       }
-      send(req, res, 200, fs.readFileSync(V13_HTML_PATH), { "content-type": "text/html; charset=utf-8" });
+      send(req, res, 200, authenticatedV13Html(user), { "content-type": "text/html; charset=utf-8" });
       return;
     }
 

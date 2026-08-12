@@ -62,6 +62,16 @@ for (const marker of ["Password Recovery Requests", "Manual User Reset", "Cloud 
 }
 
 check(v13Html.includes("const STORAGE_KEY = 'studyquest_v3';"), "The main StudyQuest storage key changed.");
+check(v13Html.includes("const ACTIVE_STORAGE_KEY = AUTHENTICATED_STORAGE_USERNAME"),
+  "Hosted v13 must use the authenticated account's browser key.");
+check(!v13Html.includes("localStorage.getItem(STORAGE_KEY)"),
+  "Hosted v13 must not load the unscoped legacy browser save.");
+check(!v13Html.includes("localStorage.setItem(STORAGE_KEY"),
+  "Hosted v13 must not write the unscoped legacy browser save.");
+check(v13Html.includes("button.disabled = preview.smartMerge.size.overLimit;"),
+  "Manual merge choices must explain what is missing instead of silently disabling approval.");
+check(server.includes("authenticatedV13Html(user)"),
+  "The v13 route must inject the authenticated account before browser storage loads.");
 check(!v13Html.includes("localStorage.removeItem(STORAGE_KEY)"), "The main StudyQuest save must never be automatically deleted.");
 
 const hash = crypto.createHash("sha256").update(fs.readFileSync(v13Path)).digest("hex");
