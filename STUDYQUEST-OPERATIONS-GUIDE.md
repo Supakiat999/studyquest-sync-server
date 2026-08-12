@@ -533,6 +533,9 @@ leave the device copy and outbox intact.
   device save.
 - The LINE sender checks the current monthly allowance and refuses to send after
   the free allowance is exhausted.
+- Scheduled LINE retries use a stable 24-hour retry key, so a network timeout or
+  repeated cron delivery cannot create a duplicate brief for the same date and
+  mode.
 - Keep Render environment values, Neon URL, LINE secret, sync token, backup key,
   GitHub credentials, and device tokens private.
 - Rotate a secret immediately if it appears in Git, a screenshot, a log, or chat.
