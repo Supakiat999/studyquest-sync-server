@@ -7871,21 +7871,38 @@ function setSmartMergeFieldChoice(index, choice) {
   refreshSmartMergePreview();
 }
 
+function buildBulkSelectedSmartMerge(localState, cloudState, selections, choice, manualOnly = false) {
+  const nextSelections = manualOnly ? { ...(selections || {}) } : {};
+  let smartMerge = buildSmartMerge(localState, cloudState, nextSelections);
+  for (let pass = 0; pass < 25; pass += 1) {
+    let changed = false;
+    smartMerge.decisions.forEach(decision => {
+      if (manualOnly && decision.recommended) return;
+      if (nextSelections[decision.path] === choice) return;
+      nextSelections[decision.path] = choice;
+      changed = true;
+    });
+    smartMerge = buildSmartMerge(localState, cloudState, nextSelections);
+    if (!smartMerge.unresolved || !changed) break;
+  }
+  return { smartMerge, selections:nextSelections };
+}
+
 function chooseAllManualMergeFields(choice) {
   const preview = liveSync.conflict || liveSync.preview;
   if (!preview?.smartMerge || !['local','cloud'].includes(choice)) return;
-  preview.selections = { ...(preview.selections || {}) };
-  preview.smartMerge.decisions.filter(decision => !decision.recommended).forEach(decision => {
-    preview.selections[decision.path] = choice;
-  });
+  const selected = buildBulkSelectedSmartMerge(preview.localState, preview.cloudState, preview.selections, choice, true);
+  preview.selections = selected.selections;
+  preview.smartMerge = selected.smartMerge;
   refreshSmartMergePreview();
 }
 
 function chooseEveryMergeField(choice) {
   const preview = liveSync.conflict || liveSync.preview;
   if (!preview?.smartMerge || !['local','cloud'].includes(choice)) return;
-  preview.selections = {};
-  preview.smartMerge.decisions.forEach(decision => { preview.selections[decision.path] = choice; });
+  const selected = buildBulkSelectedSmartMerge(preview.localState, preview.cloudState, {}, choice, false);
+  preview.selections = selected.selections;
+  preview.smartMerge = selected.smartMerge;
   refreshSmartMergePreview();
 }
 

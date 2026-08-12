@@ -76,6 +76,7 @@ const root = path.join(__dirname, "..");
 const server = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const schema = fs.readFileSync(path.join(root, "schema.sql"), "utf8");
 const recoveryPage = fs.readFileSync(path.join(root, "public", "device-recovery.js"), "utf8");
+const v13 = fs.readFileSync(path.join(root, "public", "claudever13.html"), "utf8");
 for (const marker of ["state_versions", "state_save_events", "pre_incident_recovery"]) {
   assert.ok(schema.includes(marker) || server.includes(marker), `Missing save-safety marker: ${marker}`);
 }
@@ -88,5 +89,9 @@ assert.ok(!recoveryPage.includes('/api/v2/state') && !recoveryPage.includes('/ap
   "Device recovery must not load or write cloud state");
 assert.ok(!recoveryPage.includes('localStorage.setItem') && !recoveryPage.includes('indexedDB.deleteDatabase'),
   "Device recovery must not mutate browser storage");
+assert.ok(v13.includes("function buildBulkSelectedSmartMerge("),
+  "Bulk merge choices must resolve fields revealed by earlier choices");
+assert.ok(v13.includes("for (let pass = 0; pass < 25; pass += 1)"),
+  "Bulk merge selection must iterate to a stable reviewed result");
 
 console.log("Save-safety helpers passed.");
