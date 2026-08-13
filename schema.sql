@@ -10,6 +10,7 @@ create table if not exists accounts (
 
 alter table accounts add column if not exists state_revision bigint not null default 0;
 alter table accounts add column if not exists state_updated_at timestamptz;
+alter table accounts add column if not exists state_hash text;
 alter table accounts add column if not exists password_change_required boolean not null default false;
 alter table accounts add column if not exists temporary_password_expires_at timestamptz;
 
@@ -74,6 +75,14 @@ create index if not exists state_save_events_username_created_idx
   on state_save_events(username, created_at desc);
 create index if not exists state_save_events_result_created_idx
   on state_save_events(result, created_at desc);
+
+alter table state_save_events add column if not exists base_hash text;
+alter table state_save_events add column if not exists mutation_id text;
+alter table state_save_events add column if not exists change_manifest jsonb;
+
+create unique index if not exists state_save_events_mutation_result_idx
+  on state_save_events(username, mutation_id)
+  where mutation_id is not null and resulting_revision is not null;
 
 create table if not exists sync_pairing_codes (
   code_hash text primary key,

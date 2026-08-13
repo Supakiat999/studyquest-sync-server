@@ -40,11 +40,12 @@ Deployment behavior:
 - `/v13` and `/claudever13.html` require the `admin` account. Other users are redirected to the stable app and never receive the daily v13 file.
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
-- `/api/v2/state` uses revisions and returns `409 STATE_CONFLICT` instead of silently replacing a newer account save.
+- `/api/v2/state` requires revision lineage. New clients send `baseRevision`, `baseHash`, a retry-safe `mutationId`, and a record-change manifest.
+- The server compares record IDs before every write. Missing tasks, notes, files, checklist items, grades, trips, Weekly records, categories, or notebooks require matching user-deletion entries; otherwise the save is rejected as `DESTRUCTIVE_CHANGE_REVIEW_REQUIRED` and both copies remain intact.
 - Hosted `POST /api/state` is disabled. Every cloud write must include its known base revision through `/api/v2/state`.
 - Every stable-app edit saves first to `studyquest_v3_<username>` and IndexedDB, with a durable offline outbox and rolling device recovery copies. Cloud backup starts after a 500 ms quiet period, and page exit performs a final device save plus a best-effort revision-protected upload.
 - Admin v13 uses the same IndexedDB recovery database and durable outbox. If localStorage reaches its quota, edits and approved merges remain recoverable in IndexedDB instead of failing; unknown cloud revisions still require comparison.
-- Every unique accepted cloud revision is retained as a compressed immutable `state_versions` record. Accepted, unchanged, conflicted, rejected, and oversized attempts are recorded in `state_save_events` without passwords or state contents.
+- Every unique accepted cloud revision is retained as a compressed immutable `state_versions` record. Accepted, unchanged, conflicted, blocked/rejected, recovered, restored, and oversized attempts are recorded in `state_save_events` without passwords or state contents.
 - Admin v13 sends saved edits after a 500 ms quiet period and retries its durable outbox after reopen, reconnect, focus, and visibility changes. Periodic checks remain a fallback; Chrome-versus-local-server, imported, and live differences still require a per-field Smart Merge preview.
 - `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy/tied/unverified differences require a manual choice.
 - Recovery Center reports sync times, per-field decisions, change history, and saved-state usage. Chrome, Live, and the proposed merge can be exported together before applying.
@@ -54,8 +55,9 @@ Deployment behavior:
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention. A snapshot is skipped when its state matches the latest stored backup.
 - `/api/version` reports the tested v13 release hash used by the daily publisher.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
-- Admin can preview and restore 30-day account snapshots. Every restore creates a `pre_restore` backup and increments the cloud revision; credentials are not changed.
-- Signed-in users can open `/device-recovery` to inspect and export only their current account's browser copies. That page does not fetch cloud state or write storage.
+- Admin can preview and restore 30-day account snapshots. Full replacement requires a fresh signed preview token, creates a `pre_restore` backup, and increments the cloud revision; credentials are not changed.
+- Every signed-in user can open `/data-recovery` (with `/device-recovery` kept as an alias), choose an earlier saved version, preview exact missing/current-only/changed records, and use **Recover Missing Items**. This is additive: current records and settings are not replaced.
+- The same page inspects the signed-in account's localStorage, IndexedDB device copy, pending outbox, and allowed legacy browser copy without mutating browser storage.
 - The laptop Chrome-to-live pairing bridge is admin-only and loopback-only. Normal accounts use their own same-origin browser session and never receive a pairing token.
 - The admin account password is synced from the private `STUDYQUEST_ADMIN_PASSWORD` environment variable on startup. If the admin login stops working, update that Render environment variable and redeploy/restart the service.
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
@@ -70,7 +72,7 @@ StudyQuest saves to the current device first. Cloud backup is a separate, revisi
 | --- | --- | --- | --- |
 | Account-scoped `localStorage` | Latest signed-in account state | Yes, in that browser profile | No |
 | IndexedDB | Latest device copy, durable upload outbox, and rolling recovery copies | Yes, in that browser profile | No |
-| Cloud account state | Latest revision accepted by `/api/v2/state` | Yes | Yes, for the same signed-in account |
+| Saved online | Latest revision accepted by `/api/v2/state` | Yes | Yes, for the same signed-in account |
 | Immutable versions and snapshots | Recovery history for accepted cloud revisions | Yes | Restored through recovery tools |
 
 - `Saved on this device` or `Saved in Chrome`: the edit is durable on that device and the tab may be closed.
@@ -78,7 +80,7 @@ StudyQuest saves to the current device first. Cloud backup is a separate, revisi
 - `Backed up at <time>` or `Synced to admin`: the cloud accepted the revision and other devices can load it.
 - `Conflict - both copies preserved`: uploads pause because two copies changed independently. The app retains both until the user reviews and approves a copy or merge.
 
-Every edit writes to browser storage and IndexedDB immediately. Cloud backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale browser cannot replace a newer cloud revision silently. Normal accounts remain isolated and never receive the admin laptop bridge.
+Every edit writes to IndexedDB and account-scoped browser storage immediately. Online backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale browser cannot replace an online copy merely because its revision marker matches: hash lineage and record-removal checks are also required. Normal accounts remain isolated and never receive the admin laptop bridge.
 
 ### Verified Live Release - August 12, 2026
 
@@ -194,13 +196,24 @@ The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_
 
 - After authentication, the stable app reloads the signed-in user's browser key, such as `studyquest_v3_anya`, before accepting edits.
 - Hosted v13 uses that same authenticated per-account key. The `onrender.com` browser store and `127.0.0.1` browser store are separate browser origins; localhost reaches the admin account through the revision-protected cloud bridge rather than by exposing localhost storage to the website.
-- When browser and cloud contain different user data, neither copy is silently applied. The user sees `Unsynced work found` and can choose `Export Both`, `Use Cloud`, or `Use This Browser`.
+- When device and online data differ, neither copy is silently applied. The popup uses the plain labels **On This Device** and **Saved Online**, shows removal details under **More details**, and offers export before any choice.
 - Recovery copies use an auxiliary per-account browser key. The main `studyquest_v3` data family is never cleared automatically.
 - The browser also stores the current account copy, offline outbox, and rolling recovery records in IndexedDB. Failed requests remain `Cloud backup pending` and retry after reconnect, focus, startup, and returning to the tab.
 - Cloud status text distinguishes `Saved on this device`, `Cloud backup pending`, `Backed up at <time>`, and `Conflict - both copies preserved`.
-- `Use This Browser` sends an explicit `stable-account-recovery` approval and creates a server-side `pre_merge` snapshot before cloud replacement.
+- **Review This Device** is a two-step action. It shows how many online records would be removed and requires a second confirmation. It uses the normal hash/revision/change-manifest guard; the former `stable-account-recovery` whole-copy bypass no longer exists.
 - Revision conflicts open the same recovery comparison for non-admin users instead of directing them to an admin-only screen.
-- `/device-recovery` is read-only and never loads the cloud copy. Use it to export the signed-in account's browser and IndexedDB data during an incident.
+- `/data-recovery` lists only the signed-in user's immutable versions. Preview is read-only; **Recover Missing Items** adds absent records transactionally after a fresh signed preview and first creates a `pre_restore` snapshot.
+- `/device-recovery` remains an alias to the same recovery page. Device-copy inspection/export does not write browser storage.
+
+### August 13, 2026 Save-Safety Incident
+
+The admin account's revision 59 contained 89 tasks, one trip, and four Weekly weeks. A browser `localStorage` quota failure left an older 78-task copy on disk while its revision marker advanced; startup migrations then queued that old copy, and the old server accepted it because the revision number matched. The new safeguards address each failure point:
+
+- IndexedDB is the authoritative recovery copy and outbox; large v13 undo, auto-backup, and diagnostic histories no longer keep filling localStorage.
+- Hosted v13 blocks editing while account/device/online sources load and migrations cannot create a user-edit upload.
+- Revision equality is insufficient without the matching base hash.
+- The server independently detects removed records and requires explicit deletion evidence.
+- Each accepted revision and blocked attempt remains auditable, and every user has additive self-service missing-item recovery.
 
 ## Migrating Current Admin Data
 

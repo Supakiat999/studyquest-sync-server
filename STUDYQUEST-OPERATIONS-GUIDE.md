@@ -20,7 +20,7 @@ StudyQuest has separate device and cloud copies:
 | Local admin v13 | `http://127.0.0.1:3000/claudever13.html` | Admin's authoritative Chrome test environment on this laptop |
 | Stable live app | `https://studyquest-sync-server.onrender.com/app.html?stable=1` | Normal app for Anya and other users |
 | Live admin v13 | `https://studyquest-sync-server.onrender.com/v13` | Admin-only hosted v13 |
-| Device recovery | `https://studyquest-sync-server.onrender.com/device-recovery` | Read-only export of the signed-in account's browser copies |
+| Data recovery | `https://studyquest-sync-server.onrender.com/data-recovery` | Own-version missing-item recovery plus device-copy inspection/export |
 | Render server | `studyquest-sync-server` | Login, account isolation, state API, recovery API |
 | Neon PostgreSQL | Private `DATABASE_URL` | Durable account state, revisions, snapshots, recovery records |
 | LINE Worker | `https://line-study-brief.manusirivithaya.workers.dev` | Always-on admin-only LINE replies and scheduled briefs |
@@ -360,15 +360,37 @@ means the task action is stale and should be reinstalled from the current script
 - Local v13 keeps undo history and automatic safety snapshots.
 - The stable app and v13 keep account-scoped localStorage, IndexedDB device
   copies, and a durable outbox.
-- `/device-recovery` reads and exports the current signed-in account's device
-  data without fetching or writing cloud state.
+- `/data-recovery` lists only the signed-in account's immutable online versions
+  and reads its device copies. Preview changes nothing. **Recover Missing Items**
+  adds absent records only after approval and a server `pre_restore` snapshot.
+- `/device-recovery` remains an alias. Browser-storage inspection and export are
+  read-only; recovery writes use only the dedicated signed-preview API.
 
 ### Cloud history
 
 Every unique accepted revision is compressed into immutable
-`state_versions`. Save events record accepted, unchanged, conflicted, rejected,
-and oversized attempts without recording passwords or state bodies. Daily
+`state_versions`. Save events record accepted, unchanged, conflicted, blocked,
+recovered, restored, and oversized attempts without recording passwords or state bodies. Daily
 snapshots and pre-merge/pre-restore snapshots provide additional restore points.
+
+Every normal save carries revision/hash lineage, a retry-safe mutation ID, and
+a record-change manifest. The server independently compares record IDs. An
+unexplained removal is blocked with `DESTRUCTIVE_CHANGE_REVIEW_REQUIRED`; the
+device and online copies remain available for review.
+
+### Recover missing items yourself
+
+1. Stop editing the account on other devices.
+2. Open `/data-recovery` while signed in to the affected account.
+3. Choose an **Earlier Saved Version** by Bangkok date/time and counts.
+4. Select **Preview**. Read **Items that will be added**; open **More details**
+   for current-only and changed records.
+5. Select **Recover Missing Items** and approve once.
+6. Reopen StudyQuest and verify tasks, Weekly weeks/semesters, notes, files,
+   grades, trips, and checklists.
+
+This action is additive. It does not replace current records, settings, or
+credentials. Full-version replacement remains admin-only.
 
 ### Encrypted laptop database backup
 
@@ -396,8 +418,9 @@ Sessions, pairing codes, and device tokens are excluded from database exports.
 1. Stop editing the affected account on every device.
 2. Export the current browser and cloud copies.
 3. In admin Recovery Center, inspect snapshot date, reason, revision, and counts.
-4. Select the correct snapshot and confirm once.
-5. The server creates a `pre_restore` snapshot, restores transactionally, and
+4. Select the correct snapshot or immutable version, generate its preview, and
+   inspect the additions, removals, and changed-record counts.
+5. Confirm the fresh signed preview. The server creates a `pre_restore` snapshot, restores transactionally, and
    increments the state revision.
 6. Reopen the affected user's app and resolve the expected stale-device conflict.
 7. Verify tasks, Weekly weeks/semesters, notes, files, grades, trips, and
@@ -491,11 +514,12 @@ When data appears missing:
 2. Keep the original device and browser profile open.
 3. Record username, device, browser, exact time in Bangkok, URL, and visible save
    status.
-4. Open `/device-recovery` on that same signed-in device and export its copy.
+4. Open `/data-recovery` on that same signed-in device and export its copies.
 5. Export the current cloud copy and create an encrypted database backup.
 6. Inspect cloud revisions, daily snapshots, save events, and account counts.
 7. Compare by stable record IDs and field timestamps. Preserve both copies.
-8. Restore or merge only after a preview, backup, and explicit approval.
+8. Prefer **Recover Missing Items**. Use a full replacement only as admin after
+   a fresh preview, backup, and explicit approval.
 9. Verify every data area and account isolation after recovery.
 10. Write an incident note with cause, evidence, recovery source, hashes/counts,
     and safeguards added.
@@ -509,9 +533,10 @@ leave the device copy and outbox intact.
 | --- | --- |
 | Render page says Not Found | Use `/app.html?stable=1`; then check `/api/health` and the latest deploy |
 | First live load is slow | Wait for Render Free to wake; do not keep submitting forms |
-| Data appears empty | Stop editing and use device recovery before choosing a copy |
+| Data appears empty | Stop editing and open `/data-recovery`; export device copies and preview an earlier version |
 | `Cloud backup pending` | Keep the browser data; reconnect and reopen the page |
-| Conflict popup | Export both, review latest field times, resolve manual rows, approve once |
+| Two Saved Copies popup | Export both, compare **On This Device** and **Saved Online**, open **More details**, then approve once |
+| Save blocked as destructive | Do not retry blindly. Export both copies and recover/merge through a preview |
 | Admin login fails | Check/update `STUDYQUEST_ADMIN_PASSWORD` in Render |
 | User forgot password | Use the recovery case and admin approval flow |
 | LINE menu does not reply | Run `line:admin:status`; check webhook is enabled and chat is linked |

@@ -3,11 +3,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   additiveIncidentRecovery,
+  recoverMissingRecords,
   deserializeStateVersion,
   serializeStateVersion,
   stableStringify,
   stateHash,
+  stateRecordDiff,
   stateSummary,
+  unapprovedRemovals,
 } = require("../lib/state-safety");
 
 const unorderedLeft = { beta: [2, { z: true, a: "x" }], alpha: 1 };
@@ -72,6 +75,52 @@ assert.equal(repeated.addedTasks.length, 0);
 assert.equal(repeated.addedWeeks.length, 0);
 assert.deepEqual(repeated.state, recovered.state, "recovery must be idempotent");
 
+const completeState = {
+  tasks: Array.from({ length: 89 }, (_, index) => ({ id:`task-${index + 1}`, title:`Task ${index + 1}` })),
+  notes:[{ id:"note-1", title:"Current note" }],
+  fileLinks:[{ id:"file-1", title:"File" }],
+  checklistItems:[{ id:"check-1", title:"Checklist" }],
+  trips:[{ id:"trip-uk", name:"UK" }],
+  tracker:{ weeks:Array.from({ length:4 }, (_, index) => ({ id:`week-${index + 1}`, label:`Week ${index + 1}`, rows:[{ id:`row-${index + 1}`, subject:"Subject" }] })) },
+  trackerSemesters:Array.from({ length:4 }, (_, index) => ({ id:`semester-${index + 1}`, subjects:[{ id:`subject-${index + 1}`, subject:"Course" }] })),
+  grades:{ math:{ id:"math", name:"Math", scores:[{ id:"score-1", earned:9, possible:10 }] } },
+};
+const staleState = structuredClone(completeState);
+staleState.tasks = staleState.tasks.slice(0, 78);
+staleState.trips = [];
+staleState.tracker.weeks = [];
+const destructive = unapprovedRemovals(completeState, staleState, null);
+assert.equal(destructive.unapproved.filter(item => item.collection === "tasks").length, 11,
+  "the exact 89-to-78 stale task drop must be detected");
+assert.equal(destructive.unapproved.filter(item => item.collection === "trips").length, 1);
+assert.equal(destructive.unapproved.filter(item => item.collection === "tracker.weeks").length, 4);
+
+const intentionalTaskDelete = structuredClone(completeState);
+intentionalTaskDelete.tasks = intentionalTaskDelete.tasks.slice(1);
+const taskRemoval = stateRecordDiff(completeState, intentionalTaskDelete).removed.find(item => item.collection === "tasks");
+assert.ok(taskRemoval);
+assert.equal(unapprovedRemovals(completeState, intentionalTaskDelete, {
+  deletes:[{ key:taskRemoval.key }],
+}).unapproved.length, 0, "an explicitly manifested user deletion must be accepted");
+
+const broadRecoveryCurrent = structuredClone(staleState);
+broadRecoveryCurrent.notes = [];
+broadRecoveryCurrent.fileLinks = [];
+broadRecoveryCurrent.checklistItems = [];
+broadRecoveryCurrent.grades = {};
+const broadRecovery = recoverMissingRecords(broadRecoveryCurrent, completeState);
+assert.equal(broadRecovery.summary.tasks, 89);
+assert.equal(broadRecovery.summary.notes, 1);
+assert.equal(broadRecovery.summary.files, 1);
+assert.equal(broadRecovery.summary.checklist, 1);
+assert.equal(broadRecovery.summary.grades, 1);
+assert.equal(broadRecovery.summary.trips, 1);
+assert.equal(broadRecovery.summary.weeklyWeeks, 4);
+assert.equal(broadRecovery.summary.weeklySemesters, 4);
+assert.ok(broadRecovery.additions.length >= 20);
+assert.deepEqual(recoverMissingRecords(broadRecovery.state, completeState).state, broadRecovery.state,
+  "missing-item recovery must be idempotent across all protected collections");
+
 const root = path.join(__dirname, "..");
 const server = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const schema = fs.readFileSync(path.join(root, "schema.sql"), "utf8");
@@ -83,10 +132,20 @@ for (const marker of ["state_versions", "state_save_events", "pre_incident_recov
 assert.ok(server.includes('error: "VERSIONED_STATE_REQUIRED"'), "Unversioned writes must be disabled");
 assert.ok(server.includes('result: "conflicted"'), "Conflicted saves must be audited");
 assert.ok(server.includes('result: "oversized"'), "Oversized saves must be audited");
+assert.ok(server.includes('"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED"'),
+  "Unexplained destructive saves must be blocked by the server");
+assert.ok(server.includes('"BASE_HASH_MISMATCH"'),
+  "Revision equality must be backed by a state hash");
+assert.ok(server.includes("if (duplicateRevision !== currentRevision)"),
+  "A retried mutation must conflict when Saved Online advanced after its original acceptance");
+assert.ok(server.includes("handleRecoveryVersionRecoverMissing"),
+  "Every account needs additive missing-item recovery");
+assert.ok(server.includes("recovered.state.updatedAt = Date.now();"),
+  "Recovered missing items must receive a fresh device-visible update time");
 assert.ok(server.includes('d.username = $2'), "Paired server tokens must be restricted to admin");
 assert.ok(server.includes('handleAnyaIncidentRecovery'), "Verified additive incident recovery route is missing");
 assert.ok(!recoveryPage.includes('/api/v2/state') && !recoveryPage.includes('/api/state'),
-  "Device recovery must not load or write cloud state");
+  "Recovery must not bypass the dedicated recovery endpoints with a whole-state write");
 assert.ok(!recoveryPage.includes('localStorage.setItem') && !recoveryPage.includes('indexedDB.deleteDatabase'),
   "Device recovery must not mutate browser storage");
 assert.ok(v13.includes("function buildBulkSelectedSmartMerge("),
@@ -101,8 +160,20 @@ assert.ok(v13.includes("window.addEventListener('pagehide', preserveV13StateBefo
   "v13 must preserve a final device copy when the page closes");
 assert.ok(v13.includes("StudyQuest localStorage is full; IndexedDB recovery remains active"),
   "A full localStorage quota must fall back to IndexedDB instead of losing the edit");
-assert.ok(v13.includes("if (!options.initialPair && v13DurableOutboxPending && knownRevision === null)"),
-  "An outbox without a trusted revision must require comparison instead of auto-uploading");
+assert.ok(v13.includes("const lineageMatches = lineage"),
+  "A pending v13 outbox must prove its revision and hash lineage before upload");
+assert.ok(v13.includes("reason:'outbox-lineage-review'"),
+  "An outbox without trusted lineage must require comparison instead of auto-uploading");
+assert.ok(v13.includes("persistV13RecoveryOnly"),
+  "Large v13 safety histories must move to IndexedDB");
+assert.ok(!/let state = loadState\(\);\s*initializeSyncTracking\(\);/.test(v13),
+  "v13 migrations must not initialize upload tracking before account sources load");
+assert.ok(v13.includes("ensureWeeklyTrackerData({ persist:false });"),
+  "Startup Weekly migration must stay in memory until account loading is complete");
+assert.ok(v13.includes("syncStateFromServer().finally(finishV13AccountBootstrap)"),
+  "Hosted v13 must finish account loading before enabling edits");
+assert.ok(server.includes('document.documentElement.classList.add("studyquest-account-loading")'),
+  "Hosted v13 must block editing while account sources load");
 assert.ok(v13.includes("const latest = bundle.outbox?.state || candidates[0]?.state;"),
   "An unsent v13 outbox must outrank cache timestamps during recovery");
 

@@ -3,44 +3,73 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>StudyQuest Device Recovery</title>
+  <title>StudyQuest Data Recovery</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0d0f1a; color: #eef0ff; }
     * { box-sizing: border-box; letter-spacing: 0; }
     body { margin: 0; min-height: 100vh; background: #0d0f1a; }
     header { border-bottom: 1px solid #2d3354; background: #13162a; }
-    .bar, main { width: min(880px, calc(100% - 28px)); margin: auto; }
+    .bar, main { width: min(960px, calc(100% - 28px)); margin: auto; }
     .bar { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     h1 { margin: 0; font-size: 20px; }
-    main { padding: 28px 0 48px; }
+    h2 { margin: 0 0 10px; font-size: 17px; }
+    h3 { margin: 16px 0 8px; font-size: 14px; }
+    main { padding: 26px 0 48px; }
     .notice { border-left: 4px solid #6af7b0; padding: 12px 14px; background: #171b31; line-height: 1.55; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
-    section { border: 1px solid #2d3354; background: #13162a; padding: 18px; border-radius: 8px; min-width: 0; }
-    section h2 { margin: 0 0 10px; font-size: 15px; }
-    .summary { color: #b9c0e4; line-height: 1.55; overflow-wrap: anywhere; }
-    .status { min-height: 24px; margin: 18px 0; color: #8fa3ff; font-weight: 700; }
-    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    button, a.button { min-height: 42px; border-radius: 6px; border: 1px solid #4a5487; padding: 10px 14px; color: #eef0ff; background: #252b49; font-weight: 750; text-decoration: none; cursor: pointer; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    section { border: 1px solid #2d3354; background: #13162a; padding: 18px; border-radius: 8px; min-width: 0; margin-top: 16px; }
+    .grid section { margin-top: 0; }
+    .summary, .muted { color: #b9c0e4; line-height: 1.55; overflow-wrap: anywhere; }
+    .status { min-height: 24px; margin: 16px 0; color: #8fa3ff; font-weight: 700; }
+    .warning { color: #ffd38a; }
+    .good { color: #79e7ad; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button, a.button, select { min-height: 42px; border-radius: 6px; border: 1px solid #4a5487; padding: 10px 14px; color: #eef0ff; background: #252b49; font-weight: 750; text-decoration: none; }
+    button { cursor: pointer; }
     button.primary { border-color: #7c6af7; background: #7c6af7; color: #fff; }
     button:disabled { opacity: .5; cursor: wait; }
+    select { width: min(100%, 620px); font-weight: 600; }
     code { overflow-wrap: anywhere; color: #a99ef9; }
-    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } .bar { align-items: flex-start; padding: 14px 0; } }
+    ul { margin: 8px 0 0; padding-left: 20px; color: #c9cfee; line-height: 1.55; }
+    details { margin-top: 12px; color: #b9c0e4; }
+    summary { cursor: pointer; font-weight: 750; color: #dfe2ff; }
+    .comparison { margin-top: 14px; padding: 14px; background: #0f1222; border: 1px solid #343b63; border-radius: 6px; }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } .bar { align-items: flex-start; padding: 14px 0; } .actions > * { width: 100%; } }
   </style>
 </head>
 <body>
-  <header><div class="bar"><h1>StudyQuest Device Recovery</h1><a class="button" href="/app.html?stable=1">Back to StudyQuest</a></div></header>
+  <header><div class="bar"><h1>StudyQuest Data Recovery</h1><a class="button" href="/app.html?stable=1">Back to StudyQuest</a></div></header>
   <main>
-    <div class="notice">This page reads this device only. It does not load the cloud copy and cannot overwrite your StudyQuest account.</div>
-    <p class="status" id="status" role="status">Checking the signed-in account...</p>
-    <div class="grid">
-      <section><h2>Browser copy</h2><div class="summary" id="browserSummary">Checking...</div></section>
-      <section><h2>IndexedDB recovery copy</h2><div class="summary" id="durableSummary">Checking...</div></section>
-    </div>
-    <p class="summary">Account storage key: <code id="storageKey">Checking...</code></p>
-    <div class="actions">
-      <button class="primary" id="exportBundle" disabled>Export device recovery bundle</button>
-      <button id="exportRaw" disabled>Export browser copy</button>
-    </div>
+    <div class="notice">Recovery never changes your password. Nothing changes until you preview a saved version and approve <strong>Recover Missing Items</strong>.</div>
+    <p class="status" id="status" role="status">Checking your saved copies...</p>
+
+    <section>
+      <h2>Earlier Saved Versions</h2>
+      <p class="muted">Choose a time when your missing information was still present. Recovery adds records that are absent now; it does not replace current records or settings.</p>
+      <div class="actions">
+        <select id="versionSelect" aria-label="Earlier saved version" disabled><option>Loading saved versions...</option></select>
+        <button id="previewVersion" disabled>Preview</button>
+      </div>
+      <div class="comparison" id="versionPreview" hidden></div>
+      <div class="actions" style="margin-top:12px">
+        <button class="primary" id="recoverMissing" disabled>Recover Missing Items</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Copies On This Device</h2>
+      <div class="grid">
+        <section><h3>Account browser copy</h3><div class="summary" id="browserSummary">Checking...</div></section>
+        <section><h3>Device recovery copy</h3><div class="summary" id="durableSummary">Checking...</div></section>
+        <section><h3>Pending upload</h3><div class="summary" id="outboxSummary">Checking...</div></section>
+        <section><h3>Legacy browser copy</h3><div class="summary" id="legacySummary">Checking...</div></section>
+      </div>
+      <details><summary>More details</summary><p class="summary">Account storage key: <code id="storageKey">Checking...</code></p></details>
+      <div class="actions">
+        <button id="exportBundle" disabled>Export All Device Copies</button>
+        <button id="exportRaw" disabled>Export Account Browser Copy</button>
+      </div>
+    </section>
   </main>
   <script src="/device-recovery.js"></script>
 </body>

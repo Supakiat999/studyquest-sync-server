@@ -45,7 +45,7 @@
         badge.id = "studyquestAccountBadge";
         document.body.appendChild(badge);
       }
-      badge.innerHTML = `<strong>${escapeHtml(user.username)}</strong><a href="/device-recovery">Device Recovery</a><button type="button">Logout</button>`;
+      badge.innerHTML = `<strong>${escapeHtml(user.username)}</strong><a href="/data-recovery">Data Recovery</a><button type="button">Logout</button>`;
       badge.querySelector("button").addEventListener("click", performLogout);
     }
 
@@ -54,8 +54,8 @@
       const search = new URLSearchParams(window.location.search);
       const next = search.get("next");
       const wantsStable = search.get("stable") === "1";
-      if (!user.legacy && next === "device-recovery") {
-        window.location.replace("/device-recovery");
+      if (!user.legacy && ["device-recovery", "data-recovery"].includes(next)) {
+        window.location.replace("/data-recovery");
         return;
       }
       if (!user.legacy && user.username === "admin" && !wantsStable) {
@@ -3312,27 +3312,28 @@
 <!-- ACCOUNT COPY RECOVERY MODAL -->
 <div class="modal-overlay" id="accountStateRecoveryModal" role="dialog" aria-modal="true" aria-labelledby="accountStateRecoveryTitle">
   <div class="modal account-recovery-modal">
-    <div class="modal-title" id="accountStateRecoveryTitle">Unsynced work found</div>
-    <div class="account-recovery-lead">This browser and your StudyQuest account contain different information. Nothing has been overwritten. Review both copies before choosing.</div>
+    <div class="modal-title" id="accountStateRecoveryTitle">Two Saved Copies Found</div>
+    <div class="account-recovery-lead">The information on this device differs from what was saved online. Nothing has been replaced. Compare both before choosing.</div>
     <div class="account-recovery-grid">
       <div class="account-recovery-copy">
-        <strong>This Browser</strong>
+        <strong>On This Device</strong>
         <span id="accountRecoveryBrowserSummary">Checking...</span>
         <span id="accountRecoveryBrowserTime"></span>
       </div>
       <div class="account-recovery-copy">
-        <strong>Cloud Account</strong>
+        <strong>Saved Online</strong>
         <span id="accountRecoveryCloudSummary">Checking...</span>
         <span id="accountRecoveryCloudTime"></span>
       </div>
     </div>
     <div class="account-recovery-note" id="accountRecoveryRecommendation">Choose the copy that contains the work you recognize. Export Both is the safest first step when unsure.</div>
+    <details class="account-recovery-note"><summary>More details</summary><div id="accountRecoveryRemovalDetails" style="margin-top:8px;white-space:pre-wrap;">Checking changes...</div></details>
     <div class="account-recovery-status" id="accountRecoveryStatus" aria-live="polite"></div>
     <div class="modal-btns" style="flex-wrap:wrap;">
       <button class="btn btn-ghost" type="button" onclick="closeAccountStateRecovery()">Not Now</button>
       <button class="btn btn-ghost" type="button" onclick="exportAccountStateCopies()">Export Both</button>
-      <button class="btn btn-ghost" type="button" id="accountRecoveryCloudBtn" onclick="useAccountCloudCopy()">Use Cloud</button>
-      <button class="btn btn-primary" type="button" id="accountRecoveryBrowserBtn" onclick="useAccountBrowserCopy()">Use This Browser</button>
+      <button class="btn btn-ghost" type="button" id="accountRecoveryCloudBtn" onclick="useAccountCloudCopy()">Use Saved Online</button>
+      <button class="btn btn-primary" type="button" id="accountRecoveryBrowserBtn" onclick="useAccountBrowserCopy()">Review This Device</button>
     </div>
   </div>
 </div>
@@ -3536,6 +3537,9 @@ let serverSaveTimer = null;
 let saveStatusClearTimer = null;
 let lastServerSaveStartedAt = 0;
 let serverStateRevision = null;
+let serverStateHash = null;
+let confirmedServerState = null;
+let pendingCloudMutation = null;
 let accountStateRecovery = null;
 let durableSaveChain = Promise.resolve();
 let durableSaveQueued = null;
@@ -3607,7 +3611,7 @@ async function pruneDeviceRecoveryCopies(db, username) {
   });
 }
 
-async function persistDeviceState(snapshot, { pending = true, label = 'device-save' } = {}) {
+async function persistDeviceState(snapshot, { pending = true, label = 'device-save', lineage = null } = {}) {
   const username = authenticatedUsername();
   if (!username || !snapshot || typeof snapshot !== 'object') return false;
   const copy = cloneAccountState(snapshot);
@@ -3623,7 +3627,7 @@ async function persistDeviceState(snapshot, { pending = true, label = 'device-sa
     });
     const outbox = transaction.objectStore('outbox');
     if (pending) {
-      outbox.put({ username, state:copy, updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint });
+      outbox.put({ username, state:copy, updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint, lineage });
     }
     transaction.objectStore('recovery').put({
       id:`${username}:${fingerprint}`, username, state:copy, label,
@@ -3798,6 +3802,86 @@ function accountStateSummary(value) {
   return `${Array.isArray(source.tasks) ? source.tasks.length : 0} tasks · ${Array.isArray(source.notes) ? source.notes.length : 0} notes · ${Array.isArray(source.fileLinks) ? source.fileLinks.length : 0} files · ${gradeCount} grade records · ${Array.isArray(source.trips) ? source.trips.length : 0} trips · ${weeklyWeeks} Weekly weeks · ${weeklySemesters} semesters`;
 }
 
+function safetyRecordIdentity(record, kind, index = 0) {
+  if (!record || typeof record !== 'object') return `${kind}:value:${stableRecoveryString(record)}`;
+  for (const field of ['id','uid','weekId','taskId','rowId','subjectId','key']) {
+    if (record[field] !== undefined && record[field] !== null && String(record[field]).trim()) {
+      return `${kind}:${field}:${String(record[field])}`;
+    }
+  }
+  const naturalFields = ['title','name','label','subject','dayKey','day','date'];
+  const natural = naturalFields
+    .filter(field => record[field] !== undefined && record[field] !== null && String(record[field]).trim())
+    .map(field => `${field}=${String(record[field]).trim()}`).join('|');
+  return natural ? `${kind}:natural:${natural}` : null;
+}
+
+function safetyRecordLabel(record, fallback) {
+  if (record && typeof record === 'object') {
+    for (const field of ['title','name','label','subject','filename','url']) {
+      if (record[field] !== undefined && String(record[field]).trim()) return String(record[field]).trim().slice(0, 140);
+    }
+  }
+  return fallback;
+}
+
+function collectSafetyRecordKeys(sourceValue) {
+  const source = sourceValue && typeof sourceValue === 'object' ? sourceValue : {};
+  const keys = new Map();
+  const addArray = (collection, records, kind, parentId = '') => {
+    (Array.isArray(records) ? records : []).forEach((record, index) => {
+      const identity = safetyRecordIdentity(record, kind, index);
+      if (!identity) return;
+      const id = parentId ? `${parentId}/${identity}` : identity;
+      keys.set(`${collection}/${id}`, safetyRecordLabel(record, id));
+    });
+  };
+  [
+    ['tasks','task'], ['categories','category'], ['deletedCategories','deleted-category'],
+    ['notebooks','notebook'], ['notes','note'], ['fileLinks','file'],
+    ['checklistItems','checklist-item'], ['trips','trip'], ['travelCategories','travel-category'],
+    ['customCurricula','curriculum'], ['sessions','study-session'],
+  ].forEach(([field, kind]) => addArray(field, source[field], kind));
+  addArray('tracker.weeks', source.tracker?.weeks, 'week');
+  addArray('trackerSemesters', source.trackerSemesters, 'semester');
+  (Array.isArray(source.trackerSemesters) ? source.trackerSemesters : []).forEach((semester, index) => {
+    const parent = safetyRecordIdentity(semester, 'semester', index);
+    if (parent) addArray('trackerSemesters.subjects', semester?.subjects, 'subject', parent);
+  });
+  (Array.isArray(source.tracker?.weeks) ? source.tracker.weeks : []).forEach((week, index) => {
+    const parent = safetyRecordIdentity(week, 'week', index);
+    if (parent) addArray('tracker.weeks.rows', week?.rows, 'row', parent);
+  });
+  Object.entries(source.grades && typeof source.grades === 'object' ? source.grades : {}).forEach(([gradeId, grade]) => {
+    keys.set(`grades/${gradeId}`, safetyRecordLabel(grade, gradeId));
+    addArray('grades.scores', grade?.scores, 'score', gradeId);
+  });
+  Object.entries(source.customSubjects && typeof source.customSubjects === 'object' ? source.customSubjects : {}).forEach(([groupId, subjects]) => {
+    addArray('customSubjects', subjects, 'custom-subject', groupId);
+  });
+  return keys;
+}
+
+function buildCloudChangeSet(baseState, nextState) {
+  if (!baseState || typeof baseState !== 'object') return { deletes:[], generatedAt:new Date().toISOString() };
+  const before = collectSafetyRecordKeys(baseState);
+  const after = collectSafetyRecordKeys(nextState);
+  return {
+    deletes:[...before.keys()].filter(key => !after.has(key)).map(key => ({ key, label:before.get(key) })),
+    generatedAt:new Date().toISOString(),
+    source:'authenticated-user-edit',
+  };
+}
+
+function newCloudMutation(snapshot) {
+  return {
+    mutationId:`stable-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`,
+    baseRevision:Number.isInteger(serverStateRevision) ? serverStateRevision : readServerRevision(),
+    baseHash:serverStateHash,
+    changeSet:buildCloudChangeSet(confirmedServerState, snapshot),
+  };
+}
+
 function accountStateTime(value) {
   const time = Number(value?.updatedAt || 0);
   return time > 0 ? `Last browser edit ${new Date(time).toLocaleString()}` : 'No reliable browser edit time';
@@ -3853,21 +3937,30 @@ function renderAccountStateRecovery() {
   document.getElementById('accountRecoveryBrowserTime').textContent = accountStateTime(browser);
   document.getElementById('accountRecoveryCloudTime').textContent = accountStateTime(cloud).replace('browser edit', 'cloud-copy edit');
   const recommendation = browserTime > cloudTime
-    ? 'This Browser has the later edit time. Check its counts and titles, then choose it if it contains Anya\'s missing work.'
+    ? 'On This Device has the later edit time. Check its counts and titles before choosing.'
     : cloudTime > browserTime
-      ? 'Cloud has the later edit time. Check both copies; a later time does not prove it contains every edit.'
+      ? 'Saved Online has the later edit time. Check both copies; a later time does not prove it contains every edit.'
       : 'The edit times do not identify a clear winner. Export Both before choosing.';
   document.getElementById('accountRecoveryRecommendation').textContent = recommendation;
+  const removalDetails = document.getElementById('accountRecoveryRemovalDetails');
+  if (removalDetails) {
+    const review = buildCloudChangeSet(cloud, browser);
+    removalDetails.textContent = review.deletes.length
+      ? `Choosing On This Device would remove ${review.deletes.length} record${review.deletes.length === 1 ? '' : 's'} from Saved Online:\n${review.deletes.slice(0, 20).map(item => `• ${item.label || item.key}`).join('\n')}${review.deletes.length > 20 ? `\n• and ${review.deletes.length - 20} more` : ''}`
+      : 'Choosing On This Device would not remove any identified records from Saved Online.';
+  }
   document.getElementById('accountRecoveryStatus').textContent = accountStateRecovery.reason || '';
 }
 
-function openAccountStateRecovery(browserState, cloudState, revision, reason = 'Choose which copy should become current.') {
+function openAccountStateRecovery(browserState, cloudState, revision, reason = 'Choose which copy should become current.', cloudStateHash = null) {
   const safeBrowser = normalizeState(browserState || defaultState());
   const safeCloud = normalizeState(cloudState || defaultState());
   accountStateRecovery = {
     browserState:cloneAccountState(safeBrowser),
     cloudState:cloneAccountState(safeCloud),
     revision:Number(revision || 0),
+    stateHash:cloudStateHash,
+    browserReplacementReviewed:false,
     reason,
   };
   preserveAccountRecoveryCopy('Browser copy before recovery choice', safeBrowser, { revision:Number(revision || 0) });
@@ -3905,7 +3998,7 @@ async function useAccountCloudCopy() {
   if (!accountStateRecovery) return;
   const recovery = accountStateRecovery;
   const status = document.getElementById('accountRecoveryStatus');
-  if (status) status.textContent = 'Preserving the browser copy on this device before loading Cloud...';
+  if (status) status.textContent = 'Preserving this device copy before loading Saved Online...';
   preserveAccountRecoveryCopy('Browser copy before choosing cloud', recovery.browserState, { revision:recovery.revision });
   const durablePreserved = await queueDeviceStatePersistence(recovery.browserState, {
     pending:true,
@@ -3921,13 +4014,16 @@ async function useAccountCloudCopy() {
   await queueDeviceStatePersistence(state, { pending:false, label:'chosen-cloud-copy' }).catch(() => {});
   await clearDeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(() => {});
   storeServerRevision(recovery.revision);
+  serverStateHash = recovery.stateHash || serverStateHash;
+  confirmedServerState = cloneAccountState(state);
+  pendingCloudMutation = null;
   accountStateRecovery = null;
   closeModal('accountStateRecoveryModal');
   ensureTrackerSemesters();
   ensureTravelState();
   renderAll();
-  setSaveStatus('saved', 'Cloud copy restored');
-  showToast('Cloud copy restored. The browser copy remains in recovery storage.', '#6af7b0');
+  setSaveStatus('saved', 'Saved online copy loaded');
+  showToast('Saved Online was loaded. The previous device copy remains in recovery storage.', '#6af7b0');
 }
 
 async function useAccountBrowserCopy() {
@@ -3935,6 +4031,23 @@ async function useAccountBrowserCopy() {
   const recovery = accountStateRecovery;
   const status = document.getElementById('accountRecoveryStatus');
   const buttons = ['accountRecoveryCloudBtn','accountRecoveryBrowserBtn'].map(id => document.getElementById(id));
+  const lineage = {
+    mutationId:`stable-review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`,
+    baseRevision:recovery.revision,
+    baseHash:recovery.stateHash || serverStateHash,
+    changeSet:buildCloudChangeSet(recovery.cloudState, recovery.browserState),
+  };
+  if (!recovery.browserReplacementReviewed) {
+    recovery.browserReplacementReviewed = true;
+    recovery.reviewedLineage = lineage;
+    const removals = lineage.changeSet.deletes.length;
+    if (status) status.textContent = removals
+      ? `Review: using this device would remove ${removals} saved record${removals === 1 ? '' : 's'} online. Nothing has changed yet. Click Confirm Use This Device only if those removals are intentional.`
+      : 'Review: this device will update Saved online without removing any identified records. Nothing has changed yet. Click Confirm Use This Device to approve.';
+    const browserButton = document.getElementById('accountRecoveryBrowserBtn');
+    if (browserButton) browserButton.textContent = 'Confirm Use This Device';
+    return;
+  }
   buttons.forEach(button => { if (button) button.disabled = true; });
   if (status) status.textContent = 'Creating a cloud safety snapshot and saving this browser copy...';
   preserveAccountRecoveryCopy('Chosen browser copy', recovery.browserState, { revision:recovery.revision });
@@ -3944,7 +4057,7 @@ async function useAccountBrowserCopy() {
   storeServerRevision(recovery.revision);
   const saved = await saveStateToServer({
     baseRevisionOverride:recovery.revision,
-    mergeApproval:{ source:'stable-account-recovery', approvedAt:new Date().toISOString() },
+    lineageOverride:recovery.reviewedLineage || lineage,
     allowRecovery:true,
   });
   buttons.forEach(button => { if (button) button.disabled = false; });
@@ -4164,7 +4277,8 @@ function saveState() {
     setSaveStatus('error', 'Conflict - both copies preserved');
     return;
   }
-  queueDeviceStatePersistence(snapshot, { pending:true, label:'before-cloud-save' })
+  pendingCloudMutation = newCloudMutation(snapshot);
+  queueDeviceStatePersistence(snapshot, { pending:true, label:'before-cloud-save', lineage:pendingCloudMutation })
     .catch(error => console.warn('StudyQuest IndexedDB recovery save failed', error))
     .finally(() => queueServerStateSave());
 }
@@ -4191,6 +4305,7 @@ async function saveStateToServer(options = {}) {
     baseRevisionOverride = null,
     mergeApproval = null,
     allowRecovery = false,
+    lineageOverride = null,
   } = options;
   if (!canUseServerStorage()) {
     if (!silent) setSaveStatus('local', 'Saved on this device');
@@ -4217,6 +4332,7 @@ async function saveStateToServer(options = {}) {
     const baseRevision = Number.isInteger(baseRevisionOverride)
       ? baseRevisionOverride
       : serverStateRevision ?? readServerRevision() ?? 0;
+    const lineage = lineageOverride || pendingCloudMutation || newCloudMutation(snapshot);
     const res = await fetch(SERVER_STATE_ENDPOINT, {
       method: 'POST',
       credentials: 'same-origin',
@@ -4224,6 +4340,9 @@ async function saveStateToServer(options = {}) {
       body: JSON.stringify({
         state:snapshot,
         baseRevision,
+        baseHash:lineage.baseHash || serverStateHash || undefined,
+        mutationId:lineage.mutationId,
+        changeSet:lineage.changeSet,
         deviceId:'stable-app',
         merge:mergeApproval || undefined,
       }),
@@ -4235,17 +4354,22 @@ async function saveStateToServer(options = {}) {
       setSaveStatus('error', 'Sign in to back up');
       return false;
     }
-    if (res.status === 409 && result.error === 'STATE_CONFLICT') {
-      storeServerRevision(result.revision);
+    if (res.status === 409 && ['STATE_CONFLICT','BASE_HASH_MISMATCH','DESTRUCTIVE_CHANGE_REVIEW_REQUIRED'].includes(result.error)) {
+      serverStateRevision = Number(result.revision || 0);
+      serverStateHash = result.stateHash || null;
+      confirmedServerState = cloneAccountState(result.state || defaultState());
       openAccountStateRecovery(
         snapshot,
         result.state || defaultState(),
         result.revision,
-        'The cloud changed after this browser loaded. Both copies are preserved; choose before syncing.'
+        result.error === 'DESTRUCTIVE_CHANGE_REVIEW_REQUIRED'
+          ? 'This browser would remove saved information. The upload was blocked and both copies are preserved.'
+          : 'Saved online changed after this browser loaded. Both copies are preserved; review them before syncing.',
+        result.stateHash || null
       );
       if (!silent) {
         setSaveStatus('error', 'Sync choice needed');
-        showToast('Another version changed your account. Both copies are preserved for review.', '#f76a6a');
+        showToast('StudyQuest blocked an unsafe replacement. Both copies are preserved for review.', '#f76a6a');
       }
       return false;
     }
@@ -4254,6 +4378,9 @@ async function saveStateToServer(options = {}) {
     }
     if (!res.ok) throw new Error(result.error || 'Cloud backup failed');
     storeServerRevision(result.revision);
+    serverStateHash = result.stateHash || serverStateHash;
+    confirmedServerState = cloneAccountState(snapshot);
+    pendingCloudMutation = null;
     await clearDeviceOutboxThrough(snapshotUpdatedAt).catch(error => console.warn('StudyQuest outbox cleanup failed', error));
     const backedUpAt = result.savedAt ? new Date(result.savedAt) : new Date();
     if (!silent) setSaveStatus('saved', `Backed up at ${backedUpAt.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}`);
@@ -4292,7 +4419,7 @@ function bestEffortSaveBeforePageExit() {
   } catch (e) {
     console.warn('StudyQuest final save failed', e);
   }
-  queueDeviceStatePersistence(snapshot, { pending:true, label:'page-exit' }).catch(error => {
+  queueDeviceStatePersistence(snapshot, { pending:true, label:'page-exit', lineage:pendingCloudMutation }).catch(error => {
     console.warn('StudyQuest final IndexedDB save failed', error);
   });
   if (Date.now() - lastServerSaveStartedAt >= 300) {
@@ -4315,6 +4442,7 @@ async function retryPendingCloudBackup() {
     const pending = await readDeviceOutbox(authenticatedUsername());
     cloudOutboxPending = !!pending;
     if (!pending?.state) return false;
+    pendingCloudMutation = pending.lineage || pendingCloudMutation;
     if (Number(pending.updatedAt || 0) > Number(state.updatedAt || 0)) {
       state = normalizeState(pending.state);
       writeAccountBrowserState(state);
@@ -4360,6 +4488,7 @@ async function syncStateFromServer() {
       return { accountState:null, outbox:null };
     });
     cloudOutboxPending = !!deviceBundle.outbox;
+    pendingCloudMutation = deviceBundle.outbox?.lineage || null;
     const deviceCandidates = [
       { state:localStorageState, priority:1, label:'browser storage' },
       { state:deviceBundle.accountState?.state, priority:2, label:'IndexedDB recovery' },
@@ -4387,8 +4516,10 @@ async function syncStateFromServer() {
     if (!res.ok) throw new Error('Cloud state request failed');
     const serverRaw = await res.json();
     if (!serverRaw?.ok) throw new Error(serverRaw?.error || 'Cloud state request failed');
-    storeServerRevision(serverRaw.revision);
     const serverState = serverRaw.state ? normalizeState(serverRaw.state) : null;
+    serverStateRevision = Number(serverRaw.revision || 0);
+    serverStateHash = serverRaw.stateHash || null;
+    confirmedServerState = cloneAccountState(serverState || defaultState());
     const serverHasData = hasUserData(serverState);
     const browserState = accountBrowserState || state;
     const localHasData = hasUserData(browserState);
@@ -4398,7 +4529,8 @@ async function syncStateFromServer() {
         browserState,
         serverState,
         serverRaw.revision,
-        'This browser and the cloud contain different StudyQuest information. Nothing was overwritten.'
+        'On this device and Saved online contain different StudyQuest information. Nothing was overwritten.',
+        serverRaw.stateHash || null
       );
       showToast('Unsynced browser work found. Review both copies before choosing.', '#f7c06a');
       return;
@@ -4409,7 +4541,8 @@ async function syncStateFromServer() {
         browserState,
         defaultState(),
         serverRaw.revision,
-        'This device has StudyQuest information but the account cloud copy is empty. Nothing was uploaded; choose before syncing.'
+        'This device has StudyQuest information but Saved online is empty. Nothing was uploaded; review before syncing.',
+        serverRaw.stateHash || null
       );
       showToast('Device information found. Review it before creating the cloud copy.', '#f7c06a');
       return;
@@ -4417,13 +4550,16 @@ async function syncStateFromServer() {
 
     if (serverHasData) {
       state = serverState;
-      writeAccountBrowserState(state);
-      await queueDeviceStatePersistence(state, { pending:false, label:'cloud-load' }).catch(() => {});
+      const browserSaved = writeAccountBrowserState(state);
+      const durableSaved = await queueDeviceStatePersistence(state, { pending:false, label:'cloud-load' }).then(() => true).catch(() => false);
       await clearDeviceOutboxThrough(Number(state.updatedAt || 0), accountStatesEquivalent(browserState, serverState)).catch(() => {});
+      if (durableSaved) storeServerRevision(serverRaw.revision);
       ensureTrackerSemesters();
       ensureTravelState();
       renderAll();
-      setSaveStatus('saved', serverRaw.updatedAt
+      setSaveStatus(browserSaved ? 'saved' : 'local', !browserSaved && durableSaved
+        ? 'Saved in device recovery · browser storage full'
+        : serverRaw.updatedAt
         ? `Backed up at ${new Date(serverRaw.updatedAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}`
         : 'Backed up to cloud');
       return;

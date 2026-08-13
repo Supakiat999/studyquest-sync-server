@@ -120,5 +120,11 @@ assert.ok(deviceRecovery.includes('if (db) {'),
   'A missing IndexedDB recovery database must be treated as an empty device copy');
 assert.ok(!deviceRecovery.includes('indexedDB.open(DB_NAME, DB_VERSION)'),
   'The recovery page must not request an IndexedDB version change');
+assert.ok(deviceRecovery.includes('username === "admin" ? localStorage.getItem("studyquest_v3") : null'),
+  'The unscoped legacy browser key must not be exposed to normal accounts');
+assert.ok(html.includes("['STATE_CONFLICT','BASE_HASH_MISMATCH','DESTRUCTIVE_CHANGE_REVIEW_REQUIRED']"),
+  'The stable app must preserve both copies for every lineage or destructive-save conflict');
+assert.ok(!html.includes("stable-account-recovery"),
+  'The stable app must not use a whole-copy recovery bypass');
 
 console.log('Stable account recovery tests passed.');
