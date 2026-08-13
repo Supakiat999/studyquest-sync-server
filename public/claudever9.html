@@ -58,6 +58,10 @@
         window.location.replace("/data-recovery");
         return;
       }
+      if (!user.legacy && user.username === "admin" && next === "v14") {
+        window.location.replace("/v14");
+        return;
+      }
       if (!user.legacy && user.username === "admin" && !wantsStable) {
         window.location.replace("/v13");
         return;

@@ -28,6 +28,12 @@ Admin-only v13:
 https://studyquest-sync-server.onrender.com/v13
 ```
 
+Admin-only v14 Weekly customization:
+
+```text
+https://studyquest-sync-server.onrender.com/v14
+```
+
 Current Render service:
 
 ```text
@@ -37,7 +43,8 @@ studyquest-sync-server
 Deployment behavior:
 
 - Render shows this web service as `Node Free`.
-- `/v13` and `/claudever13.html` require the `admin` account. Other users are redirected to the stable app and never receive the daily v13 file.
+- `/v13` and `/claudever13.html` require the `admin` account. Other users are redirected to the stable app and never receive the v13 file.
+- `/v14` and `/claudever14.html` are a separate admin-only experimental route. They share the authenticated admin state but add only the namespaced `tracker.weeklyV14` overlay after its backup and first-use confirmation.
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` requires revision lineage. New clients send `baseRevision`, `baseHash`, a retry-safe `mutationId`, and a record-change manifest.
@@ -48,12 +55,13 @@ Deployment behavior:
 - Every unique accepted cloud revision is retained as a compressed immutable `state_versions` record. Accepted, unchanged, conflicted, blocked/rejected, recovered, restored, and oversized attempts are recorded in `state_save_events` without passwords or state contents.
 - Admin v13 sends saved edits after a 500 ms quiet period and retries its durable outbox after reopen, reconnect, focus, and visibility changes. Periodic checks remain a fallback; Chrome-versus-local-server, imported, and live differences still require a per-field Smart Merge preview.
 - `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy/tied/unverified differences require a manual choice.
-- Recovery Center reports sync times, per-field decisions, change history, and saved-state usage. Chrome, Live, and the proposed merge can be exported together before applying.
+- Recovery Center reports sync times, per-field decisions, change history, saved-state usage, Weekly column counts, and the latest five readable changes for each copy. Chrome, Live, and the proposed merge can be exported together before applying.
+- The comparison and merge views show the newest task addition, its Bangkok time, Weekly total/visible/archived columns, and a plain-language change list. The latest trustworthy values are preselected, but nothing changes until `Approve Merge` is clicked.
 - Weekly curriculum is stored inside each account's state. New Weekly users choose ICE, BALAC, Industrial Pharmacy, a custom curriculum, or a blank program instead of receiving ICE automatically.
 - Existing Weekly semesters, weeks, notes, checks, and edited course lists are migrated additively. `Edit Subjects` remains the per-semester source for that user's course names and weekdays.
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention. A snapshot is skipped when its state matches the latest stored backup.
-- `/api/version` reports the tested v13 release hash used by the daily publisher.
+- `/api/version` reports the v13 release hash; `/api/version?version=14` reports the separate v14 hash and `/v14` route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
 - Admin can preview and restore 30-day account snapshots. Full replacement requires a fresh signed preview token, creates a `pre_restore` backup, and increments the cloud revision; credentials are not changed.
 - Every signed-in user can open `/data-recovery` (with `/device-recovery` kept as an alias), choose an earlier saved version, preview exact missing/current-only/changed records, and use **Recover Missing Items**. This is additive: current records and settings are not replaced.
@@ -63,6 +71,31 @@ Deployment behavior:
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
 - Render's own Free Postgres is not a forever database plan because it expires after 30 days. For long-term no-monthly-cost storage, use Neon Free Postgres or another durable database/export plan.
+
+### v14 Release Gate
+
+v14 is published through a protected release branch and pull request. The
+process stops at the PR; Render does not deploy it until the owner reviews and
+merges it. The release must use the clean `live-smart-merge-release` checkout
+and must not touch the unrelated `live-release` or `live-v13-release` folders.
+
+Before opening the PR, run:
+
+```powershell
+npm.cmd run check
+```
+
+This validates the v14 HTML, route guards, exact v14 hash metadata, unchanged
+v13 hash, Weekly column summaries, latest-change summaries, and explicit merge
+approval. GitHub CLI authentication is performed through the official browser
+flow when needed; no credential belongs in the repository.
+
+The v14 comparison shows total, visible, and archived Weekly columns for the
+Chrome and Live copies. It calls out the newest task addition and its Bangkok
+time, then lists the latest five reliable changes. If a copy has no reliable
+history, the UI says so instead of inventing a timestamp. The latest reliable
+field winners are selected automatically, but data is not changed until
+**Approve Merge** is clicked.
 
 ## Save Locations and Statuses
 

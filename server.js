@@ -10,6 +10,7 @@ const {
   recoverMissingRecords,
   serializeStateVersion,
   stableStringify,
+  stateActivitySummary,
   stateHash,
   stateRecordDiff,
   stateSummary,
@@ -21,6 +22,8 @@ const ROOT = __dirname;
 const HTML_PATH = path.join(ROOT, "public", "claudever9.html");
 const V13_HTML_PATH = path.join(ROOT, "public", "claudever13.html");
 const V13_VERSION_PATH = path.join(ROOT, "public", "v13-version.json");
+const V14_HTML_PATH = path.join(ROOT, "public", "claudever14.html");
+const V14_VERSION_PATH = path.join(ROOT, "public", "v14-version.json");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
 const WEEKLY_STUDY_PLANNER_LITE_PATH = path.join(ROOT, "public", "weekly-study-planner.html");
@@ -114,6 +117,12 @@ function sendJson(req, res, status, data, headers = {}) {
 
 function authenticatedV13Html(user) {
   const html = fs.readFileSync(V13_HTML_PATH, "utf8");
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
+  return html.replace("</head>", `${bootstrap}\n</head>`);
+}
+
+function authenticatedV14Html(user) {
+  const html = fs.readFileSync(V14_HTML_PATH, "utf8");
   const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
@@ -1532,6 +1541,7 @@ function stateConflictPayload(row, error = "STATE_CONFLICT", extra = {}) {
     updatedAt: row?.state_updated_at || row?.updated_at || null,
     stateBytes: Buffer.byteLength(JSON.stringify(currentState)),
     maxStateBytes: MAX_STATE_BYTES,
+    activity: stateActivitySummary(currentState),
     serverTime: new Date().toISOString(),
     ...extra,
   };
@@ -1557,6 +1567,7 @@ async function handleVersionedState(req, res) {
       updatedAt: user.state_updated_at || user.updated_at || null,
       stateBytes: Number(user.state_bytes || 0),
       maxStateBytes: MAX_STATE_BYTES,
+      activity: stateActivitySummary(user.state),
       serverTime: new Date().toISOString(),
     });
     return;
@@ -1669,6 +1680,7 @@ async function handleVersionedState(req, res) {
           savedAt: row.state_updated_at || row.updated_at || null,
           stateBytes: Number(row.state_bytes || 0),
           maxStateBytes: MAX_STATE_BYTES,
+          activity: stateActivitySummary(row.state),
           serverTime: new Date().toISOString(),
           requiresRefresh: false,
         });
@@ -1769,7 +1781,7 @@ async function handleVersionedState(req, res) {
       return;
     }
 
-    const approvedRecoverySources = new Set(["v13-smart-merge"]);
+    const approvedRecoverySources = new Set(["v13-smart-merge", "v14-smart-merge"]);
     const mergeApproved = approvedRecoverySources.has(body?.merge?.source) && body?.merge?.approvedAt;
     const preMergeBackupCreated = mergeApproved ? await createMergeStateBackup(client, row) : false;
     await createDailyStateBackup(client, row);
@@ -1813,6 +1825,7 @@ async function handleVersionedState(req, res) {
       savedAt: saved.rows[0].state_updated_at,
       stateBytes,
       maxStateBytes: MAX_STATE_BYTES,
+      activity: stateActivitySummary(incomingState),
       serverTime: new Date().toISOString(),
       preMergeBackupCreated,
     });
@@ -2257,6 +2270,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/v14" || url.pathname === "/claudever14.html") {
+      const user = await currentUser(req);
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?next=v14" });
+        return;
+      }
+      if (user.username !== ADMIN_USERNAME) {
+        send(req, res, 302, "Admin v14 only", { location: "/app.html?stable=1" });
+        return;
+      }
+      send(req, res, 200, authenticatedV14Html(user), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
     if (url.pathname === "/device-recovery" || url.pathname === "/data-recovery") {
       const user = await currentUser(req);
       if (!user || user.sync_device_id) {
@@ -2436,8 +2463,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/version") {
-      let version = { version: 13, hash: null, releasedAt: null };
-      try { version = JSON.parse(fs.readFileSync(V13_VERSION_PATH, "utf8")); } catch {}
+      const versionNumber = url.searchParams.get("version") === "14" ? 14 : 13;
+      const versionPath = versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
+      let version = { version: versionNumber, hash: null, releasedAt: null, source: versionNumber === 14 ? "claudever14.html" : "claudever13.html" };
+      try { version = JSON.parse(fs.readFileSync(versionPath, "utf8")); } catch {}
       sendJson(req, res, 200, { ok: true, ...version });
       return;
     }
@@ -2452,6 +2481,19 @@ const server = http.createServer(async (req, res) => {
         ]);
         databaseBytes = Number(sizeResult.rows[0]?.bytes || 0);
         stateBytes = healthUser ? Number(healthUser.state_bytes || 0) : null;
+        const activity = healthUser ? stateActivitySummary(healthUser.state) : null;
+        sendJson(req, res, 200, {
+          ok: true,
+          auth: true,
+          db: "postgres",
+          serverTime: new Date().toISOString(),
+          maxStateBytes: MAX_STATE_BYTES,
+          maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
+          stateBytes,
+          databaseBytes,
+          activity,
+        });
+        return;
       }
       sendJson(req, res, 200, {
         ok: true,
@@ -2462,6 +2504,7 @@ const server = http.createServer(async (req, res) => {
         maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
         stateBytes,
         databaseBytes,
+        activity: null,
       });
       return;
     }
