@@ -9518,10 +9518,8 @@ function renderRecoveryCenter() {
   const sizeLevel = size.percent >= 95 ? 'Critical' : size.percent >= 80 ? 'Warning' : 'Healthy';
   const saveHealth = corrupt ? 'Recovery needed' : liveSync.conflict ? 'Sync choice needed' : pendingServerSync || liveSync.pending ? 'Local saved · sync pending' : 'Ready';
   const liveStatus = liveSync.conflict ? 'Conflict - both preserved' : liveSync.paired || isHostedAppHost() ? liveSync.status || 'Connected' : 'Not paired';
-  const release = liveSync.release || null;
-  const releaseState = release?.job?.status || release?.status || (release?.hash ? 'deployed' : 'not run');
-  const localHash = liveSync.localHash || release?.local?.hash || null;
-  const publishedHash = liveSync.publishedHash || release?.hash || null;
+  const localHash = liveSync.localHash || null;
+  const publishedHash = liveSync.publishedHash || null;
   const hashesMatch = !!localHash && !!publishedHash && localHash === publishedHash;
   const comparison = liveSync.comparison;
   const comparisonStatus = liveSync.conflict
@@ -9599,7 +9597,7 @@ function renderRecoveryCenter() {
     </div>
     <div class="recovery-section">
       <div class="recovery-section-title">v14 Release</div>
-      <div class="recovery-empty">${release ? `${escapeHtml(releaseState)} · ${escapeHtml(formatRecoveryDate(release.job?.finishedAt || release.finishedAt || release.job?.startedAt || release.startedAt))}${release.commit ? ' · ' + escapeHtml(String(release.commit).slice(0, 10)) : ''}${release.job?.message || release.message ? '<br>' + escapeHtml(release.job?.message || release.message) : ''}` : 'No local release run recorded yet.'}</div>
+      <div class="recovery-empty">Protected PR gate · Local v14 ${escapeHtml(shortReleaseHash(localHash))} · Live v14 ${escapeHtml(shortReleaseHash(publishedHash))}. Render deployment stays paused until the release PR is reviewed and merged.</div>
       ${isLocalLabHost() ? `<div class="recovery-actions" style="margin-top:9px;">
         <button class="btn btn-ghost btn-sm" onclick="refreshLiveSyncStatus()">Check Live v14</button>
       </div>` : ''}
