@@ -20,6 +20,7 @@ StudyQuest has separate device and cloud copies:
 | Local admin v13 | `http://127.0.0.1:3000/claudever13.html` | Admin's authoritative Chrome test environment on this laptop |
 | Stable live app | `https://studyquest-sync-server.onrender.com/app.html?stable=1` | Normal app for Anya and other users |
 | Live admin v13 | `https://studyquest-sync-server.onrender.com/v13` | Admin-only hosted v13 |
+| Live v14 Weekly customization | `https://studyquest-sync-server.onrender.com/v14` | Signed-in account route; each user sees only their own data |
 | Data recovery | `https://studyquest-sync-server.onrender.com/data-recovery` | Own-version missing-item recovery plus device-copy inspection/export |
 | Render server | `studyquest-sync-server` | Login, account isolation, state API, recovery API |
 | Neon PostgreSQL | Private `DATABASE_URL` | Durable account state, revisions, snapshots, recovery records |
@@ -504,6 +505,39 @@ The `code50` organization shown on GitHub's authorization page is an
 organization associated with the GitHub account. It is not a password, login
 code, or a person receiving the repository. Repository access is governed by
 the permissions shown on the authorization page and GitHub account settings.
+
+## 10A. Safe v14 Release
+
+v14 is a separate Weekly customization route. It is not the default app and it
+does not replace v13. The release branch must contain only the tested
+`public/claudever14.html`, `public/v14-version.json`, the v14 route/status
+support, tests, and documentation.
+
+Run the release checkout checks before opening a PR:
+
+```powershell
+npm.cmd run check
+```
+
+The checks confirm that:
+
+- v13's hosted SHA-256 is unchanged;
+- v14 inline JavaScript, route metadata, and version hash are valid;
+- `/v14` requires a normal signed-in account session, rejects logged-out and device-token requests, and follows `STUDYQUEST_V14_ACCESS` (`off`, `admin`, or `all`);
+- Weekly column counts and latest-change summaries are present;
+- merge approval remains explicit and revision-protected;
+- no browser storage is cleared or silently replaced.
+
+The v14 status view reports total, visible, and archived Weekly columns for
+each copy. It also shows the latest five reliable changes and calls out the
+newest task addition with its Bangkok time. Missing legacy history is shown as
+unavailable rather than guessed. A comparison remains read-only until the
+user resolves uncertain fields and clicks **Approve Merge**.
+
+For this release, create a protected branch from the current `origin/main`,
+push it after GitHub browser authentication, and open a PR. Stop at the PR:
+Render must not deploy v14 until the owner reviews and merges it. Never force
+push, and never use the dirty `live-release` or `live-v13-release` folders.
 
 ## 11. Emergency Recovery
 
