@@ -28,7 +28,7 @@ Admin-only v13:
 https://studyquest-sync-server.onrender.com/v13
 ```
 
-Admin-only v14 Weekly customization:
+Authenticated-user v14 Weekly customization:
 
 ```text
 https://studyquest-sync-server.onrender.com/v14
@@ -44,7 +44,8 @@ Deployment behavior:
 
 - Render shows this web service as `Node Free`.
 - `/v13` and `/claudever13.html` require the `admin` account. Other users are redirected to the stable app and never receive the v13 file.
-- `/v14` and `/claudever14.html` are a separate admin-only experimental route. They share the authenticated admin state but add only the namespaced `tracker.weeklyV14` overlay after its backup and first-use confirmation.
+- `/v14` and `/claudever14.html` are a separate authenticated-user experimental route. Every signed-in account sees only its own state and adds only the namespaced `tracker.weeklyV14` overlay after its backup and first-use confirmation. The `STUDYQUEST_V14_ACCESS` switch supports `off`, `admin`, and `all`; the release uses `all`, with `off` available as an emergency stop.
+- The stable app shows a `Try v14` button after login. It explains the safe first-use step and offers a backup before opening v14. Logged-out requests return to login, and bearer device tokens cannot open v14.
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` requires revision lineage. New clients send `baseRevision`, `baseHash`, a retry-safe `mutationId`, and a record-change manifest.
@@ -61,7 +62,7 @@ Deployment behavior:
 - Existing Weekly semesters, weeks, notes, checks, and edited course lists are migrated additively. `Edit Subjects` remains the per-semester source for that user's course names and weekdays.
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention. A snapshot is skipped when its state matches the latest stored backup.
-- `/api/version` reports the v13 release hash; `/api/version?version=14` reports the separate v14 hash and `/v14` route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
+- `/api/version` reports the v13 release hash; `/api/version?version=14` reports the separate v14 hash, access mode, and `/v14` route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
 - Admin can preview and restore 30-day account snapshots. Full replacement requires a fresh signed preview token, creates a `pre_restore` backup, and increments the cloud revision; credentials are not changed.
 - Every signed-in user can open `/data-recovery` (with `/device-recovery` kept as an alias), choose an earlier saved version, preview exact missing/current-only/changed records, and use **Recover Missing Items**. This is additive: current records and settings are not replaced.
@@ -85,7 +86,7 @@ Before opening the PR, run:
 npm.cmd run check
 ```
 
-This validates the v14 HTML, route guards, exact v14 hash metadata, unchanged
+This validates the v14 HTML, authenticated-user route guards, exact v14 hash metadata, unchanged
 v13 hash, Weekly column summaries, latest-change summaries, and explicit merge
 approval. GitHub CLI authentication is performed through the official browser
 flow when needed; no credential belongs in the repository.

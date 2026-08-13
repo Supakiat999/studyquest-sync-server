@@ -20,7 +20,7 @@ StudyQuest has separate device and cloud copies:
 | Local admin v13 | `http://127.0.0.1:3000/claudever13.html` | Admin's authoritative Chrome test environment on this laptop |
 | Stable live app | `https://studyquest-sync-server.onrender.com/app.html?stable=1` | Normal app for Anya and other users |
 | Live admin v13 | `https://studyquest-sync-server.onrender.com/v13` | Admin-only hosted v13 |
-| Live admin v14 | `https://studyquest-sync-server.onrender.com/v14` | Admin-only Weekly customization test route |
+| Live v14 Weekly customization | `https://studyquest-sync-server.onrender.com/v14` | Signed-in account route; each user sees only their own data |
 | Data recovery | `https://studyquest-sync-server.onrender.com/data-recovery` | Own-version missing-item recovery plus device-copy inspection/export |
 | Render server | `studyquest-sync-server` | Login, account isolation, state API, recovery API |
 | Neon PostgreSQL | Private `DATABASE_URL` | Durable account state, revisions, snapshots, recovery records |
@@ -523,7 +523,7 @@ The checks confirm that:
 
 - v13's hosted SHA-256 is unchanged;
 - v14 inline JavaScript, route metadata, and version hash are valid;
-- `/v14` requires the signed-in `admin` account;
+- `/v14` requires a normal signed-in account session, rejects logged-out and device-token requests, and follows `STUDYQUEST_V14_ACCESS` (`off`, `admin`, or `all`);
 - Weekly column counts and latest-change summaries are present;
 - merge approval remains explicit and revision-protected;
 - no browser storage is cleared or silently replaced.

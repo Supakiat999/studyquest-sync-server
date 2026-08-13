@@ -7020,6 +7020,20 @@ function isHostedAppHost() {
   return canUseServerStorage() && /\.onrender\.com$/i.test(window.location.hostname);
 }
 
+function isAdminAccount() {
+  return isLocalLabHost() || AUTHENTICATED_STORAGE_USERNAME === 'admin';
+}
+
+function liveAccountLabel() {
+  return isAdminAccount() ? 'Live admin' : 'Saved online';
+}
+
+function pendingCloudStatusText() {
+  return isAdminAccount() && isLocalLabHost()
+    ? 'Saved locally · admin sync pending'
+    : 'Saved locally · cloud backup pending';
+}
+
 function getLiveSyncMeta() {
   return safeReadJson(LIVE_SYNC_META_STORAGE_KEY, {});
 }
@@ -7032,13 +7046,14 @@ function setLiveSyncMeta(patch) {
 
 function renderV13ModeUI() {
   const hosted = isHostedAppHost();
+  const admin = isAdminAccount();
   const label = document.getElementById('v13ModeLabel');
   const title = document.getElementById('v13ModeTitle');
   const copy = document.getElementById('v13ModeCopy');
-  if (label) label.textContent = hosted ? 'Admin v14' : 'Local v14';
-  if (title) title.textContent = hosted ? 'Admin v14 beta' : 'Local v14 test lab';
+  if (label) label.textContent = hosted ? (admin ? 'Admin v14' : 'v14 Weekly') : 'Local v14';
+  if (title) title.textContent = hosted ? (admin ? 'Admin v14 beta' : 'StudyQuest v14') : 'Local v14 test lab';
   if (copy) copy.textContent = hosted
-    ? 'Experimental v14 Weekly tools. Account data is revision-protected and the stable app remains available.'
+    ? `${admin ? 'Experimental admin' : 'Experimental'} v14 Weekly tools. Only this signed-in account data is used, and the stable app remains available.`
     : 'Local v14 adds only a recoverable Weekly customization overlay. Export before major experiments.';
 }
 
@@ -7364,7 +7379,7 @@ async function saveStateToServer() {
     if (!res.ok) throw new Error('Server save failed');
     pendingServerSync = false;
     setSaveMeta({ latestServerSaveAt: new Date().toISOString(), latestLocalServerSaveAt: new Date().toISOString() });
-    setSaveStatus(liveSync.paired ? 'saving' : 'local', liveSync.paired ? 'Saved locally · admin sync pending' : 'Saved locally · live not paired');
+    setSaveStatus(liveSync.paired ? 'saving' : 'local', liveSync.paired ? pendingCloudStatusText() : 'Saved locally · live not paired');
     if (liveSync.paired && (liveSync.pending || getLiveSyncMeta().pending)) queueLiveCloudSave();
   } catch (e) {
     console.warn('StudyQuest server save failed', e);
@@ -7541,7 +7556,7 @@ async function saveStateToCloud() {
       liveSync.status = 'offline';
       liveSync.message = e?.name === 'AbortError' ? 'Live server timed out' : String(e?.message || e);
       setLiveSyncMeta({ pending: true, lastError: liveSync.message });
-      setSaveStatus(e?.code === 'STATE_TOO_LARGE' ? 'error' : 'offline', e?.code === 'STATE_TOO_LARGE' ? 'Saved locally · cloud size limit exceeded' : 'Saved locally · admin sync pending');
+      setSaveStatus(e?.code === 'STATE_TOO_LARGE' ? 'error' : 'offline', e?.code === 'STATE_TOO_LARGE' ? 'Saved locally · cloud size limit exceeded' : pendingCloudStatusText());
       recordAppError('live-save', e);
     }
     return { ok: false, error: liveSync.message };
@@ -8345,7 +8360,7 @@ function renderSmartMergeGroups(items, otherLabel) {
 function renderSmartMergeReport(preview) {
   if (!preview?.smartMerge) return '<div class="recovery-empty">Smart merge preview unavailable.</div>';
   const smart = preview.smartMerge;
-  const otherLabel = preview.cloudLabel || 'Live admin';
+  const otherLabel = preview.cloudLabel || liveAccountLabel();
   const browserLabel = smartMergeBrowserLabel();
   const indexed = smart.decisions.map((decision, index) => ({ decision, index }));
   const unresolved = indexed.filter(item => !item.decision.selected);
@@ -8412,14 +8427,15 @@ function renderComparisonNameList(title, values) {
 function renderStateComparisonReport(comparison, chromeState, liveState) {
   if (!comparison) return '<div class="recovery-empty">Comparison unavailable.</div>';
   const changedSections = comparison.sections.filter(item => item.differenceCount);
+  const otherLabel = liveAccountLabel();
   const summary = comparison.different
     ? `${comparison.differenceCount} saved item${comparison.differenceCount === 1 ? '' : 's'} differ across ${comparison.changedSectionCount} area${comparison.changedSectionCount === 1 ? '' : 's'}. Review the names and fields below before choosing a copy.`
-    : 'Chrome and the live admin account contain the same user data. Save timestamps and navigation-only settings are ignored.';
+    : `This device and ${otherLabel} contain the same user data. Save timestamps and navigation-only settings are ignored.`;
   return `
     <div class="sync-compare-summary${comparison.different ? '' : ' is-equal'}"><strong>${comparison.different ? 'Differences found' : 'Both versions match'}</strong><br>${escapeHtml(summary)}<br><span class="recovery-row-meta" style="white-space:normal;">Compared ${escapeHtml(formatRecoveryDate(comparison.comparedAt))}</span></div>
     <div class="sync-conflict-grid">
       <div class="sync-conflict-card"><strong>Chrome on this PC</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.chromeUpdatedAt))}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(chromeState || {}))}</div>${renderActivitySummary(chromeState || {}, 'Chrome on this PC')}</div>
-      <div class="sync-conflict-card"><strong>Live admin account</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div>${renderActivitySummary(liveState || {}, 'Live admin account')}</div>
+      <div class="sync-conflict-card"><strong>${escapeHtml(otherLabel)}</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div>${renderActivitySummary(liveState || {}, otherLabel)}</div>
     </div>
     ${changedSections.length ? `<div class="sync-diff-list">${changedSections.map(section => `
       <details class="sync-diff-section" open>
@@ -8524,7 +8540,7 @@ function openLiveSyncConflict(conflict) {
     liveSync.lastComparedAt = conflict.comparison.comparedAt;
     if (conflict.sourceType === 'local-server') {
       closeModal('liveSyncConflictModal');
-      setSaveStatus(liveSync.pending ? 'local' : 'saved', liveSync.pending ? 'Saved locally · admin sync pending' : 'Chrome and local server match');
+      setSaveStatus(liveSync.pending ? 'local' : 'saved', liveSync.pending ? pendingCloudStatusText() : (isAdminAccount() ? 'Chrome and local server match' : 'Device and saved online match'));
       return false;
     }
     liveSync.pending = false;
@@ -8590,13 +8606,13 @@ function exportSmartMergeBundle() {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   downloadJsonFile(`studyquest-smart-merge-${stamp}.json`, {
     exportedAt:new Date().toISOString(),
-    otherSource:preview.cloudLabel || 'Live admin',
+    otherSource:preview.cloudLabel || liveAccountLabel(),
     chrome:preview.localState,
     other:preview.cloudState,
     merged:preview.smartMerge.mergedState,
     decisions:preview.smartMerge.decisions,
   });
-  showToast(`Browser, ${preview.cloudLabel || 'Live'}, and merged copies exported together.`, '#6af7b0');
+  showToast(`Browser, ${preview.cloudLabel || liveAccountLabel()}, and merged copies exported together.`, '#6af7b0');
 }
 
 function refreshSmartMergePreview() {
@@ -8983,6 +8999,10 @@ async function createFirstPairingSafetyBundle(cloudState, revision, updatedAt) {
 }
 
 async function generateLivePairingCode() {
+  if (!isAdminAccount()) {
+    showToast('Only the admin laptop can create pairing codes.', '#f7c06a');
+    return;
+  }
   try {
     const res = await fetch('/api/admin/pairing-code', {
       method: 'POST',
@@ -9113,6 +9133,7 @@ function recoverySummaryText(summary) {
 }
 
 async function adminRecoveryFetch(path, options = {}) {
+  if (!isAdminAccount()) throw new Error('Admin access required.');
   const response = await fetch(path, {
     credentials: 'same-origin',
     cache: 'no-store',
@@ -9129,7 +9150,7 @@ async function adminRecoveryFetch(path, options = {}) {
 }
 
 async function loadAccountRecoverySnapshots(username, options = {}) {
-  if (!isHostedAppHost() || !username) return;
+  if (!isHostedAppHost() || !isAdminAccount() || !username) return;
   accountRecovery.selectedUsername = username;
   if (!options.silent) {
     accountRecovery.snapshots = [];
@@ -9150,7 +9171,7 @@ async function loadAccountRecoverySnapshots(username, options = {}) {
 }
 
 async function refreshAccountRecoveryAdmin() {
-  if (!isHostedAppHost() || accountRecovery.loading) return;
+  if (!isHostedAppHost() || !isAdminAccount() || accountRecovery.loading) return;
   accountRecovery.loading = true;
   accountRecovery.error = '';
   renderRecoveryCenter();
@@ -9383,7 +9404,7 @@ function recoverAnyaIncidentAdditively() {
 }
 
 function renderAccountRecoveryAdmin() {
-  if (!isHostedAppHost()) return '';
+  if (!isHostedAppHost() || !isAdminAccount()) return '';
   const snapshotUserOptions = accountRecovery.users
     .map(user => `<option value="${escapeHtml(user.username)}" ${user.username === accountRecovery.selectedUsername ? 'selected' : ''}>${escapeHtml(user.display_name || user.username)}</option>`)
     .join('');
@@ -9559,7 +9580,7 @@ function renderRecoveryCenter() {
     <div class="recovery-section">
       <div class="recovery-section-title">Latest changes by version</div>
       ${renderActivitySummary(state, 'This Chrome copy')}
-      ${comparisonOtherState ? renderActivitySummary(comparisonOtherState, 'Live admin copy') : comparisonOtherActivity ? renderActivitySummaryData(comparisonOtherActivity, 'Live admin copy') : '<div class="recovery-empty" style="margin-top:8px;">Compare Chrome and Live to see the latest changes in the other copy.</div>'}
+      ${comparisonOtherState ? renderActivitySummary(comparisonOtherState, liveAccountLabel() + ' copy') : comparisonOtherActivity ? renderActivitySummaryData(comparisonOtherActivity, liveAccountLabel() + ' copy') : '<div class="recovery-empty" style="margin-top:8px;">Compare this device and Saved online to see the latest changes in the other copy.</div>'}
     </div>
     <div class="recovery-section">
       <div class="recovery-section-title">Storage Usage</div>
@@ -9569,8 +9590,8 @@ function renderRecoveryCenter() {
     </div>
     ${renderAccountRecoveryAdmin()}
     <div class="recovery-section">
-      <div class="recovery-section-title">Live Admin Sync</div>
-      ${isHostedAppHost() ? `
+      <div class="recovery-section-title">${isAdminAccount() ? 'Live Admin Sync' : 'Cloud Sync'}</div>
+      ${isHostedAppHost() && isAdminAccount() ? `
         <div class="recovery-empty">Two-way sync checks the cloud every 30 minutes. Live edits save in this browser immediately, then safely reach paired Chrome through revision-protected cloud sync.</div>
         <div class="recovery-actions" style="margin-top:9px;">
           <button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:'manual'})">Sync Now</button>
@@ -9578,6 +9599,12 @@ function renderRecoveryCenter() {
           <button class="btn btn-ghost btn-sm" onclick="openStableApp()">Open Stable App</button>
         </div>
         ${liveSync.pairingCode ? `<div class="sync-conflict-card" style="margin-top:10px;"><div class="recovery-label">One-time code</div><div class="sync-code">${escapeHtml(liveSync.pairingCode)}</div><div class="recovery-row-meta" style="white-space:normal;">Expires ${escapeHtml(formatRecoveryDate(liveSync.pairingExpiresAt))}</div></div>` : ''}
+      ` : isHostedAppHost() ? `
+        <div class="recovery-empty">Your changes are saved to this account online. Device saves happen first; cloud backup retries automatically after a short quiet period, reconnect, or reopen. No pairing code is needed.</div>
+        <div class="recovery-actions" style="margin-top:9px;">
+          <button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:'manual'})">Sync Now</button>
+          <button class="btn btn-ghost btn-sm" onclick="openStableApp()">Open Stable App</button>
+        </div>
       ` : liveSync.paired ? `
         <div class="recovery-empty">Paired as <strong>${escapeHtml(liveSync.username || 'admin')}</strong>${liveSync.deviceName ? ' · ' + escapeHtml(liveSync.deviceName) : ''}. Chrome and live exchange changes every 30 minutes. Browser and disk saves remain immediate.</div>
         <div class="recovery-actions" style="margin-top:9px;">
@@ -9878,7 +9905,7 @@ async function syncLiveState(options = {}) {
     liveSync.status = 'offline';
     liveSync.pending = !!getLiveSyncMeta().pending;
     liveSync.message = e?.name === 'AbortError' ? 'Live server timed out while waking.' : String(e?.message || e);
-    setSaveStatus('offline', liveSync.pending ? 'Saved locally · admin sync pending' : 'Live server unavailable');
+    setSaveStatus('offline', liveSync.pending ? pendingCloudStatusText() : 'Live server unavailable');
     recordAppError('live-load', e);
     return { ok: false, error: liveSync.message };
   } finally {

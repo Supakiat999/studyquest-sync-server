@@ -31,6 +31,10 @@ const WEEKLY_STUDY_PLANNER_FULL_PATH = path.join(ROOT, "public", "weekly-study-p
 const SESSION_COOKIE = "sq_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const ADMIN_USERNAME = "admin";
+const V14_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V14_ACCESS || "admin").trim().toLowerCase();
+  return ["off", "admin", "all"].includes(configured) ? configured : "admin";
+})();
 const USERNAME_PATTERN = /^[a-z0-9_-]{3,32}$/;
 const PASSWORD_MIN_LENGTH = 8;
 const PBKDF2_ITERATIONS = 210000;
@@ -125,6 +129,11 @@ function authenticatedV14Html(user) {
   const html = fs.readFileSync(V14_HTML_PATH, "utf8");
   const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
+}
+
+function canAccessV14(user) {
+  if (!user || user.sync_device_id || V14_ACCESS_MODE === "off") return false;
+  return V14_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
 }
 
 function readBody(req, maxBytes = MAX_AUTH_BODY_BYTES) {
@@ -2270,18 +2279,18 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname === "/v14" || url.pathname === "/claudever14.html") {
-      const user = await currentUser(req);
-      if (!user || user.sync_device_id) {
-        send(req, res, 302, "Login required", { location: "/app.html?next=v14" });
+      if (url.pathname === "/v14" || url.pathname === "/claudever14.html") {
+        const user = await currentUser(req);
+        if (!user || user.sync_device_id) {
+          send(req, res, 302, "Login required", { location: "/app.html?next=v14" });
+          return;
+        }
+        if (!canAccessV14(user)) {
+          send(req, res, 302, V14_ACCESS_MODE === "off" ? "v14 is temporarily unavailable" : "v14 is not enabled for this account", { location: "/app.html?stable=1" });
+          return;
+        }
+        send(req, res, 200, authenticatedV14Html(user), { "content-type": "text/html; charset=utf-8" });
         return;
-      }
-      if (user.username !== ADMIN_USERNAME) {
-        send(req, res, 302, "Admin v14 only", { location: "/app.html?stable=1" });
-        return;
-      }
-      send(req, res, 200, authenticatedV14Html(user), { "content-type": "text/html; charset=utf-8" });
-      return;
     }
 
     if (url.pathname === "/device-recovery" || url.pathname === "/data-recovery") {
@@ -2462,14 +2471,18 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname === "/api/version") {
-      const versionNumber = url.searchParams.get("version") === "14" ? 14 : 13;
-      const versionPath = versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
-      let version = { version: versionNumber, hash: null, releasedAt: null, source: versionNumber === 14 ? "claudever14.html" : "claudever13.html" };
-      try { version = JSON.parse(fs.readFileSync(versionPath, "utf8")); } catch {}
-      sendJson(req, res, 200, { ok: true, ...version });
-      return;
-    }
+      if (url.pathname === "/api/version") {
+        const versionNumber = url.searchParams.get("version") === "14" ? 14 : 13;
+        const versionPath = versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
+        let version = { version: versionNumber, hash: null, releasedAt: null, source: versionNumber === 14 ? "claudever14.html" : "claudever13.html" };
+        try { version = JSON.parse(fs.readFileSync(versionPath, "utf8")); } catch {}
+        sendJson(req, res, 200, {
+          ok: true,
+          ...version,
+          ...(versionNumber === 14 ? { accessMode: V14_ACCESS_MODE, adminOnly: V14_ACCESS_MODE !== "all" } : {}),
+        });
+        return;
+      }
 
     if (url.pathname === "/api/heartbeat" || url.pathname === "/api/health") {
       let databaseBytes = null;
@@ -2482,12 +2495,13 @@ const server = http.createServer(async (req, res) => {
         databaseBytes = Number(sizeResult.rows[0]?.bytes || 0);
         stateBytes = healthUser ? Number(healthUser.state_bytes || 0) : null;
         const activity = healthUser ? stateActivitySummary(healthUser.state) : null;
-        sendJson(req, res, 200, {
-          ok: true,
-          auth: true,
-          db: "postgres",
-          serverTime: new Date().toISOString(),
-          maxStateBytes: MAX_STATE_BYTES,
+          sendJson(req, res, 200, {
+            ok: true,
+            auth: true,
+            db: "postgres",
+            serverTime: new Date().toISOString(),
+            v14AccessMode: V14_ACCESS_MODE,
+            maxStateBytes: MAX_STATE_BYTES,
           maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
           stateBytes,
           databaseBytes,
@@ -2500,6 +2514,7 @@ const server = http.createServer(async (req, res) => {
         auth: true,
         db: "postgres",
         serverTime: new Date().toISOString(),
+        v14AccessMode: V14_ACCESS_MODE,
         maxStateBytes: MAX_STATE_BYTES,
         maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
         stateBytes,

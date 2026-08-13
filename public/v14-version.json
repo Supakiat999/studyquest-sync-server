@@ -1,8 +1,10 @@
 {
   "version": 14,
-  "hash": "8e7e856e38c3ec1c151d21bda174ec775755a5995bfe3fa4a3021c1fef6c30b6",
+  "hash": "9a4e7d2547db64d315f556dbc0b7ef061bb5ee0262f0413157cc1b7abad8ff62",
   "releasedAt": null,
   "source": "claudever14.html",
   "route": "/v14",
-  "adminOnly": true
+  "adminOnly": false,
+  "access": "authenticated",
+  "accessMode": "all"
 }

@@ -58,10 +58,10 @@
         window.location.replace("/data-recovery");
         return;
       }
-      if (!user.legacy && user.username === "admin" && next === "v14") {
-        window.location.replace("/v14");
-        return;
-      }
+        if (!user.legacy && next === "v14") {
+          window.location.replace("/v14");
+          return;
+        }
       if (!user.legacy && user.username === "admin" && !wantsStable) {
         window.location.replace("/v13");
         return;
@@ -400,6 +400,8 @@
   }
   #v13BetaHeaderButton { display: none; }
   html[data-studyquest-account="admin"] #v13BetaHeaderButton { display: inline-flex; }
+  #v14TryHeaderButton { display: none; }
+  html[data-studyquest-account] #v14TryHeaderButton { display: inline-flex; }
   #studyquestLoginGate {
     position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center;
     padding: 24px; background: #0d0f1a; color: #e8eaf6; font-family: 'Syne', system-ui, sans-serif;
@@ -2375,6 +2377,7 @@
       </div>
       <button class="btn btn-ghost" onclick="openQuickCapture()" title="Quick add task (Q)">Quick Capture</button>
       <button class="btn btn-ghost" id="v13BetaHeaderButton" onclick="openV13BetaModal()" title="Open the admin-only v13">v13 Beta</button>
+      <button class="btn btn-ghost" id="v14TryHeaderButton" onclick="openV14BetaModal()" title="Try the v14 Weekly customization">Try v14</button>
       <button class="btn btn-primary" onclick="openCreateTask()">+ New Task</button>
       <button class="btn btn-ghost logout-header-btn" onclick="studyquestLogout()" title="Sign out of this StudyQuest account">Logout</button>
       <button class="profile-btn" id="profileBtn" onclick="openProfileSettings()" title="Profile and settings">SQ</button>
@@ -3301,6 +3304,19 @@
   </div>
 </div>
 
+<!-- V14 BETA MODAL -->
+<div class="modal-overlay" id="v14BetaModal">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-title">Try StudyQuest v14?</div>
+    <div style="font-size:13px;line-height:1.6;color:var(--text-dim);white-space:pre-wrap;">v14 adds optional Weekly columns and time estimates to your own account. It keeps your existing tasks, grades, notes, files, trips, and Weekly data. The first activation creates a recovery copy and asks before adding anything.</div>
+    <div class="modal-btns" style="flex-wrap:wrap;">
+      <button class="btn btn-ghost" type="button" onclick="closeV14BetaModal()">Cancel</button>
+      <button class="btn btn-ghost" type="button" onclick="exportV14BetaBackup()">Export Backup</button>
+      <button class="btn btn-primary" type="button" id="v14BetaOpenBtn" onclick="openV14Beta()">Open v14</button>
+    </div>
+  </div>
+</div>
+
 <!-- APP CONFIRM MODAL -->
 <div class="modal-overlay" id="appConfirmModal">
   <div class="modal" style="max-width:420px;">
@@ -3643,6 +3659,36 @@ async function persistDeviceState(snapshot, { pending = true, label = 'device-sa
     return true;
   } finally {
     db.close();
+  }
+}
+
+function openV14BetaModal() {
+  openModal('v14BetaModal');
+}
+
+function closeV14BetaModal() {
+  closeModal('v14BetaModal');
+}
+
+function exportV14BetaBackup() {
+  exportData();
+  showToast('Backup downloaded. Open v14 when you are ready.', '#6af7b0');
+}
+
+async function openV14Beta() {
+  const btn = document.getElementById('v14BetaOpenBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Opening...';
+  }
+  try {
+    if (typeof window.studyquestFlushSave === 'function') {
+      await window.studyquestFlushSave().catch(() => {});
+    } else if (typeof saveStateToServer === 'function') {
+      await saveStateToServer().catch(() => {});
+    }
+  } finally {
+    window.location.href = '/v14';
   }
 }
 
