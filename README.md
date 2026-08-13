@@ -82,13 +82,15 @@ StudyQuest saves to the current device first. Cloud backup is a separate, revisi
 
 Every edit writes to IndexedDB and account-scoped browser storage immediately. Online backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale browser cannot replace an online copy merely because its revision marker matches: hash lineage and record-removal checks are also required. Normal accounts remain isolated and never receive the admin laptop bridge.
 
-### Verified Live Release - August 12, 2026
+### Verified Save-Safety Recovery - August 13, 2026
 
-- Commit `b4c7768d6e5c81d766ce5183e94796b010d0da51` deployed successfully from `main`.
-- `/api/version` reported `1d5888ff215269bba9800252f36104d7ea55c3836f40fa9776c8240528a1d75f`, matching the tested v13 file.
-- Live health reported the 10 MiB state limit and no sync error.
-- Deployment verification performed no account merge or content edit; pre- and post-deployment account summaries were unchanged.
-- Stable recovery tests, save-safety tests, v13 merge/size checks, local bridge checks, inline script parsing, and a live browser console check passed.
+- Commit `07b5a60` deployed successfully from `main` before any production restoration.
+- `/api/version` reported `9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7`, matching the tested local and hosted v13 files.
+- Live health reported the exact 10 MiB state limit and no browser console errors.
+- Admin revision 59 was restored as immutable revision 63, then safely adopted by the live browser as revision 64 after comparison. Final counts were 89 tasks, 20 notes, 2 files, 42 grade records, 1 trip, 4 Weekly weeks, and 4 semesters.
+- Revision 62 remains immutable, and `pre_restore` backup 27 preserves its 78-task state. Nothing was deleted from revision history.
+- Encrypted pre- and post-recovery database exports both passed decryption and integrity validation. The hidden daily backup task retains 30 daily and 12 monthly copies.
+- Stable recovery tests, destructive-drop tests, v13 merge/size/immediate-save checks, schema rollback validation, local bridge checks, inline script parsing, Data Recovery preview, and live Chrome validation passed.
 
 ## Best Free Long-Term Setup
 
