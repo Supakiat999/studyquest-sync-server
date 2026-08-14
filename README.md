@@ -46,6 +46,8 @@ Deployment behavior:
 - `/v13` and `/claudever13.html` require the `admin` account. Other users are redirected to the stable app and never receive the v13 file.
 - `/v14` and `/claudever14.html` are a separate authenticated-user experimental route. Every signed-in account sees only its own state and adds only the namespaced `tracker.weeklyV14` overlay after its backup and first-use confirmation. The `STUDYQUEST_V14_ACCESS` switch supports `off`, `admin`, and `all`; the release uses `all`, with `off` available as an emergency stop.
 - The stable app shows a `Try v14` button after login. It explains the safe first-use step and offers a backup before opening v14. Logged-out requests return to login, and bearer device tokens cannot open v14.
+- `/v15` and `/claudever15.html` are a separate hosted task-progress pilot. Access defaults to `off`; even after an explicit owner activation to `admin`, only the authenticated `admin` account may open it. Normal accounts, logged-out requests, and bearer device-token sessions are rejected, and the stable app has no v15 button.
+- v15 uses the existing `studyquest_v3` account data, `/api/v2/state`, IndexedDB recovery, revisions, snapshots, undo, and cloud sync. Opening the route is read-only; task duration/progress fields are written only after the user interacts with a control.
 - Admin login opens v13 automatically unless `/app.html?stable=1` was requested. v13 always keeps a Stable App fallback button.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` requires revision lineage. New clients send `baseRevision`, `baseHash`, a retry-safe `mutationId`, and a record-change manifest.

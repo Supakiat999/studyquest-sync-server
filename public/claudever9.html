@@ -62,6 +62,10 @@
           window.location.replace("/v14");
           return;
         }
+        if (!user.legacy && next === "v15" && user.username === "admin") {
+          window.location.replace("/v15");
+          return;
+        }
       if (!user.legacy && user.username === "admin" && !wantsStable) {
         window.location.replace("/v13");
         return;

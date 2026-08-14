@@ -1,0 +1,10 @@
+{
+  "version": 15,
+  "hash": "8facf7fb58c59a5f69f8b298b5618f2ae33cfab42f915e71f38210b5ff81fd3e",
+  "releasedAt": null,
+  "source": "claudever15.html",
+  "route": "/v15",
+  "adminOnly": true,
+  "access": "authenticated",
+  "accessMode": "admin"
+}

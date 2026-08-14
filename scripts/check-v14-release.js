@@ -47,7 +47,7 @@ assert(server.includes('function authenticatedV14Html'), 'Server is missing auth
 assert(server.includes('url.pathname === "/v14"'), 'Server is missing the /v14 route');
 assert(server.includes('const V14_ACCESS_MODE'), 'Server is missing the v14 access switch');
 assert(server.includes('function canAccessV14'), 'Server is missing the v14 account access check');
-assert(server.includes('url.searchParams.get("version") === "14"'), 'Version API does not select v14');
+assert(server.includes('requestedVersion === "14"') && server.includes('requestedVersion === "15"'), 'Version API does not select v14 and v15');
 assert(server.includes('stateActivitySummary'), 'Server does not expose activity summaries');
 assert(safety.includes('function stateActivitySummary'), 'State safety activity summary is missing');
 assert(stable.includes('next === "v14"') && stable.includes('window.location.replace("/v14")'), 'Stable login does not return a signed-in user to v14 when explicitly requested');

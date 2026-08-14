@@ -28,6 +28,8 @@ services:
         value: "5"
       - key: STUDYQUEST_V14_ACCESS
         value: "all"
+      - key: STUDYQUEST_V15_ACCESS
+        value: "off"
       - key: STUDYQUEST_MAX_STATE_BYTES
         value: "10485760"
       - key: STUDYQUEST_MAX_STATE_ENVELOPE_BYTES

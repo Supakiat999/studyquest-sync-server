@@ -21,6 +21,7 @@ StudyQuest has separate device and cloud copies:
 | Stable live app | `https://studyquest-sync-server.onrender.com/app.html?stable=1` | Normal app for Anya and other users |
 | Live admin v13 | `https://studyquest-sync-server.onrender.com/v13` | Admin-only hosted v13 |
 | Live v14 Weekly customization | `https://studyquest-sync-server.onrender.com/v14` | Signed-in account route; each user sees only their own data |
+| Hosted v15 task pilot | `https://studyquest-sync-server.onrender.com/v15` | Admin-only pilot; disabled by default until an owner activates it |
 | Data recovery | `https://studyquest-sync-server.onrender.com/data-recovery` | Own-version missing-item recovery plus device-copy inspection/export |
 | Render server | `studyquest-sync-server` | Login, account isolation, state API, recovery API |
 | Neon PostgreSQL | Private `DATABASE_URL` | Durable account state, revisions, snapshots, recovery records |
@@ -538,6 +539,51 @@ For this release, create a protected branch from the current `origin/main`,
 push it after GitHub browser authentication, and open a PR. Stop at the PR:
 Render must not deploy v14 until the owner reviews and merges it. Never force
 push, and never use the dirty `live-release` or `live-v13-release` folders.
+
+## 10B. Safe v15 Hosted Pilot PR
+
+v15 is a protected, separate task-progress pilot. This release must stop at a
+draft PR. It must not deploy, merge, migrate the database, or write any live
+account data.
+
+The hosted v15 route is `/v15` (or `/claudever15.html`) and reads the existing
+`studyquest_v3` account family. `STUDYQUEST_V15_ACCESS` is committed as `off`.
+Only a future, explicit owner change to `admin` can activate it; the server
+still requires the normal authenticated `admin` account and rejects logged-out,
+ordinary-account, and device-token sessions. There is no normal-user v15
+button. The stable login redirect accepts `next=v15` only for the admin.
+
+Before opening the PR, complete this data-safety gate:
+
+1. Confirm the admin Recovery Center has no conflict or `Cloud backup pending`.
+2. Export both the current admin browser/device copy and the cloud copy through
+   the existing recovery flow.
+3. Run `scripts/run-database-backup.ps1` and confirm decrypt validation,
+   checksums, and table counts succeed. Never commit the encrypted backup,
+   plaintext exports, credentials, or backup keys.
+4. Record the admin revision, state hash, state summary, and the v13/v14 hashes
+   outside Git.
+5. Verify opening v15 alone does not save or increment the cloud revision.
+
+Run the release checks:
+
+```powershell
+npm.cmd run check
+```
+
+The v15 checks cover syntax, metadata, route guards, `studyquest_v3`, no-clear
+and no-main-key-removal invariants, whole-minute duration validation, 0/25/75/
+100 progress behavior, legacy 50% restoration, unknown-field preservation, and
+v13/v14 cross-version hashes. Run desktop/mobile browser QA and read-only
+hosted-route smoke checks for health, version metadata, login redirect, admin
+access, and device-token rejection.
+
+Create `codex/v15-safe-task-release` from the current v14 release branch, push
+without force, and open a draft PR targeting that v14 branch. Stop at the PR.
+If the pilot is later unhealthy, set `STUDYQUEST_V15_ACCESS=off` first, then
+revert only the v15 release commit when no newer deployment exists. Never clear
+browser storage or restore a whole database as the first response; preserve
+both copies and use the revision-protected recovery flow.
 
 ## 11. Emergency Recovery
 
