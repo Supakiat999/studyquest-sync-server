@@ -43,19 +43,17 @@ for (const invalid of ['1.5', '-1', '12abc', '1e3', '9007199254740992']) {
 
 const progress = loadFunctions(
   v15,
-  ['taskProgressValue', 'taskProgressBeforeDone', 'taskHasLegacyProgress'],
-  'const TASK_PROGRESS_VALUES = [0, 25, 75];\nconst TASK_LEGACY_PROGRESS_VALUES = [50];\nconst TASK_ALL_PROGRESS_VALUES = [...TASK_PROGRESS_VALUES, ...TASK_LEGACY_PROGRESS_VALUES];',
+  ['taskProgressValue', 'taskProgressBeforeDone'],
+  'const TASK_PROGRESS_VALUES = [0, 25, 50, 75];\nconst TASK_ALL_PROGRESS_VALUES = TASK_PROGRESS_VALUES;',
 );
 assert.equal(progress.taskProgressValue({ progressPercent: 0 }), 0);
 assert.equal(progress.taskProgressValue({ progressPercent: 25 }), 25);
-assert.equal(progress.taskProgressValue({ progressPercent: 75 }), 75);
 assert.equal(progress.taskProgressValue({ progressPercent: 50 }), 50);
+assert.equal(progress.taskProgressValue({ progressPercent: 75 }), 75);
 assert.equal(progress.taskProgressValue({ progressPercent: 33 }), 0);
 assert.equal(progress.taskProgressValue({ done: true, progressPercent: 75 }), 100);
 assert.equal(progress.taskProgressBeforeDone({ progressBeforeDone: 50 }), 50);
 assert.equal(progress.taskProgressBeforeDone({ progressBeforeDone: 33 }), 0);
-assert.equal(progress.taskHasLegacyProgress({ progressPercent: 50 }), true);
-assert.equal(progress.taskHasLegacyProgress({ done: true, progressPercent: 50 }), false);
 
 function normalizeWith(source, task) {
   const functions = loadFunctions(
@@ -96,8 +94,11 @@ for (const source of [v14, v15]) {
 assert.match(v15, /t\.progressBeforeDone\s*=\s*taskProgressValue\(t\)/, 'completion must remember the prior percentage');
 assert.match(v15, /t\.progressPercent\s*=\s*taskProgressBeforeDone\(t\)/, 'reopening must restore the prior percentage');
 assert.match(v15, /if \(next === 100\)\s*\{\s*toggleDone\(taskId\)/, '100% must use the existing completion path');
-assert.match(v15, /TASK_PROGRESS_VALUES = \[0, 25, 75\]/, 'new progress choices must be 0, 25, and 75');
-assert.match(v15, /TASK_LEGACY_PROGRESS_VALUES = \[50\]/, 'legacy 50% progress must remain supported');
+assert.match(v15, /TASK_PROGRESS_VALUES = \[0, 25, 50, 75\]/, 'progress choices must include a normal 50% option');
+assert.doesNotMatch(v15, /TASK_LEGACY_PROGRESS_VALUES/, 'legacy-only 50% progress must be removed');
+assert.match(v15, /const active = done \? value === 100 : progress === value;/, 'stored 50% progress must activate the normal button');
+assert.match(v15, /\[\.\.\.TASK_PROGRESS_VALUES, 100\]\.map\(value => \{/,
+  'the renderer must expose 0%, 25%, 50%, 75%, and 100% controls');
 assert.match(v15, /\.\.\.t/, 'task normalization must preserve unknown task properties');
 
-console.log('v15 duration, progress, legacy-50, and cross-version preservation tests passed.');
+console.log('v15 duration, progress, completion-restore, and cross-version preservation tests passed.');

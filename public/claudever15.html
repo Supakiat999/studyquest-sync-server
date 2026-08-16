@@ -7201,9 +7201,8 @@ function normalizeTaskItem(task) {
   };
 }
 
-const TASK_PROGRESS_VALUES = [0, 25, 75];
-const TASK_LEGACY_PROGRESS_VALUES = [50];
-const TASK_ALL_PROGRESS_VALUES = [...TASK_PROGRESS_VALUES, ...TASK_LEGACY_PROGRESS_VALUES];
+const TASK_PROGRESS_VALUES = [0, 25, 50, 75];
+const TASK_ALL_PROGRESS_VALUES = TASK_PROGRESS_VALUES;
 
 function taskProgressValue(task) {
   if (task?.done) return 100;
@@ -7214,10 +7213,6 @@ function taskProgressValue(task) {
 function taskProgressBeforeDone(task) {
   const stored = Number(task?.progressBeforeDone);
   return TASK_ALL_PROGRESS_VALUES.includes(stored) ? stored : 0;
-}
-
-function taskHasLegacyProgress(task) {
-  return !task?.done && TASK_LEGACY_PROGRESS_VALUES.includes(Number(task?.progressPercent));
 }
 
 function parseTaskDurationMinutes(raw) {
@@ -7243,11 +7238,10 @@ function renderTaskInlineControls(task, options = {}) {
   const compact = options.compact ? ' compact' : '';
   const done = !!task?.done;
   const progress = taskProgressValue(task);
-  const legacyProgress = taskHasLegacyProgress(task);
   const duration = taskDurationValue(task);
   const durationValue = duration === null ? '' : String(duration);
   const buttonMarkup = [...TASK_PROGRESS_VALUES, 100].map(value => {
-    const active = done ? value === 100 : !legacyProgress && progress === value;
+    const active = done ? value === 100 : progress === value;
     const completed = done && value === 100;
     return `
     <button type="button" class="task-progress-btn ${active ? 'active' : ''} ${completed ? 'complete-active' : ''}"
@@ -7266,7 +7260,6 @@ function renderTaskInlineControls(task, options = {}) {
         <span class="task-duration-suffix">min</span>
       </div>
       <div class="task-progress-buttons" role="group" aria-label="Task progress">${buttonMarkup}</div>
-      ${legacyProgress ? '<span class="task-legacy-progress" title="Legacy 50% progress preserved">50%</span>' : ''}
       <button type="button" class="task-progress-complete ${done ? 'done' : ''}"
         onclick="event.stopPropagation();toggleDone('${id}')" role="checkbox" aria-checked="${done}"
         aria-label="${done ? 'Reopen task' : 'Mark task complete'}" title="${done ? 'Reopen task' : 'Mark task complete'}"></button>

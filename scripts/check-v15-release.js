@@ -37,8 +37,8 @@ for (const marker of [
   'const STUDYQUEST_VERSION = 15',
   "file: 'claudever15.html'",
   "const STORAGE_KEY = 'studyquest_v3'",
-  'const TASK_PROGRESS_VALUES = [0, 25, 75]',
-  'const TASK_LEGACY_PROGRESS_VALUES = [50]',
+  'const TASK_PROGRESS_VALUES = [0, 25, 50, 75]',
+  'const TASK_ALL_PROGRESS_VALUES = TASK_PROGRESS_VALUES',
   'function parseTaskDurationMinutes',
   'function renderTaskInlineControls',
   'task-inline-controls',
@@ -61,6 +61,9 @@ assert(v15.includes("if (next === 100) {\n    toggleDone(taskId);"), 'v15 100% p
 assert(v15.indexOf('task-duration-inline') < v15.indexOf('task-progress-buttons'), 'v15 duration must render before progress buttons');
 assert(v15.indexOf('task-progress-buttons') < v15.indexOf('task-progress-complete'), 'v15 completion tick must render after progress buttons');
 assert(v15.includes('progressBeforeDone'), 'v15 must preserve the previous progress before completion');
+assert(!v15.includes('TASK_LEGACY_PROGRESS_VALUES'), 'v15 must not keep a legacy-only 50% path');
+assert(!v15.includes('taskHasLegacyProgress'), 'v15 must render 50% through the normal progress controls');
+assert(v15.includes('const active = done ? value === 100 : progress === value;'), 'v15 must mark a stored 50% task as active');
 const startupSyncStart = v15.indexOf('async function syncStateFromServer');
 const startupSyncEnd = v15.indexOf('function retryPendingServerSync', startupSyncStart);
 const startupSync = startupSyncStart >= 0 && startupSyncEnd > startupSyncStart ? v15.slice(startupSyncStart, startupSyncEnd) : '';

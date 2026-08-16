@@ -540,11 +540,13 @@ push it after GitHub browser authentication, and open a PR. Stop at the PR:
 Render must not deploy v14 until the owner reviews and merges it. Never force
 push, and never use the dirty `live-release` or `live-v13-release` folders.
 
-## 10B. Safe v15 Hosted Pilot PR
+## 10B. Safe v15 Hosted Pilot Release
 
-v15 is a protected, separate task-progress pilot. This release must stop at a
-draft PR. It must not deploy, merge, migrate the database, or write any live
-account data.
+v15 is a protected, separate task-progress pilot. It deploys to the existing
+Render service at `/v15` without replacing the stable root app or migrating
+the database. The committed `STUDYQUEST_V15_ACCESS=off` value remains the
+fail-closed default until the exact tested code is healthy; then the existing
+Render service may be changed to runtime value `admin`.
 
 The hosted v15 route is `/v15` (or `/claudever15.html`) and reads the existing
 `studyquest_v3` account family. `STUDYQUEST_V15_ACCESS` is committed as `off`.
@@ -553,7 +555,7 @@ still requires the normal authenticated `admin` account and rejects logged-out,
 ordinary-account, and device-token sessions. There is no normal-user v15
 button. The stable login redirect accepts `next=v15` only for the admin.
 
-Before opening the PR, complete this data-safety gate:
+Before publishing, complete this data-safety gate:
 
 1. Confirm the admin Recovery Center has no conflict or `Cloud backup pending`.
 2. Export both the current admin browser/device copy and the cloud copy through
@@ -562,8 +564,29 @@ Before opening the PR, complete this data-safety gate:
    checksums, and table counts succeed. Never commit the encrypted backup,
    plaintext exports, credentials, or backup keys.
 4. Record the admin revision, state hash, state summary, and the v13/v14 hashes
-   outside Git.
+   outside Git in `%LOCALAPPDATA%\StudyQuest\v15-release-safety.json`.
 5. Verify opening v15 alone does not save or increment the cloud revision.
+
+The safety manifest must contain only gate results, hashes, counts, timestamps,
+and paths to the two exports; it must not contain passwords, database URLs,
+backup keys, sessions, or state bodies. Required fields are:
+
+```json
+{
+  "version": 1,
+  "recordedAt": "2026-08-16T00:00:00.000Z",
+  "adminRecoveryConflict": false,
+  "cloudBackupPending": false,
+  "browserExportPath": "C:\\Users\\ASUS\\Downloads\\device-export.json",
+  "cloudExportPath": "C:\\Users\\ASUS\\Downloads\\cloud-export.json",
+  "databaseBackupValidated": true,
+  "adminRevision": 0,
+  "adminStateHash": "<64 lowercase hex characters>",
+  "adminSummary": {},
+  "v13Hash": "9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7",
+  "v14Hash": "<hash from public/claudever14.html>"
+}
+```
 
 Run the release checks:
 
@@ -572,14 +595,29 @@ npm.cmd run check
 ```
 
 The v15 checks cover syntax, metadata, route guards, `studyquest_v3`, no-clear
-and no-main-key-removal invariants, whole-minute duration validation, 0/25/75/
-100 progress behavior, legacy 50% restoration, unknown-field preservation, and
-v13/v14 cross-version hashes. Run desktop/mobile browser QA and read-only
-hosted-route smoke checks for health, version metadata, login redirect, admin
-access, and device-token rejection.
+and no-main-key-removal invariants, whole-minute duration validation, 0/25/50/
+75/100 progress behavior, completion restoration, unknown-field preservation,
+and v13/v14 cross-version hashes. The guarded publisher also requires a clean
+fast-forward checkout, a freshly validated encrypted database backup, the
+safety manifest, and valid GitHub authentication.
 
-Create `codex/v15-safe-task-release` from the current v14 release branch, push
-without force, and open a draft PR targeting that v14 branch. Stop at the PR.
+Run the guarded release from `live-smart-merge-release`:
+
+```powershell
+Push-Location .\live-smart-merge-release
+npm.cmd run check
+& .\scripts\publish-v15.ps1 -DryRun
+& .\scripts\publish-v15.ps1
+Pop-Location
+```
+
+The publisher stages only the v15 HTML, metadata, tests, publisher, and this
+guide; it pushes `HEAD:main` without force and polls Render for the exact v15
+hash plus unchanged v13/v14 hashes. After the code deployment passes, set the
+existing Render service's runtime `STUDYQUEST_V15_ACCESS` to `admin`, wait for
+the restart, and verify `/api/health`, `/api/version?version=15`, admin access,
+ordinary-account rejection, and device-token rejection.
+
 If the pilot is later unhealthy, set `STUDYQUEST_V15_ACCESS=off` first, then
 revert only the v15 release commit when no newer deployment exists. Never clear
 browser storage or restore a whole database as the first response; preserve
