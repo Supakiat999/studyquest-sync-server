@@ -18,10 +18,10 @@ StudyQuest has separate device and cloud copies:
 | Part | Location | Purpose |
 | --- | --- | --- |
 | Local admin v13 | `http://127.0.0.1:3000/claudever13.html` | Admin's authoritative Chrome test environment on this laptop |
-| Stable live app | `https://studyquest-sync-server.onrender.com/app.html?stable=1` | Normal app for Anya and other users |
+| Stable live fallback | `https://studyquest-sync-server.onrender.com/app.html?stable=1` | Emergency fallback that remains available without replacing account data |
 | Live admin v13 | `https://studyquest-sync-server.onrender.com/v13` | Admin-only hosted v13 |
 | Live v14 Weekly customization | `https://studyquest-sync-server.onrender.com/v14` | Signed-in account route; each user sees only their own data |
-| Hosted v15 task pilot | `https://studyquest-sync-server.onrender.com/v15` | Admin-only pilot; disabled by default until an owner activates it |
+| Hosted v15 main app | `https://studyquest-sync-server.onrender.com/` | Main app for authenticated users; `/v15` remains an alias |
 | Data recovery | `https://studyquest-sync-server.onrender.com/data-recovery` | Own-version missing-item recovery plus device-copy inspection/export |
 | Render server | `studyquest-sync-server` | Login, account isolation, state API, recovery API |
 | Neon PostgreSQL | Private `DATABASE_URL` | Durable account state, revisions, snapshots, recovery records |
@@ -540,30 +540,30 @@ push it after GitHub browser authentication, and open a PR. Stop at the PR:
 Render must not deploy v14 until the owner reviews and merges it. Never force
 push, and never use the dirty `live-release` or `live-v13-release` folders.
 
-## 10B. Safe v15 Hosted Pilot Release
+## 10B. Safe v15 Main Promotion
 
-v15 is a protected, separate task-progress pilot. It deploys to the existing
-Render service at `/v15` without replacing the stable root app or migrating
-the database. The committed `STUDYQUEST_V15_ACCESS=off` value remains the
-fail-closed default until the exact tested code is healthy; then the existing
-Render service may be changed to runtime value `admin`.
+v15 is the authenticated main app at the existing Render root. `/v15` and
+`/claudever15.html` remain aliases, while `/app.html?stable=1` remains the
+stable fallback. No database migration or whole-state replacement is part of
+this promotion. The committed `STUDYQUEST_V15_ACCESS=off` value remains the
+fail-closed default until the exact tested code is healthy.
 
-The hosted v15 route is `/v15` (or `/claudever15.html`) and reads the existing
-`studyquest_v3` account family. `STUDYQUEST_V15_ACCESS` is committed as `off`.
-Only a future, explicit owner change to `admin` can activate it; the server
-still requires the normal authenticated `admin` account and rejects logged-out,
-ordinary-account, and device-token sessions. There is no normal-user v15
-button. The stable login redirect accepts `next=v15` only for the admin.
+`STUDYQUEST_V15_ACCESS` supports `off`, `admin`, and `all`. Deploy with the
+existing runtime value `admin`, verify the admin canary and all safety
+baselines, then change the runtime value to `all`. Logged-out users return to
+the stable login page, device-token sessions cannot open HTML, and every
+authenticated browser account receives only its own account-scoped state.
 
 Before publishing, complete this data-safety gate:
 
 1. Confirm the admin Recovery Center has no conflict or `Cloud backup pending`.
 2. Export both the current admin browser/device copy and the cloud copy through
-   the existing recovery flow.
+   the existing recovery flow. The read-only audit can create the private cloud
+   export with `run-incident-audit.ps1 -Phase before -ExportAdminCloudCopy`.
 3. Run `scripts/run-database-backup.ps1` and confirm decrypt validation,
    checksums, and table counts succeed. Never commit the encrypted backup,
    plaintext exports, credentials, or backup keys.
-4. Record the admin revision, state hash, state summary, and the v13/v14 hashes
+4. Record every account's revision, state hash, and summary plus the protected v13/v14/v15 hashes
    outside Git in `%LOCALAPPDATA%\StudyQuest\v15-release-safety.json`.
 5. Verify opening v15 alone does not save or increment the cloud revision.
 
@@ -571,10 +571,20 @@ The safety manifest must contain only gate results, hashes, counts, timestamps,
 and paths to the two exports; it must not contain passwords, database URLs,
 backup keys, sessions, or state bodies. Required fields are:
 
+Create it from the current read-only audit only after the browser/device export,
+cloud export, and encrypted backup have all succeeded:
+
+```powershell
+& .\scripts\write-v15-safety-manifest.ps1 `
+  -BrowserExportPath '<device recovery export>' `
+  -CloudExportPath '<private admin cloud export>' `
+  -DatabaseBackupValidated
+```
+
 ```json
 {
-  "version": 1,
-  "recordedAt": "2026-08-16T00:00:00.000Z",
+  "version": 2,
+  "recordedAt": "2026-08-20T00:00:00.000Z",
   "adminRecoveryConflict": false,
   "cloudBackupPending": false,
   "browserExportPath": "C:\\Users\\ASUS\\Downloads\\device-export.json",
@@ -583,8 +593,17 @@ backup keys, sessions, or state bodies. Required fields are:
   "adminRevision": 0,
   "adminStateHash": "<64 lowercase hex characters>",
   "adminSummary": {},
+  "accounts": [
+    {
+      "username": "admin",
+      "revision": 0,
+      "stateHash": "<64 lowercase hex characters>",
+      "summary": {}
+    }
+  ],
   "v13Hash": "9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7",
-  "v14Hash": "<hash from public/claudever14.html>"
+  "v14Hash": "<hash from public/claudever14.html>",
+  "v15Hash": "9c0dc2e6ff47553fdae6c2fdf6b87ccf99bbbb5f41d5bd2398eea4d0d73d8155"
 }
 ```
 
@@ -597,28 +616,30 @@ npm.cmd run check
 The v15 checks cover syntax, metadata, route guards, `studyquest_v3`, no-clear
 and no-main-key-removal invariants, whole-minute duration validation, 0/25/50/
 75/100 progress behavior, completion restoration, unknown-field preservation,
-and v13/v14 cross-version hashes. The guarded publisher also requires a clean
+root routing for logged-out, admin, ordinary-account, and device-token sessions,
+and v13/v14/v15 cross-version hashes. The guarded publisher also requires a clean
 fast-forward checkout, a freshly validated encrypted database backup, the
-safety manifest, and valid GitHub authentication.
+safety manifest, and a successful no-write Git push check before the real push.
 
-Run the guarded release from `live-smart-merge-release`:
+Run the guarded release from the isolated clean release checkout:
 
 ```powershell
-Push-Location .\live-smart-merge-release
+Push-Location .\live-v15-main-release
 npm.cmd run check
 & .\scripts\publish-v15.ps1 -DryRun
 & .\scripts\publish-v15.ps1
 Pop-Location
 ```
 
-The publisher stages only the v15 HTML, metadata, tests, publisher, and this
-guide; it pushes `HEAD:main` without force and polls Render for the exact v15
-hash plus unchanged v13/v14 hashes. After the code deployment passes, set the
-existing Render service's runtime `STUDYQUEST_V15_ACCESS` to `admin`, wait for
-the restart, and verify `/api/health`, `/api/version?version=15`, admin access,
-ordinary-account rejection, and device-token rejection.
+The publisher stages only the reviewed route, stable-login redirect, metadata,
+tests, publisher, and documentation files. It pushes `HEAD:main` without force
+and polls Render for the exact v15 hash plus unchanged v13/v14 hashes. The code
+first deploys under the existing runtime value `admin`. After the admin canary
+passes, set `STUDYQUEST_V15_ACCESS=all`, wait for the restart, and verify the
+root route for admin and ordinary accounts, stable fallback, device-token
+rejection, account isolation, and unchanged revision/hash/count baselines.
 
-If the pilot is later unhealthy, set `STUDYQUEST_V15_ACCESS=off` first, then
+If the main promotion is unhealthy, set `STUDYQUEST_V15_ACCESS=off` first, then
 revert only the v15 release commit when no newer deployment exists. Never clear
 browser storage or restore a whole database as the first response; preserve
 both copies and use the revision-protected recovery flow.

@@ -73,7 +73,7 @@ assert(server.includes('const V15_HTML_PATH'), 'Server is missing the v15 HTML p
 assert(server.includes('const V15_VERSION_PATH'), 'Server is missing the v15 metadata path');
 assert(server.includes('const V15_ACCESS_MODE'), 'Server is missing the v15 access switch');
 assert(server.includes('process.env.STUDYQUEST_V15_ACCESS || "off"'), 'v15 access must default to off');
-assert(server.includes('["off", "admin"].includes(configured) ? configured : "off"'), 'v15 access must be fail-closed');
+assert(server.includes('["off", "admin", "all"].includes(configured) ? configured : "off"'), 'v15 access must support a fail-closed all-user promotion');
 assert(server.includes('function authenticatedV15Html'), 'Server is missing authenticated v15 bootstrap');
 assert(server.includes('function canAccessV15'), 'Server is missing the v15 account access check');
 assert(server.includes('url.pathname === "/v15"'), 'Server is missing the /v15 route');
@@ -86,11 +86,20 @@ const v15RouteStart = server.indexOf('if (url.pathname === "/v15"');
 const v15RouteEnd = server.indexOf('if (url.pathname === "/device-recovery"', v15RouteStart);
 const v15Route = v15RouteStart >= 0 && v15RouteEnd > v15RouteStart ? server.slice(v15RouteStart, v15RouteEnd) : '';
 assert(v15Route.includes('if (!user || user.sync_device_id)'), 'v15 must reject unauthenticated and device-token requests');
-assert(v15Route.includes('if (!canAccessV15(user))'), 'v15 must use the admin-only access switch');
-assert(!v15Route.includes('V15_ACCESS_MODE === "all"'), 'v15 must not support an all-users access mode');
+assert(v15Route.includes('if (!canAccessV15(user))'), 'v15 must use the authenticated access switch');
 
-assert(stable.includes('next === "v15"') && stable.includes('user.username === "admin"'), 'Stable login must guard the v15 redirect to admin');
-assert(stable.includes('window.location.replace("/v15")'), 'Stable login does not return an admin to v15 when explicitly requested');
+const rootRouteStart = server.indexOf('if (url.pathname === "/")');
+const rootRouteEnd = server.indexOf('if (url.pathname === "/device-recovery"', rootRouteStart);
+const rootRoute = rootRouteStart >= 0 && rootRouteEnd > rootRouteStart ? server.slice(rootRouteStart, rootRouteEnd) : '';
+assert(rootRoute.includes('if (!user || user.sync_device_id)'), 'Main root must reject unauthenticated and device-token requests');
+assert(rootRoute.includes('location: "/app.html?next=v15-main"'), 'Main root must use the stable login flow');
+assert(rootRoute.includes('if (!canAccessV15(user))'), 'Main root must use the fail-closed v15 access switch');
+assert(rootRoute.includes('location: "/app.html?stable=1"'), 'Main root must retain the stable fallback');
+assert(rootRoute.includes('authenticatedV15Html(user)'), 'Main root must serve authenticated v15 HTML');
+assert(!server.includes('url.pathname === "/" || url.pathname === "/app.html"'), 'Stable static route must not bypass the authenticated v15 root');
+
+assert(stable.includes('next === "v15-main"') && stable.includes('window.location.replace("/")'), 'Stable login must return authenticated users to the clean root');
+assert(stable.includes('next === "v15"') && stable.includes('window.location.replace("/v15")'), 'Stable login must retain the v15 alias');
 assert(!stable.includes('v15TryHeaderButton') && !stable.includes('openV15'), 'Stable app must not expose a v15 button');
 assert(renderYaml.includes('key: STUDYQUEST_V15_ACCESS') && renderYaml.includes('value: "off"'), 'Render config must default v15 access to off');
 assert(renderNeonYaml.includes('key: STUDYQUEST_V15_ACCESS') && renderNeonYaml.includes('value: "off"'), 'Neon Render config must default v15 access to off');
@@ -102,15 +111,17 @@ assert(v14Version.version === 14 && v14Version.source === 'claudever14.html' && 
 const v15Hash = sha256('public/claudever15.html');
 assert(v15Version.version === 15 && v15Version.source === 'claudever15.html', 'v15 version metadata is invalid');
 assert(v15Version.hash === v15Hash, `v15 version hash does not match HTML: ${v15Hash}`);
-assert(v15Version.route === '/v15' && v15Version.adminOnly === true && v15Version.access === 'authenticated' && v15Version.accessMode === 'admin', 'v15 route metadata is invalid');
+assert(v15Version.route === '/' && Array.isArray(v15Version.aliases) && v15Version.aliases.includes('/v15') && v15Version.aliases.includes('/claudever15.html'), 'v15 main route metadata is invalid');
+assert(v15Version.main === true && v15Version.adminOnly === false && v15Version.access === 'authenticated' && v15Version.accessMode === 'all' && v15Version.defaultAccessMode === 'off', 'v15 access metadata is invalid');
 
 console.log(JSON.stringify({
   ok: true,
   v13Sha256: sha256('public/claudever13.html'),
   v14Sha256: v14Hash,
   v15Sha256: v15Hash,
-  route: '/v15',
+  route: '/',
+  aliases: v15Version.aliases,
   access: 'authenticated',
-  adminOnly: true,
+  adminOnly: false,
   defaultAccessMode: 'off',
 }, null, 2));

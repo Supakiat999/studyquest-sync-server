@@ -6,6 +6,15 @@ const { additiveIncidentRecovery, stateHash, stateSummary } = require("../lib/st
 const DATABASE_URL = process.env.STUDYQUEST_BACKUP_DATABASE_URL;
 if (!DATABASE_URL) throw new Error("STUDYQUEST_BACKUP_DATABASE_URL is required.");
 
+function writePrivateJson(outputPath, value) {
+  const resolved = path.resolve(outputPath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  const temporary = `${resolved}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag:"wx", mode:0o600 });
+  fs.renameSync(temporary, resolved);
+  return resolved;
+}
+
 function shouldUseSsl(databaseUrl) {
   return !/localhost|127\.0\.0\.1/i.test(databaseUrl);
 }
@@ -69,13 +78,22 @@ async function main() {
     };
     const serialized = `${JSON.stringify(output, null, 2)}\n`;
     if (process.env.STUDYQUEST_INCIDENT_AUDIT_FILE) {
-      const outputPath = path.resolve(process.env.STUDYQUEST_INCIDENT_AUDIT_FILE);
-      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      const temporary = `${outputPath}.${process.pid}.${Date.now()}.tmp`;
-      fs.writeFileSync(temporary, serialized, { flag:"wx", mode:0o600 });
-      fs.renameSync(temporary, outputPath);
+      writePrivateJson(process.env.STUDYQUEST_INCIDENT_AUDIT_FILE, output);
     }
-    process.stdout.write(serialized);
+    if (process.env.STUDYQUEST_ADMIN_CLOUD_EXPORT_FILE) {
+      const admin = accountsResult.rows.find((row) => row.username === "admin");
+      if (!admin) throw new Error("Admin cloud state is unavailable.");
+      const exportPath = writePrivateJson(process.env.STUDYQUEST_ADMIN_CLOUD_EXPORT_FILE, {
+        exportedAt: new Date().toISOString(),
+        username: "admin",
+        revision: Number(admin.state_revision || 0),
+        stateHash: stateHash(admin.state),
+        summary: stateSummary(admin.state),
+        state: admin.state,
+      });
+      output.adminCloudExportPath = exportPath;
+    }
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
   } finally {
     await pool.end();
   }

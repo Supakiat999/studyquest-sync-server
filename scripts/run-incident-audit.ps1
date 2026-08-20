@@ -1,6 +1,7 @@
 param(
   [ValidateSet('before', 'after')]
-  [string]$Phase = 'before'
+  [string]$Phase = 'before',
+  [switch]$ExportAdminCloudCopy
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,11 +22,17 @@ try {
   [IO.Directory]::CreateDirectory($auditDir) | Out-Null
   $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH-mm-ssZ')
   $env:STUDYQUEST_INCIDENT_AUDIT_FILE = Join-Path $auditDir "$Phase-$timestamp.json"
+  if ($ExportAdminCloudCopy) {
+    $cloudExportDir = Join-Path $profileDir 'v15-cloud-exports'
+    [IO.Directory]::CreateDirectory($cloudExportDir) | Out-Null
+    $env:STUDYQUEST_ADMIN_CLOUD_EXPORT_FILE = Join-Path $cloudExportDir "admin-cloud-$timestamp.json"
+  }
   & node $scriptPath
   if ($LASTEXITCODE -ne 0) { throw "Incident audit exited with code $LASTEXITCODE" }
 }
 finally {
   Remove-Item Env:STUDYQUEST_BACKUP_DATABASE_URL -ErrorAction SilentlyContinue
   Remove-Item Env:STUDYQUEST_INCIDENT_AUDIT_FILE -ErrorAction SilentlyContinue
+  Remove-Item Env:STUDYQUEST_ADMIN_CLOUD_EXPORT_FILE -ErrorAction SilentlyContinue
   [Array]::Clear($clear, 0, $clear.Length)
 }

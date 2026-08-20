@@ -39,7 +39,7 @@ const V14_ACCESS_MODE = (() => {
 })();
 const V15_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V15_ACCESS || "off").trim().toLowerCase();
-  return ["off", "admin"].includes(configured) ? configured : "off";
+  return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
 const USERNAME_PATTERN = /^[a-z0-9_-]{3,32}$/;
 const PASSWORD_MIN_LENGTH = 8;
@@ -149,7 +149,8 @@ function authenticatedV15Html(user) {
 }
 
 function canAccessV15(user) {
-  return Boolean(user && !user.sync_device_id && V15_ACCESS_MODE === "admin" && user.username === ADMIN_USERNAME);
+  if (!user || user.sync_device_id || V15_ACCESS_MODE === "off") return false;
+  return V15_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
 }
 
 function readBody(req, maxBytes = MAX_AUTH_BODY_BYTES) {
@@ -2323,6 +2324,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/") {
+      const user = await currentUser(req);
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?next=v15-main" });
+        return;
+      }
+      if (!canAccessV15(user)) {
+        send(req, res, 302, V15_ACCESS_MODE === "off" ? "v15 is temporarily unavailable" : "v15 is not enabled for this account", { location: "/app.html?stable=1" });
+        return;
+      }
+      send(req, res, 200, authenticatedV15Html(user), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
     if (url.pathname === "/device-recovery" || url.pathname === "/data-recovery") {
       const user = await currentUser(req);
       if (!user || user.sync_device_id) {
@@ -2353,7 +2368,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname === "/" || url.pathname === "/app.html" || url.pathname === "/claudever9.html") {
+    if (url.pathname === "/app.html" || url.pathname === "/claudever9.html") {
       send(req, res, 200, fs.readFileSync(HTML_PATH), { "content-type": "text/html; charset=utf-8" });
       return;
     }
@@ -2516,7 +2531,7 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           ...version,
           ...(versionNumber === 14 ? { accessMode: V14_ACCESS_MODE, adminOnly: V14_ACCESS_MODE !== "all" } : {}),
-          ...(versionNumber === 15 ? { accessMode: V15_ACCESS_MODE, adminOnly: true } : {}),
+          ...(versionNumber === 15 ? { accessMode: V15_ACCESS_MODE, adminOnly: V15_ACCESS_MODE !== "all" } : {}),
         });
         return;
       }

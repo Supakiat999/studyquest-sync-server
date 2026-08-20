@@ -20,11 +20,17 @@ $versionFile = Join-Path $ReleaseRepo 'public\v15-version.json'
 $checker = Join-Path $ReleaseRepo 'scripts\check-v15-release.js'
 $backupRunner = Join-Path $ReleaseRepo 'scripts\run-database-backup.ps1'
 $expectedFiles = @(
-  'public/claudever15.html',
+  'server.js',
+  'package.json',
+  'public/claudever9.html',
   'public/v15-version.json',
   'scripts/check-v15-release.js',
-  'scripts/test-v15-release.js',
+  'scripts/incident-audit.js',
+  'scripts/run-incident-audit.ps1',
+  'scripts/test-v15-main-routing.js',
+  'scripts/write-v15-safety-manifest.ps1',
   'scripts/publish-v15.ps1',
+  'README.md',
   'STUDYQUEST-OPERATIONS-GUIDE.md'
 )
 $startedAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -84,7 +90,7 @@ function Read-SafetyManifest {
     throw "Safety manifest is required: $SafetyManifest"
   }
   $value = Get-Content -LiteralPath $SafetyManifest -Raw | ConvertFrom-Json
-  if ($value.version -ne 1) { throw 'Safety manifest version must be 1.' }
+  if ($value.version -ne 2) { throw 'Safety manifest version must be 2 for the all-account main promotion.' }
   if ($value.adminRecoveryConflict -ne $false) { throw 'Recovery Center conflict gate is not clear.' }
   if ($value.cloudBackupPending -ne $false) { throw 'Cloud backup pending gate is not clear.' }
   if (-not $value.recordedAt) { throw 'Safety manifest recordedAt is required.' }
@@ -100,6 +106,23 @@ function Read-SafetyManifest {
   if ([string]$value.v13Hash -ne '9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7') { throw 'Recorded v13 hash does not match the protected release.' }
   $expectedV14 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ReleaseRepo 'public\claudever14.html')).Hash.ToLowerInvariant()
   if ([string]$value.v14Hash -ne $expectedV14) { throw 'Recorded v14 hash does not match the release checkout.' }
+  if ([string]$value.v15Hash -ne $sourceHash) { throw 'Recorded v15 hash does not match the protected HTML artifact.' }
+  $accounts = @($value.accounts)
+  if ($accounts.Count -lt 1) { throw 'Per-account revision, hash, and summary baselines are required.' }
+  $seenAccounts = @{}
+  foreach ($account in $accounts) {
+    $username = ([string]$account.username).Trim().ToLowerInvariant()
+    if (-not $username -or $seenAccounts.ContainsKey($username)) { throw 'Account baseline usernames must be present and unique.' }
+    $accountRevision = 0L
+    if (-not [int64]::TryParse([string]$account.revision, [ref]$accountRevision)) { throw "Account baseline revision is invalid: $username" }
+    if ([string]$account.stateHash -notmatch '^[a-f0-9]{64}$') { throw "Account baseline hash is invalid: $username" }
+    if ($null -eq $account.summary) { throw "Account baseline summary is missing: $username" }
+    $seenAccounts[$username] = $account
+  }
+  if (-not $seenAccounts.ContainsKey('admin')) { throw 'The all-account baseline must include admin.' }
+  if ([int64]$seenAccounts['admin'].revision -ne $revision -or [string]$seenAccounts['admin'].stateHash -ne [string]$value.adminStateHash) {
+    throw 'The admin entry does not match the top-level safety baseline.'
+  }
   return $value
 }
 
@@ -156,8 +179,8 @@ try {
   if (-not (Test-Path -LiteralPath $checker -PathType Leaf)) { throw "v15 checker is missing: $checker" }
   if (-not (Test-Path -LiteralPath $backupRunner -PathType Leaf)) { throw "Database backup runner is missing: $backupRunner" }
 
-  $gate = Read-SafetyManifest
   $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceHtml).Hash.ToLowerInvariant()
+  $gate = Read-SafetyManifest
   $version = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
   if ($version.version -ne 15 -or [string]$version.hash -ne $sourceHash) { throw 'v15 version metadata does not match the HTML hash.' }
 
@@ -179,18 +202,16 @@ try {
       exit 0
     }
 
-    $auth = & gh auth status -h github.com 2>&1
-    if ($LASTEXITCODE -ne 0) { throw 'GitHub authentication is not ready. Run gh auth login -h github.com --web.' }
     Assert-OnlyExpectedWorkingChanges 'Release checkout after checks'
 
-    & git add -- public/claudever15.html public/v15-version.json scripts/check-v15-release.js scripts/test-v15-release.js scripts/publish-v15.ps1 STUDYQUEST-OPERATIONS-GUIDE.md
+    & git add -- server.js package.json public/claudever9.html public/v15-version.json scripts/check-v15-release.js scripts/incident-audit.js scripts/run-incident-audit.ps1 scripts/test-v15-main-routing.js scripts/write-v15-safety-manifest.ps1 scripts/publish-v15.ps1 README.md STUDYQUEST-OPERATIONS-GUIDE.md
     if ($LASTEXITCODE -ne 0) { throw 'Could not stage the v15 release files.' }
     $staged = @(& git diff --cached --name-only)
     $unexpected = @($staged | Where-Object { $_ -notin $expectedFiles })
     if ($unexpected.Count -gt 0) { throw "Publisher staged unexpected files: $($unexpected -join ', ')" }
     if ($staged.Count -eq 0) { throw 'No v15 release changes are staged.' }
 
-    $message = "chore(v15): release safe admin pilot $((Get-Date).ToString('yyyy-MM-dd HH:mm')) ICT"
+    $message = "feat(v15): promote authenticated main $((Get-Date).ToString('yyyy-MM-dd HH:mm')) ICT"
     & git commit -m $message
     if ($LASTEXITCODE -ne 0) { throw 'Could not commit the v15 release.' }
     $commit = (& git rev-parse HEAD).Trim()
@@ -198,6 +219,7 @@ try {
     if ((& git rev-parse origin/main).Trim() -ne $remoteMain) { throw 'origin/main advanced during the release; refusing to push.' }
     & git merge-base --is-ancestor origin/main HEAD
     if ($LASTEXITCODE -ne 0) { throw 'The release is no longer a fast-forward from origin/main.' }
+    Invoke-CheckedCommand 'git' @('push', '--dry-run', 'origin', 'HEAD:main') 'GitHub push authentication or fast-forward validation failed.' | Out-Null
     & git push origin 'HEAD:main'
     if ($LASTEXITCODE -ne 0) { throw 'Could not push the v15 release to origin/main.' }
 
@@ -209,7 +231,8 @@ try {
         $health = Invoke-RestMethod -Uri "$LiveOrigin/api/health" -Method Get -TimeoutSec 75
         $v13Live = Invoke-RestMethod -Uri "$LiveOrigin/api/version?version=13" -Method Get -TimeoutSec 75
         $v14Live = Invoke-RestMethod -Uri "$LiveOrigin/api/version?version=14" -Method Get -TimeoutSec 75
-        if ($health.ok -and [string]$versionLive.hash -eq $sourceHash -and [string]$v13Live.hash -eq [string]$gate.v13Hash -and [string]$v14Live.hash -eq [string]$gate.v14Hash) {
+        $aliases = @($versionLive.aliases)
+        if ($health.ok -and [string]$versionLive.hash -eq $sourceHash -and [string]$versionLive.route -eq '/' -and $aliases -contains '/v15' -and [string]$v13Live.hash -eq [string]$gate.v13Hash -and [string]$v14Live.hash -eq [string]$gate.v14Hash) {
           $deployed = $true
           break
         }
@@ -217,7 +240,7 @@ try {
       Start-Sleep -Seconds 20
     }
     if (-not $deployed) { throw 'Render did not report the exact v15 hash and protected v13/v14 hashes within 15 minutes.' }
-    Write-Evidence 'deployed' 'v15 code is live on Render with exact hash and protected v13/v14 hashes. Runtime v15 access must be enabled separately as admin.'
+    Write-Evidence 'deployed' 'v15 main-route code is live on Render with exact hash and protected v13/v14 hashes. Runtime v15 access must be changed separately from admin to all after smoke checks.'
     Write-Output "v15 deployed: $commit"
   } finally {
     Pop-Location
