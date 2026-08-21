@@ -188,6 +188,22 @@
   .save-status-chip.local { color: var(--accent2); border-color: rgba(247,192,106,0.35); }
   .save-status-chip.offline { color: var(--gold); border-color: rgba(247,192,106,0.35); background: rgba(247,192,106,0.08); }
   .save-status-chip.error { color: var(--red); border-color: rgba(247,106,106,0.35); background: rgba(247,106,106,0.08); }
+  .sync-review-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin: 12px 20px 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(247,192,106,0.45);
+    border-radius: 10px;
+    background: rgba(247,192,106,0.09);
+    color: var(--text);
+  }
+  .sync-review-banner[hidden] { display: none; }
+  .sync-review-banner-copy { min-width: 0; font-size: 12px; line-height: 1.5; }
+  .sync-review-banner-copy strong { display: block; color: var(--gold); margin-bottom: 2px; }
+  .sync-review-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
   .header-exam-list {
     display: flex;
     align-items: center;
@@ -3753,6 +3769,9 @@
       min-width: 0;
       white-space: normal;
     }
+    .sync-review-banner { align-items: flex-start; flex-direction: column; margin: 8px 8px 0; }
+    .sync-review-banner-actions { width: 100%; }
+    .sync-review-banner-actions .btn { flex: 1 1 135px; }
     .task-editor-modal {
       width: calc(100vw - 16px);
       max-width: calc(100vw - 16px);
@@ -4937,6 +4956,17 @@
     </div>
   </header>
 
+  <div class="sync-review-banner" id="syncReviewBanner" role="status" aria-live="polite" hidden>
+    <div class="sync-review-banner-copy">
+      <strong>Sync review needed — both copies are safe</strong>
+      <span id="syncReviewBannerCopy">You can keep using StudyQuest. New work is saved on this device while cloud sync waits for your review.</span>
+    </div>
+    <div class="sync-review-banner-actions">
+      <button class="btn btn-primary btn-sm" type="button" onclick="reviewPendingLiveSyncConflict()">Review Copies</button>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="postponeLiveSyncReview()">Continue Working</button>
+    </div>
+  </div>
+
   <!-- TABS -->
   <div class="tabs">
     <button class="tab active" onclick="switchTab('tasks', this)">Today</button>
@@ -6075,11 +6105,11 @@
         <div class="modal-title" id="liveSyncConflictTitle" style="margin-bottom:4px;">Review Smart Merge</div>
         <div id="liveSyncConflictCopy" style="font-size:12px;color:var(--text-dim);line-height:1.5;">Review each proposed field winner. Nothing changes until you approve.</div>
       </div>
-      <button class="task-modal-close" type="button" onclick="closeModal('liveSyncConflictModal')" title="Close merge preview" aria-label="Close merge preview">×</button>
+      <button class="task-modal-close" type="button" onclick="postponeLiveSyncReview()" title="Continue working; both copies stay preserved" aria-label="Continue working and keep both copies">×</button>
     </div>
     <div id="liveSyncConflictBody" style="padding:14px 0;"></div>
     <div class="modal-btns" style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;flex-wrap:wrap;">
-      <button class="btn btn-ghost" onclick="closeModal('liveSyncConflictModal')">Not Now</button>
+      <button class="btn btn-ghost" onclick="postponeLiveSyncReview()">Continue Working</button>
       <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Export Chrome + Live + Merged</button>
       <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Use Live</button>
       <button class="btn btn-ghost" onclick="resolveLiveSyncConflict('local')">Use Chrome</button>
@@ -6793,6 +6823,23 @@ function syncNowStamp(meta) {
 function isSyncUiOnlyPath(path) {
   const [root] = syncPathSegments(path);
   return !root || SYNC_UI_ONLY_ROOTS.has(root) || root === '_syncMeta' || root === '_exportedAt' || root === '_exportVersion';
+}
+
+function mergeRelevantStateValue(value, path = '') {
+  if (path && isSyncUiOnlyPath(path)) return undefined;
+  if (Array.isArray(value)) return value.map(item => mergeRelevantStateValue(item, path));
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  Object.keys(value).sort().forEach(key => {
+    const childPath = syncPathJoin(path, key);
+    const child = mergeRelevantStateValue(value[key], childPath);
+    if (child !== undefined) result[key] = child;
+  });
+  return result;
+}
+
+function mergeRelevantStatesEquivalent(left, right) {
+  return syncValuesEqual(mergeRelevantStateValue(left || {}), mergeRelevantStateValue(right || {}));
 }
 
 function syncArrayUsesRecords(left, right) {
@@ -8701,7 +8748,37 @@ function downloadJsonFile(filename, value) {
   URL.revokeObjectURL(url);
 }
 
-function openLiveSyncConflict(conflict) {
+function shouldOpenLiveSyncConflictModal(conflict, forceOpen = false) {
+  return forceOpen
+    || conflict?.sourceType === 'import'
+    || conflict?.sourceType === 'local-server'
+    || ['manual-review', 'initial-pair'].includes(conflict?.reason);
+}
+
+function renderSyncReviewBanner() {
+  const banner = document.getElementById('syncReviewBanner');
+  if (!banner) return;
+  const cloudConflict = liveSync.conflict && !['import', 'local-server'].includes(liveSync.conflict.sourceType);
+  banner.hidden = !cloudConflict;
+  if (!cloudConflict) return;
+  const copy = document.getElementById('syncReviewBannerCopy');
+  if (copy) copy.textContent = liveSync.pending || v13DurableOutboxPending
+    ? 'Your latest work is saved on this device. Cloud sync is paused until you review both preserved copies.'
+    : 'You can keep using StudyQuest. Both preserved copies will remain unchanged until you review them.';
+}
+
+function postponeLiveSyncReview() {
+  closeModal('liveSyncConflictModal');
+  renderSyncReviewBanner();
+  setSaveStatus('local', liveSync.pending || v13DurableOutboxPending ? 'Saved on device · sync review pending' : 'Sync review pending · both copies safe');
+}
+
+async function reviewPendingLiveSyncConflict() {
+  closeModal('liveSyncConflictModal');
+  await compareChromeAndLive();
+}
+
+function openLiveSyncConflict(conflict, options = {}) {
   if (!conflict?.localState || !conflict?.cloudState) return;
   conflict.comparison = conflict.comparison || buildStateComparison(conflict.localState, conflict.cloudState, {
     cloudUpdatedAt: conflict.cloudUpdatedAt,
@@ -8718,6 +8795,7 @@ function openLiveSyncConflict(conflict) {
     liveSync.lastComparedAt = conflict.comparison.comparedAt;
     if (conflict.sourceType === 'local-server') {
       closeModal('liveSyncConflictModal');
+      renderSyncReviewBanner();
       setSaveStatus(liveSync.pending ? 'local' : 'saved', liveSync.pending ? 'Saved locally · admin sync pending' : 'Chrome and local server match');
       return false;
     }
@@ -8734,6 +8812,7 @@ function openLiveSyncConflict(conflict) {
     }
     setLiveSyncMeta(metaPatch);
     closeModal('liveSyncConflictModal');
+    renderSyncReviewBanner();
     setSaveStatus('saved', scheduledSyncStatusText());
     return false;
   }
@@ -8741,7 +8820,7 @@ function openLiveSyncConflict(conflict) {
   liveSync.preview = conflict;
   liveSync.comparison = conflict.comparison;
   liveSync.lastComparedAt = conflict.comparison.comparedAt;
-  liveSync.pending = false;
+  liveSync.pending = Boolean(liveSync.pending || v13DurableOutboxPending);
   liveSync.status = 'conflict';
   const otherLabel = conflict.cloudLabel || 'Live';
   const browserLabel = smartMergeBrowserLabel();
@@ -8749,7 +8828,7 @@ function openLiveSyncConflict(conflict) {
     pushAutoBackup(`${otherLabel} comparison - browser copy`, conflict.localState);
     pushAutoBackup(`${otherLabel} comparison - other copy`, conflict.cloudState);
   }
-  setLiveSyncMeta({ pending: false, conflictAt: new Date().toISOString() });
+  setLiveSyncMeta({ pending:liveSync.pending, conflictAt: new Date().toISOString() });
   const title = document.getElementById('liveSyncConflictTitle');
   const copy = document.getElementById('liveSyncConflictCopy');
   if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Review Smart Merge';
@@ -8763,8 +8842,10 @@ function openLiveSyncConflict(conflict) {
   const body = document.getElementById('liveSyncConflictBody');
   if (body) body.innerHTML = renderSmartMergeReport(conflict);
   updateSmartMergeApplyButton(conflict);
-  openModal('liveSyncConflictModal');
-  setSaveStatus('error', 'Sync choice needed');
+  if (shouldOpenLiveSyncConflictModal(conflict, options.forceOpen === true)) openModal('liveSyncConflictModal');
+  else closeModal('liveSyncConflictModal');
+  renderSyncReviewBanner();
+  setSaveStatus('local', liveSync.pending ? 'Saved on device · sync review pending' : 'Sync review pending · both copies safe');
   renderRecoveryCenter();
   return true;
 }
@@ -8891,23 +8972,38 @@ async function compareChromeAndLive() {
       comparison,
     };
     liveSync.preview.smartMerge = buildSmartMerge(chromeState, cloudState);
+    const mergeDifferent = liveSync.preview.smartMerge.different;
+    if (!mergeDifferent) {
+      liveSync.conflict = null;
+      liveSync.pending = false;
+      confirmedCloudState = cloneStateForSafety(cloudState);
+      pendingCloudMutation = null;
+      await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
+      setLiveSyncMeta({
+        revision:Number(result.revision || 0),
+        stateHash:result.stateHash || null,
+        pending:false,
+        lastSyncedStateUpdatedAt:state.updatedAt,
+      });
+      renderSyncReviewBanner();
+    }
     liveSync.comparison = comparison;
     liveSync.lastComparedAt = comparison.comparedAt;
     liveSync.lastCloudRevision = Number(result.revision || 0);
-    liveSync.status = comparison.different ? 'comparison-ready' : 'synced';
-    liveSync.message = comparison.different
+    liveSync.status = mergeDifferent ? 'comparison-ready' : 'synced';
+    liveSync.message = mergeDifferent
       ? `${comparison.differenceCount} saved item(s) differ. Nothing was changed.`
       : 'Chrome and live user data match.';
     const body = document.getElementById('liveSyncComparisonBody');
     if (body) body.innerHTML = renderStateComparisonReport(comparison, chromeState, cloudState);
     const reviewButton = document.getElementById('reviewLiveSyncChoicesBtn');
     if (reviewButton) {
-      reviewButton.disabled = !comparison.different;
-      reviewButton.textContent = comparison.different ? 'Review Smart Merge' : 'Versions Match';
+      reviewButton.disabled = !mergeDifferent;
+      reviewButton.textContent = mergeDifferent ? 'Review Smart Merge' : 'Versions Match';
     }
     closeModal('recoveryCenterModal');
     openModal('liveSyncComparisonModal');
-    setSaveStatus(comparison.different ? 'local' : 'saved', comparison.different ? 'Versions differ · review ready' : scheduledSyncStatusText());
+    setSaveStatus(mergeDifferent ? 'local' : 'saved', mergeDifferent ? 'Versions differ · review ready' : scheduledSyncStatusText());
   } catch (error) {
     liveSync.status = 'offline';
     liveSync.message = error?.name === 'AbortError' ? 'Live comparison timed out while the server was waking.' : String(error?.message || error);
@@ -8942,7 +9038,7 @@ function exportLiveSyncComparisonReport() {
 
 function reviewLiveSyncComparison() {
   const preview = liveSync.preview;
-  if (!preview?.comparison?.different) return closeLiveSyncComparison();
+  if (!preview?.smartMerge?.different) return closeLiveSyncComparison();
   closeModal('liveSyncComparisonModal');
   liveSync.preview = null;
   openLiveSyncConflict({
@@ -8962,6 +9058,26 @@ async function resolveLiveSyncConflict(choice) {
   if (!['local','cloud'].includes(choice)) return;
   chooseEveryMergeField(choice);
   await applySmartMerge();
+}
+
+function rebaseSmartMergePreview(preview, latestLocalState, latestCloudState, metadata) {
+  metadata = metadata || {};
+  const preservedSelections = { ...(preview.selections || {}) };
+  preview.localState = cloneStateForSafety(latestLocalState);
+  preview.cloudState = normalizeState(latestCloudState || defaultState());
+  preview.revision = Number(metadata.revision || 0);
+  preview.cloudStateHash = metadata.stateHash || null;
+  preview.cloudUpdatedAt = metadata.updatedAt || null;
+  preview.comparison = buildStateComparison(preview.localState, preview.cloudState, {
+    comparedAt:new Date().toISOString(),
+    chromeUpdatedAt:preview.localState.updatedAt,
+    cloudUpdatedAt:preview.cloudUpdatedAt,
+    liveUpdatedAt:preview.cloudUpdatedAt,
+    liveRevision:preview.revision,
+  });
+  preview.smartMerge = buildSmartMerge(preview.localState, preview.cloudState, preservedSelections);
+  preview.selections = preview.smartMerge.selections;
+  return preview;
 }
 
 function finalizeSmartMergeState(preview) {
@@ -9053,23 +9169,34 @@ async function applySmartMerge() {
     if (!response.ok) throw new Error(latest.error || 'Could not recheck the live save.');
     calibrateSyncClock(latest.serverTime);
     const latestRevision = Number(latest.revision || 0);
-    const cloudChanged = latestRevision !== Number(preview.revision || 0) || !statesEquivalent(latest.state || {}, preview.cloudState || {});
-    const chromeChanged = !statesEquivalent(state, preview.localState || {});
-    if (cloudChanged || chromeChanged) {
+    const latestCloudState = normalizeState(latest.state || defaultState());
+    const cloudContentChanged = !mergeRelevantStatesEquivalent(latestCloudState, preview.cloudState || {});
+    const chromeContentChanged = !mergeRelevantStatesEquivalent(state, preview.localState || {});
+    if (cloudContentChanged || chromeContentChanged) {
       openLiveSyncConflict({
         localState:cloneStateForSafety(state),
-        cloudState:normalizeState(latest.state || defaultState()),
+        cloudState:latestCloudState,
         revision:latestRevision,
         cloudStateHash:latest.stateHash || null,
         cloudUpdatedAt:latest.updatedAt || null,
         reason:'revision-recheck',
-      });
-      showToast('A copy changed during review. The preview was refreshed before writing.', '#f7c06a');
+      }, { forceOpen:true });
+      showToast('Saved content changed during review. Both copies were preserved and the review was refreshed.', '#f7c06a');
       return;
     }
 
+    rebaseSmartMergePreview(preview, state, latestCloudState, {
+      revision:latestRevision,
+      stateHash:latest.stateHash || null,
+      updatedAt:latest.updatedAt || null,
+    });
+    if (preview.smartMerge.unresolved) {
+      refreshSmartMergePreview();
+      return explainUnresolvedSmartMerge(preview);
+    }
+
     liveSync.stateHash = latest.stateHash || liveSync.stateHash;
-    confirmedCloudState = cloneStateForSafety(latest.state || defaultState());
+    confirmedCloudState = cloneStateForSafety(latestCloudState);
 
     const approvedState = finalizeSmartMergeState(preview);
     const approvedSize = stateSizeBreakdown(approvedState);
@@ -9767,7 +9894,9 @@ function renderRecoveryCenter() {
       ${isHostedAppHost() ? `
         <div class="recovery-empty">Two-way sync checks the cloud every 30 minutes. Live edits save in this browser immediately, then safely reach paired Chrome through revision-protected cloud sync.</div>
         <div class="recovery-actions" style="margin-top:9px;">
-          <button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:'manual'})">Sync Now</button>
+          ${liveSync.conflict
+            ? '<button class="btn btn-primary btn-sm" onclick="reviewPendingLiveSyncConflict()">Review Current Differences</button>'
+            : '<button class="btn btn-primary btn-sm" onclick="runLiveSyncCycle({manual:true,reason:\'manual\'})">Sync Now</button>'}
           <button class="btn btn-primary btn-sm" onclick="generateLivePairingCode()">Generate Pairing Code</button>
           <button class="btn btn-ghost btn-sm" onclick="openStableApp()">Open Stable App</button>
         </div>
@@ -9776,7 +9905,7 @@ function renderRecoveryCenter() {
         <div class="recovery-empty">Paired as <strong>${escapeHtml(liveSync.username || 'admin')}</strong>${liveSync.deviceName ? ' · ' + escapeHtml(liveSync.deviceName) : ''}. Chrome and live exchange changes every 30 minutes. Browser and disk saves remain immediate.</div>
         <div class="recovery-actions" style="margin-top:9px;">
           ${liveSync.conflict
-            ? '<button class="btn btn-primary btn-sm" onclick="openLiveSyncConflict(liveSync.conflict)">Review Current Differences</button>'
+            ? '<button class="btn btn-primary btn-sm" onclick="reviewPendingLiveSyncConflict()">Review Current Differences</button>'
             : '<button class="btn btn-primary btn-sm" onclick="compareChromeAndLive()">Compare Chrome & Live</button>'}
           <button class="btn btn-ghost btn-sm" onclick="disconnectLocalLiveAccount()">Disconnect Device</button>
         </div>
@@ -23301,6 +23430,7 @@ function playAmbient(type, el) {
 
 function renderAll() {
   applyTheme(state.themeId || 'default');
+  renderSyncReviewBanner();
   renderProfileButton();
   renderHeader();
   renderCats();

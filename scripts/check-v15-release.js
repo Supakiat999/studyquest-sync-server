@@ -50,6 +50,10 @@ for (const marker of [
   "const LIVE_VERSION_ENDPOINT = '/api/version?version=15'",
   'weeklyV14',
   "source:'v15-smart-merge'",
+  'function mergeRelevantStatesEquivalent',
+  'function rebaseSmartMergePreview',
+  'function reviewPendingLiveSyncConflict',
+  'Sync review needed — both copies are safe',
 ]) assert(v15.includes(marker), `Missing v15 marker: ${marker}`);
 
 assert(!v15.includes('task-control-strip'), 'v15 must not render the old full-width task control strip');
@@ -68,6 +72,9 @@ const startupSyncStart = v15.indexOf('async function syncStateFromServer');
 const startupSyncEnd = v15.indexOf('function retryPendingServerSync', startupSyncStart);
 const startupSync = startupSyncStart >= 0 && startupSyncEnd > startupSyncStart ? v15.slice(startupSyncStart, startupSyncEnd) : '';
 assert(startupSync && !startupSync.includes('saveState()'), 'opening v15 must not directly save or increment the cloud revision');
+assert(!startupSync.includes('{ forceOpen:true }'), 'startup cloud differences must not open a blocking merge modal');
+assert(server.includes('statesEqualIgnoringRootUpdatedAt'), 'Server must ignore root updatedAt-only saves without creating revisions');
+assert(server.includes('Ignored root updatedAt-only save'), 'Timestamp-only no-op saves must remain auditable');
 
 assert(server.includes('const V15_HTML_PATH'), 'Server is missing the v15 HTML path');
 assert(server.includes('const V15_VERSION_PATH'), 'Server is missing the v15 metadata path');

@@ -12,6 +12,7 @@ const {
   stableStringify,
   stateActivitySummary,
   stateHash,
+  statesEqualIgnoringRootUpdatedAt,
   stateRecordDiff,
   stateSummary,
   unapprovedRemovals,
@@ -1752,29 +1753,38 @@ async function handleVersionedState(req, res) {
       return;
     }
 
-    if (row.state && stateHash(row.state) === incomingVersion.hash) {
+    const exactStateMatch = Boolean(row.state && currentHash === incomingVersion.hash);
+    const rootTimestampOnlyMatch = Boolean(
+      row.state
+      && !exactStateMatch
+      && statesEqualIgnoringRootUpdatedAt(row.state, incomingState)
+    );
+    if (exactStateMatch || rootTimestampOnlyMatch) {
+      const unchangedHash = currentHash;
+      const unchangedBytes = Number(row.state_bytes || Buffer.byteLength(JSON.stringify(row.state)));
       await recordSaveEvent(client, {
         username: user.username,
         result: "no_change",
         baseRevision,
         currentRevision,
         resultingRevision: currentRevision,
-        stateHash: incomingVersion.hash,
-        stateBytes,
+        stateHash: unchangedHash,
+        stateBytes: unchangedBytes,
         deviceId,
         baseHash,
         mutationId,
         changeManifest: changeSet,
-        detail: "State hash already current",
+        detail: rootTimestampOnlyMatch ? "Ignored root updatedAt-only save" : "State hash already current",
       });
       await client.query("commit");
       sendJson(req, res, 200, {
         ok: true,
         unchanged: true,
+        ignoredVolatileOnly: rootTimestampOnlyMatch,
         revision: currentRevision,
-        stateHash: incomingVersion.hash,
+        stateHash: unchangedHash,
         savedAt: row.state_updated_at || row.updated_at || null,
-        stateBytes: Number(row.state_bytes || stateBytes),
+        stateBytes: unchangedBytes,
         maxStateBytes: MAX_STATE_BYTES,
         serverTime: new Date().toISOString(),
         preMergeBackupCreated: false,

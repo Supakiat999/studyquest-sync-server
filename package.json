@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/device-recovery.js && node --check scripts/incident-audit.js && node scripts/check-html.js public/claudever9.html public/claudever13.html public/claudever14.html public/claudever15.html && node scripts/check-recovery.js && node scripts/check-v14-release.js && node scripts/check-v15-release.js && node scripts/test-v14-release.js && node scripts/test-v15-release.js && node scripts/test-v15-main-routing.js && node scripts/test-account-state-recovery.js && node scripts/test-save-safety.js",
+    "check": "node --check server.js && node --check public/device-recovery.js && node --check scripts/incident-audit.js && node scripts/check-html.js public/claudever9.html public/claudever13.html public/claudever14.html public/claudever15.html && node scripts/check-recovery.js && node scripts/check-v14-release.js && node scripts/check-v15-release.js && node scripts/test-v14-release.js && node scripts/test-v15-release.js && node scripts/test-v15-smart-merge-hotfix.js && node scripts/test-v15-main-routing.js && node scripts/test-account-state-recovery.js && node scripts/test-save-safety.js",
     "export:admin-state": "node scripts/export-admin-state.js",
     "import:admin-state": "node scripts/import-admin-state.js"
   },
