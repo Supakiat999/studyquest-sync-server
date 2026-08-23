@@ -22,6 +22,7 @@ StudyQuest has separate device and cloud copies:
 | Live admin v13 | `https://studyquest-sync-server.onrender.com/v13` | Admin-only hosted v13 |
 | Live v14 Weekly customization | `https://studyquest-sync-server.onrender.com/v14` | Signed-in account route; each user sees only their own data |
 | Hosted v15 main app | `https://studyquest-sync-server.onrender.com/` | Main app for authenticated users; `/v15` remains an alias |
+| Hosted v16 release | `https://studyquest-sync-server.onrender.com/v16` | Separate authenticated v16 route; `/claudever16.html` remains an alias |
 | Data recovery | `https://studyquest-sync-server.onrender.com/data-recovery` | Own-version missing-item recovery plus device-copy inspection/export |
 | Render server | `studyquest-sync-server` | Login, account isolation, state API, recovery API |
 | Neon PostgreSQL | Private `DATABASE_URL` | Durable account state, revisions, snapshots, recovery records |
@@ -643,6 +644,36 @@ If the main promotion is unhealthy, set `STUDYQUEST_V15_ACCESS=off` first, then
 revert only the v15 release commit when no newer deployment exists. Never clear
 browser storage or restore a whole database as the first response; preserve
 both copies and use the revision-protected recovery flow.
+
+## 10.5 Hosted v16 Release
+
+Hosted v16 is separate from the v15 root and is available at `/v16`, with
+`/claudever16.html` as an alias. It uses the existing account-scoped
+`/api/v2/state` endpoint, IndexedDB recovery outbox, revision/hash checks, and
+destructive-change protection. It does not migrate task data or save during
+startup/rendering. The v16 access switch is `STUDYQUEST_V16_ACCESS`; committed
+and Render-config defaults are `off`.
+
+Before publishing v16, use a fresh checkout based on `origin/main` and record
+every account's revision, state hash, byte size, and record summary. Export the
+browser/device and cloud copies outside Git. Confirm Recovery Center has no
+conflict or pending cloud save. Run the encrypted Neon backup and require
+successful decryption, checksum validation, and table-count validation. Keep
+all exports, credentials, database URLs, backup keys, and tokens out of Git.
+
+Run the complete hosted suite, including v13/v14/v15 protection, v16 inline
+syntax, recurrence, duration, workload, calendar, XP, recovery, route-access,
+account-isolation, and no-startup-save checks. Confirm the v13, v14, and v15
+HTML hashes are unchanged and that `/api/version?version=16` matches the exact
+tested v16 hash.
+
+Deploy with `STUDYQUEST_V16_ACCESS=admin` first. Verify `/v16` for admin,
+login redirects, device-token rejection, the stable fallback, and unchanged
+account baselines. Only after those checks pass, set the existing Render
+runtime value to `all`; verify an ordinary signed-in account sees only its own
+state. Monitor health, save events, revisions, and account summaries for at
+least 15 minutes. If any gate fails, set `STUDYQUEST_V16_ACCESS=off` first and
+leave the database untouched.
 
 ## 11. Emergency Recovery
 

@@ -1,0 +1,16 @@
+{
+  "version": 16,
+  "hash": "07cc146fd49a257386f507e60b24e314b2693af88c333d6ede91286da54e4909",
+  "releasedAt": "2026-08-23T03:54:55.5754839Z",
+  "source": "claudever16.html",
+  "route": "/v16",
+  "aliases": ["/claudever16.html"],
+  "main": false,
+  "adminOnly": false,
+  "access": "authenticated",
+  "accessMode": "all",
+  "defaultAccessMode": "off",
+  "launched": true,
+  "localOnly": false,
+  "sync": "account-scoped-revision-protected-v2-state"
+}

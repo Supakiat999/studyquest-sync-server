@@ -47,6 +47,8 @@ Deployment behavior:
 - `/v14` and `/claudever14.html` are a separate authenticated-user experimental route. Every signed-in account sees only its own state and adds only the namespaced `tracker.weeklyV14` overlay after its backup and first-use confirmation. The `STUDYQUEST_V14_ACCESS` switch supports `off`, `admin`, and `all`; the release uses `all`, with `off` available as an emergency stop.
 - The stable app shows a `Try v14` button after login. It explains the safe first-use step and offers a backup before opening v14. Logged-out requests return to login, and bearer device tokens cannot open v14.
 - v15 is the authenticated main app at `/`, with `/v15` and `/claudever15.html` retained as aliases. `STUDYQUEST_V15_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`, production activation is `all`, and `off` returns the root to `/app.html?stable=1` as an emergency stop.
+- v16 is a separate authenticated route at `/v16`, with `/claudever16.html` retained as an alias. `STUDYQUEST_V16_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`, and public activation occurs only after the admin canary, backup, hash, and account-isolation gates pass.
+- Hosted v16 uses the same account-scoped `studyquest_v3_<username>` storage, IndexedDB recovery outbox, and revision/hash-protected `/api/v2/state` flow. Opening or rendering v16 is read-only; deliberate edits are saved locally before cloud retry, and conflicts preserve both copies.
 - Logged-out requests use the stable login flow, bearer device-token sessions cannot open HTML routes, and every signed-in account receives only its own namespaced `studyquest_v3` state.
 - v15 uses the existing `/api/v2/state`, IndexedDB recovery, revisions, snapshots, undo, and cloud sync. Opening the route is read-only; task duration/progress fields are written only after the user interacts with a control. The stable app remains available at `/app.html?stable=1`, while v13 and v14 remain unchanged.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
@@ -64,7 +66,7 @@ Deployment behavior:
 - Existing Weekly semesters, weeks, notes, checks, and edited course lists are migrated additively. `Edit Subjects` remains the per-semester source for that user's course names and weekdays.
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention. A snapshot is skipped when its state matches the latest stored backup.
-- `/api/version` reports the v13 release hash; `/api/version?version=14` reports the separate v14 hash, access mode, and `/v14` route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
+- `/api/version` reports the v13 release hash; `/api/version?version=14`, `/api/version?version=15`, and `/api/version?version=16` report their separate hashes, access modes, and route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
 - Admin can preview and restore 30-day account snapshots. Full replacement requires a fresh signed preview token, creates a `pre_restore` backup, and increments the cloud revision; credentials are not changed.
 - Every signed-in user can open `/data-recovery` (with `/device-recovery` kept as an alias), choose an earlier saved version, preview exact missing/current-only/changed records, and use **Recover Missing Items**. This is additive: current records and settings are not replaced.
@@ -74,6 +76,18 @@ Deployment behavior:
 - Render Billing showed `No card on file`, `Services $0.00`, `Pipeline Minutes $0.00`, `Total month to date $0.00 USD`, and `Projected total for June $0.00 USD` when checked.
 - Free Render web services can spin down after inactivity. The first request after sleep can take about 50-60 seconds to wake.
 - Render's own Free Postgres is not a forever database plan because it expires after 30 days. For long-term no-monthly-cost storage, use Neon Free Postgres or another durable database/export plan.
+
+### v16 Hosted Release Gate
+
+The v16 hosted route is released separately from the v15 root. Use a fresh
+checkout based on `origin/main`, export browser and cloud copies outside Git,
+validate the encrypted Neon backup, record every account's revision/hash/
+summary baseline, and run the full release suite before pushing. Keep
+`STUDYQUEST_V16_ACCESS=off` until the exact v16 hash and health response are
+confirmed with the admin canary; then change only the Render runtime value to
+`all` and verify an ordinary signed-in account. Logged-out and device-token
+sessions remain blocked, and a failed gate rolls v16 back to `off` without a
+database restore.
 
 ### v14 Release Gate
 
