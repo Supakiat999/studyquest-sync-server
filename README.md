@@ -48,18 +48,19 @@ Deployment behavior:
 - The stable app shows a `Try v14` button after login. It explains the safe first-use step and offers a backup before opening v14. Logged-out requests return to login, and bearer device tokens cannot open v14.
 - v15 is the authenticated main app at `/`, with `/v15` and `/claudever15.html` retained as aliases. `STUDYQUEST_V15_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`, production activation is `all`, and `off` returns the root to `/app.html?stable=1` as an emergency stop.
 - v16 is a separate authenticated route at `/v16`, with `/claudever16.html` retained as an alias. `STUDYQUEST_V16_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`, and public activation occurs only after the admin canary, backup, hash, and account-isolation gates pass.
-- Hosted v16 uses the same account-scoped `studyquest_v3_<username>` storage, IndexedDB recovery outbox, and revision/hash-protected `/api/v2/state` flow. Opening or rendering v16 is read-only; deliberate edits are saved locally before cloud retry, and conflicts preserve both copies.
+- Hosted v16 uses the same account-scoped `studyquest_v3_<username>` storage, IndexedDB v3 recovery outbox, and revision/hash-protected `/api/v2/state` flow. Opening or rendering v16 is read-only; deliberate edits are saved locally before cloud retry, and conflicts preserve both copies.
 - Logged-out requests use the stable login flow, bearer device-token sessions cannot open HTML routes, and every signed-in account receives only its own namespaced `studyquest_v3` state.
 - v15 uses the existing `/api/v2/state`, IndexedDB recovery, revisions, snapshots, undo, and cloud sync. Opening the route is read-only; task duration/progress fields are written only after the user interacts with a control. The stable app remains available at `/app.html?stable=1`, while v13 and v14 remain unchanged.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
 - `/api/v2/state` requires revision lineage. New clients send `baseRevision`, `baseHash`, a retry-safe `mutationId`, and a record-change manifest.
+- `/api/v2/state/meta` returns authenticated revision/hash/integrity metadata without returning the full state. Visible clients check it every minute and immediately after startup, reconnect, focus, or returning to the tab.
 - The server compares record IDs before every write. Missing tasks, notes, files, checklist items, grades, trips, Weekly records, categories, or notebooks require matching user-deletion entries; otherwise the save is rejected as `DESTRUCTIVE_CHANGE_REVIEW_REQUIRED` and both copies remain intact.
 - Hosted `POST /api/state` is disabled. Every cloud write must include its known base revision through `/api/v2/state`.
-- Every stable-app edit saves first to `studyquest_v3_<username>` and IndexedDB, with a durable offline outbox and rolling device recovery copies. Cloud backup starts after a 500 ms quiet period, and page exit performs a final device save plus a best-effort revision-protected upload.
+- Every stable-app edit saves first to `studyquest_v3_<username>` and IndexedDB, with a durable offline outbox containing the exact cloud base and newest local snapshot. Cloud backup starts after a 500 ms quiet period; failed uploads retry after 1, 3, 10, and 30 seconds, then every 60 seconds while visible.
 - Admin v13 uses the same IndexedDB recovery database and durable outbox. If localStorage reaches its quota, edits and approved merges remain recoverable in IndexedDB instead of failing; unknown cloud revisions still require comparison.
 - Every unique accepted cloud revision is retained as a compressed immutable `state_versions` record. Accepted, unchanged, conflicted, blocked/rejected, recovered, restored, and oversized attempts are recorded in `state_save_events` without passwords or state contents.
-- Admin v13 sends saved edits after a 500 ms quiet period and retries its durable outbox after reopen, reconnect, focus, and visibility changes. Periodic checks remain a fallback; Chrome-versus-local-server, imported, and live differences still require a per-field Smart Merge preview.
-- `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy/tied/unverified differences require a manual choice.
+- v15/v16 automatically pull a newer cloud revision when the device has no pending work. If both devices changed, an exact base/local/cloud comparison automatically merges only disjoint record or field changes; same-field edits, edit-versus-delete, missing bases, and unstable record identities require review.
+- `_syncMeta` records stable IDs, per-field update stamps, deletion tombstones, additive counters, and 90 days or 500 visible change events. Legacy, overlapping, tied, or unverified differences require a manual choice.
 - Recovery Center reports sync times, per-field decisions, change history, saved-state usage, Weekly column counts, and the latest five readable changes for each copy. Chrome, Live, and the proposed merge can be exported together before applying.
 - The comparison and merge views show the newest task addition, its Bangkok time, Weekly total/visible/archived columns, and a plain-language change list. The latest trustworthy values are preselected, but nothing changes until `Approve Merge` is clicked.
 - Weekly curriculum is stored inside each account's state. New Weekly users choose ICE, BALAC, Industrial Pharmacy, a custom curriculum, or a blank program instead of receiving ICE automatically.
@@ -88,6 +89,11 @@ confirmed with the admin canary; then change only the Render runtime value to
 `all` and verify an ordinary signed-in account. Logged-out and device-token
 sessions remain blocked, and a failed gate rolls v16 back to `off` without a
 database restore.
+
+Safe multi-device reconciliation has a separate rollback switch. Keep
+`STUDYQUEST_SAFE_SYNC_MODE=off` for the initial deploy, use `users` with a
+private comma-separated `STUDYQUEST_SAFE_SYNC_USERS` canary list, then use
+`all` after the canary passes. `admin` enables only the admin account.
 
 ### v14 Release Gate
 
@@ -130,7 +136,7 @@ StudyQuest saves to the current device first. Cloud backup is a separate, revisi
 - `Backed up at <time>` or `Synced to admin`: the cloud accepted the revision and other devices can load it.
 - `Conflict - both copies preserved`: uploads pause because two copies changed independently. The app retains both until the user reviews and approves a copy or merge.
 
-Every edit writes to IndexedDB and account-scoped browser storage immediately. Online backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale browser cannot replace an online copy merely because its revision marker matches: hash lineage and record-removal checks are also required. Normal accounts remain isolated and never receive the admin laptop bridge.
+Every edit writes to IndexedDB and account-scoped browser storage immediately. Online backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale clean browser adopts the verified online copy after first making a recovery snapshot. A stale browser with unsent work cannot replace an online copy merely because its revision marker matches: exact base-state, hash-lineage, mutation acknowledgement, and record-removal checks are required.
 
 ### Verified Save-Safety Recovery - August 13, 2026
 
@@ -200,6 +206,8 @@ STUDYQUEST_ADMIN_PASSWORD=<strong private admin password>
 STUDYQUEST_INVITE_CODE=<private invite code for friends>
 STUDYQUEST_ADMIN_CONTACT_LABEL=<public contact label shown during recovery>
 STUDYQUEST_ADMIN_CONTACT_URL=<optional mailto or https contact link>
+STUDYQUEST_SAFE_SYNC_MODE=<off, admin, users, or all>
+STUDYQUEST_SAFE_SYNC_USERS=<private comma-separated canary usernames>
 STUDYQUEST_MAX_ACCOUNTS=5
 STUDYQUEST_MAX_STATE_BYTES=10485760
 STUDYQUEST_MAX_STATE_ENVELOPE_BYTES=262144
@@ -248,7 +256,7 @@ The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_
 
 - After authentication, the stable app reloads the signed-in user's browser key, such as `studyquest_v3_anya`, before accepting edits.
 - Hosted v13 uses that same authenticated per-account key. The `onrender.com` browser store and `127.0.0.1` browser store are separate browser origins; localhost reaches the admin account through the revision-protected cloud bridge rather than by exposing localhost storage to the website.
-- When device and online data differ, neither copy is silently applied. The popup uses the plain labels **On This Device** and **Saved Online**, shows removal details under **More details**, and offers export before any choice.
+- When a clean device is behind, the newer verified online copy is applied automatically after a device recovery snapshot. When both sides have unsent changes, disjoint fields merge automatically; a popup appears only for overlapping or otherwise unsafe differences and offers export before any choice.
 - Recovery copies use an auxiliary per-account browser key. The main `studyquest_v3` data family is never cleared automatically.
 - The browser also stores the current account copy, offline outbox, and rolling recovery records in IndexedDB. Failed requests remain `Cloud backup pending` and retry after reconnect, focus, startup, and returning to the tab.
 - Cloud status text distinguishes `Saved on this device`, `Cloud backup pending`, `Backed up at <time>`, and `Conflict - both copies preserved`.
@@ -256,6 +264,12 @@ The `admin` account cannot be reset inside StudyQuest. Change `STUDYQUEST_ADMIN_
 - Revision conflicts open the same recovery comparison for non-admin users instead of directing them to an admin-only screen.
 - `/data-recovery` lists only the signed-in user's immutable versions. Preview is read-only; **Recover Missing Items** adds absent records transactionally after a fresh signed preview and first creates a `pre_restore` snapshot.
 - `/device-recovery` remains an alias to the same recovery page. Device-copy inspection/export does not write browser storage.
+
+For a read-only incident audit, run `npm run audit:sync-incident` with a private
+`STUDYQUEST_BACKUP_DATABASE_URL`. Set `STUDYQUEST_INCIDENT_USERNAME`, time-range
+variables, and private output paths as needed. The command reads immutable
+versions/save events and produces an additive recovery preview; it never writes
+to PostgreSQL or performs recovery.
 
 ### August 13, 2026 Save-Safety Incident
 

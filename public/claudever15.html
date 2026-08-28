@@ -4958,12 +4958,12 @@
 
   <div class="sync-review-banner" id="syncReviewBanner" role="status" aria-live="polite" hidden>
     <div class="sync-review-banner-copy">
-      <strong>Sync review needed — both copies are safe</strong>
+      <strong id="syncReviewBannerTitle">Sync review needed — both copies are safe</strong>
       <span id="syncReviewBannerCopy">You can keep using StudyQuest. New work is saved on this device while cloud sync waits for your review.</span>
     </div>
     <div class="sync-review-banner-actions">
-      <button class="btn btn-primary btn-sm" type="button" onclick="reviewPendingLiveSyncConflict()">Review Copies</button>
-      <button class="btn btn-ghost btn-sm" type="button" onclick="postponeLiveSyncReview()">Continue Working</button>
+      <button class="btn btn-primary btn-sm" id="syncReviewPrimaryBtn" type="button" onclick="reviewPendingLiveSyncConflict()">Review Copies</button>
+      <button class="btn btn-ghost btn-sm" id="syncReviewSecondaryBtn" type="button" onclick="postponeLiveSyncReview()">Continue Working</button>
     </div>
   </div>
 
@@ -6136,6 +6136,7 @@
   </div>
 </div>
 
+<script src="/safe-sync.js"></script>
 <script>
 // ════════════════════════════════════════════════════════
 // STATE
@@ -6342,16 +6343,19 @@ const LIVE_SYNC_META_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_live_sync_meta`;
 const DEVICE_ID_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_device_id`;
 const SERVER_STATE_ENDPOINT = '/api/state';
 const CLOUD_STATE_ENDPOINT = '/api/v2/state';
+const CLOUD_STATE_META_ENDPOINT = '/api/v2/state/meta';
 const LOCAL_LIVE_STATE_ENDPOINT = '/api/live-state';
 const LOCAL_LIVE_STATUS_ENDPOINT = '/api/live-sync/status';
 const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
 const LIVE_VERSION_ENDPOINT = '/api/version?version=15';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
-const DEVICE_RECOVERY_DB_VERSION = 2;
+const DEVICE_RECOVERY_DB_VERSION = 3;
 const DEVICE_RECOVERY_COPY_LIMIT = 20;
 const CLOUD_SAVE_QUIET_MS = 500;
-const LIVE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+const LIVE_SYNC_INTERVAL_MS = 60 * 1000;
+const SAFE_MULTI_DEVICE_SYNC_ENABLED = window.__STUDYQUEST_SAFE_SYNC_V2__ !== false;
+const SAFE_SYNC_CLIENT_VERSION = 15;
 const STUDYQUEST_MAX_STATE_BYTES = 10 * 1024 * 1024;
 const SYNC_HISTORY_LIMIT = 500;
 const SYNC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
@@ -6407,6 +6411,8 @@ let liveSync = {
   lastPushAt: null,
   lastPullAt: null,
   nextSyncAt: null,
+  failureCount: 0,
+  pendingSince: null,
   lastDirection: null,
   inFlight: false,
   message: '',
@@ -6526,6 +6532,8 @@ async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-de
   const capturedAtMs = Date.now();
   const updatedAt = Number(copy.updatedAt || capturedAtMs);
   const fingerprint = `${updatedAt}:${serialized.length}`;
+  const lineageCopy = lineage ? JSON.parse(JSON.stringify(lineage)) : null;
+  if (lineageCopy) lineageCopy.localState = copy;
   const db = await openV13DeviceRecoveryDb();
   try {
     const transaction = db.transaction(['accountStates','outbox','recovery'], 'readwrite');
@@ -6533,7 +6541,14 @@ async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-de
       username, state:copy, updatedAt, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
     });
     const outbox = transaction.objectStore('outbox');
-    if (pending) outbox.put({ username, state:copy, updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint, lineage });
+    if (pending) outbox.put({
+      username, formatVersion:3, state:copy, localState:copy,
+      baseState:lineageCopy?.baseState || null,
+      baseRevision:Number.isInteger(lineageCopy?.baseRevision) ? lineageCopy.baseRevision : null,
+      baseHash:lineageCopy?.baseHash || null,
+      mutationId:lineageCopy?.mutationId || null,
+      updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint, lineage:lineageCopy,
+    });
     transaction.objectStore('recovery').put({
       id:`${username}:${fingerprint}`, username, state:copy, label,
       updatedAt, capturedAtMs, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
@@ -6633,6 +6648,53 @@ async function clearV13DeviceOutboxThrough(savedUpdatedAt, force = false) {
     });
     const remaining = await v13IdbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username));
     v13DurableOutboxPending = !!remaining;
+  } finally {
+    db.close();
+  }
+}
+
+async function clearV13DeviceOutboxAcknowledged(mutationId, savedUpdatedAt) {
+  if (!mutationId) return false;
+  const username = v13DurableUsername();
+  const db = await openV13DeviceRecoveryDb();
+  try {
+    let cleared = false;
+    const transaction = db.transaction('outbox', 'readwrite');
+    const store = transaction.objectStore('outbox');
+    const pending = await v13IdbRequest(store.get(username));
+    const pendingMutationId = pending?.mutationId || pending?.lineage?.mutationId || null;
+    if (pending && pendingMutationId === mutationId && Number(pending.updatedAt || 0) <= Number(savedUpdatedAt || 0)) {
+      store.delete(username);
+      cleared = true;
+    }
+    await v13IdbTransactionDone(transaction);
+    const remaining = await v13IdbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username));
+    v13DurableOutboxPending = !!remaining;
+    return cleared;
+  } finally {
+    db.close();
+  }
+}
+
+async function clearV13DeviceOutboxIfCloudMatches(cloudState, expectedMutationId = null) {
+  const username = v13DurableUsername();
+  const db = await openV13DeviceRecoveryDb();
+  try {
+    let cleared = false;
+    const transaction = db.transaction('outbox', 'readwrite');
+    const store = transaction.objectStore('outbox');
+    const pending = await v13IdbRequest(store.get(username));
+    const pendingState = pending?.localState || pending?.state;
+    const pendingMutationId = pending?.mutationId || pending?.lineage?.mutationId || null;
+    const mutationMatches = !expectedMutationId || pendingMutationId === expectedMutationId;
+    if (pending && mutationMatches && mergeRelevantStatesEquivalent(pendingState, cloudState)) {
+      store.delete(username);
+      cleared = true;
+    }
+    await v13IdbTransactionDone(transaction);
+    const remaining = await v13IdbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username));
+    v13DurableOutboxPending = !!remaining;
+    return cleared;
   } finally {
     db.close();
   }
@@ -7061,6 +7123,9 @@ function newCloudMutation(snapshot) {
     mutationId:`v13-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`,
     baseRevision:Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null,
     baseHash:liveSync.stateHash || meta.stateHash || null,
+    baseState:confirmedCloudState ? cloneStateForSafety(confirmedCloudState) : null,
+    localState:cloneStateForSafety(snapshot),
+    createdAt:new Date().toISOString(),
     changeSet:buildCloudChangeSet(confirmedCloudState, snapshot),
   };
 }
@@ -7555,7 +7620,8 @@ function saveState() {
   setSaveStatus('saving', 'Saving on this device...');
   if (trackedChanges.length && (isHostedAppHost() || liveSync.paired)) {
     liveSync.pending = true;
-    setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
+    liveSync.pendingSince = liveSync.pendingSince || new Date().toISOString();
+    setLiveSyncMeta({ pending: true, pendingSince:liveSync.pendingSince, localUpdatedAt: state.updatedAt });
   }
   queueV13DeviceStatePersistence(snapshot, {
     pending:shouldQueueCloud
@@ -7639,7 +7705,7 @@ function scheduledSyncStatusText() {
     : `Synced · next check ${syncTimeOnly(next)}`;
 }
 
-function scheduleNextLiveSync({ reset = false } = {}) {
+function scheduleNextLiveSync({ reset = false, retry = false } = {}) {
   clearTimeout(liveSyncScheduleTimer);
   if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) {
     liveSync.nextSyncAt = null;
@@ -7647,7 +7713,10 @@ function scheduleNextLiveSync({ reset = false } = {}) {
   }
   const now = Date.now();
   const meta = getLiveSyncMeta();
-  let target = reset ? now + LIVE_SYNC_INTERVAL_MS : Date.parse(meta.nextScheduledSyncAt || liveSync.nextSyncAt || '');
+  const retryDelay = retry && window.StudyQuestSafeSync
+    ? window.StudyQuestSafeSync.retryDelay(liveSync.failureCount || 1)
+    : null;
+  let target = retryDelay ? now + retryDelay : reset ? now + LIVE_SYNC_INTERVAL_MS : Date.parse(meta.nextScheduledSyncAt || liveSync.nextSyncAt || '');
   if (!Number.isFinite(target)) target = now + LIVE_SYNC_INTERVAL_MS;
   liveSync.nextSyncAt = new Date(target).toISOString();
   setLiveSyncMeta({ nextScheduledSyncAt: liveSync.nextSyncAt });
@@ -7657,7 +7726,8 @@ function scheduleNextLiveSync({ reset = false } = {}) {
 function queueLiveCloudSave() {
   if ((!liveSync.paired && !isHostedAppHost()) || liveSync.conflict || corruptSaveInfo) return;
   liveSync.pending = true;
-  setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
+  liveSync.pendingSince = liveSync.pendingSince || new Date().toISOString();
+  setLiveSyncMeta({ pending: true, pendingSince:liveSync.pendingSince, localUpdatedAt: state.updatedAt });
   clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(() => runLiveSyncCycle({ reason:'edit-save' }), CLOUD_SAVE_QUIET_MS);
   setSaveStatus('local', scheduledSyncStatusText());
@@ -7669,6 +7739,8 @@ function cloudStateEndpoint() {
 }
 
 function recordSuccessfulLiveSync(direction, at = new Date().toISOString()) {
+  liveSync.failureCount = 0;
+  if (!liveSync.pending) liveSync.pendingSince = null;
   liveSync.lastSuccessAt = at;
   liveSync.lastDirection = direction;
   if (direction === 'browser-to-cloud') liveSync.lastPushAt = at;
@@ -7679,17 +7751,89 @@ function recordSuccessfulLiveSync(direction, at = new Date().toISOString()) {
   };
   if (direction === 'browser-to-cloud') patch.lastPushAt = at;
   if (direction === 'cloud-to-browser') patch.lastPullAt = at;
-  setLiveSyncMeta(patch);
+  setLiveSyncMeta({ ...patch, failureCount:0, pendingSince:liveSync.pendingSince });
+  renderSyncReviewBanner();
+}
+
+function recordLiveSyncFailure(message) {
+  liveSync.failureCount = Math.max(0, Number(liveSync.failureCount || 0)) + 1;
+  if (liveSync.pending) liveSync.pendingSince = liveSync.pendingSince || new Date().toISOString();
+  setLiveSyncMeta({ failureCount:liveSync.failureCount, pendingSince:liveSync.pendingSince, lastError:message });
+  renderSyncReviewBanner();
+}
+
+function stableCloudStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableCloudStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableCloudStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function verifiedCloudStateHash(snapshot) {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') return null;
+  const bytes = new TextEncoder().encode(stableCloudStringify(snapshot ?? null));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function attemptAutomaticNonOverlappingMerge({ lineage, localState, cloudState, cloudRevision, cloudStateHash, cloudUpdatedAt, depth = 0 }) {
+  if (!SAFE_MULTI_DEVICE_SYNC_ENABLED || !window.StudyQuestSafeSync || !lineage?.baseState || depth > 0) {
+    return { merged:false, conflicts:[{ path:'', kind:'missing-or-legacy-base' }] };
+  }
+  const result = window.StudyQuestSafeSync.buildThreeWayMerge(lineage.baseState, localState, cloudState, {
+    uiOnlyRoots:[...SYNC_UI_ONLY_ROOTS, '_syncMeta', '_exportedAt', '_exportVersion'],
+  });
+  if (!result.autoMergeable) return { merged:false, conflicts:result.conflicts };
+  const mergedState = normalizeState(result.mergedState || localState);
+  const smartMetadata = buildSmartMerge(localState, cloudState).mergedState?._syncMeta;
+  if (smartMetadata) mergedState._syncMeta = smartMetadata;
+  mergedState.updatedAt = Math.max(Date.now(), Number(localState?.updatedAt || 0), Number(cloudState?.updatedAt || 0));
+  await Promise.all([
+    persistV13RecoveryOnly(localState, 'Before automatic non-overlapping merge'),
+    persistV13RecoveryOnly(cloudState, 'Cloud copy before automatic non-overlapping merge'),
+  ]);
+  if (!mergeRelevantStatesEquivalent(state, localState)) {
+    return { merged:false, conflicts:[{ path:'', kind:'local-changed-during-merge' }] };
+  }
+  pushAutoBackup('Before automatic non-overlapping merge', localState);
+  setSQState(mergedState, { resetSyncBaseline:true });
+  writeV13BrowserState(state);
+  liveSync.revision = Number(cloudRevision || 0);
+  liveSync.stateHash = cloudStateHash || null;
+  confirmedCloudState = cloneStateForSafety(cloudState);
+  pendingCloudMutation = newCloudMutation(state);
+  pendingCloudMutation.baseRevision = liveSync.revision;
+  pendingCloudMutation.baseHash = liveSync.stateHash;
+  pendingCloudMutation.baseState = cloneStateForSafety(cloudState);
+  const mergedSnapshot = cloneStateForSafety(state);
+  await persistV13DeviceState(state, { pending:true, label:'automatic-nonoverlap-merge', lineage:pendingCloudMutation });
+  liveSync.pending = true;
+  setLiveSyncMeta({ revision:liveSync.revision, stateHash:liveSync.stateHash, pending:true, localUpdatedAt:state.updatedAt });
+  const outcome = await saveStateToCloud({
+    lineageOverride:pendingCloudMutation,
+    snapshotOverride:mergedSnapshot,
+    autoMergeDepth:depth + 1,
+    mergeApproval:{
+      approvedAt:new Date().toISOString(),
+      sourceRevision:liveSync.revision,
+      source:`v${SAFE_SYNC_CLIENT_VERSION}-auto-nonoverlap`,
+      changedPathCount:result.changedPaths.length,
+    },
+  });
+  return { merged:true, outcome, changedPaths:result.changedPaths };
 }
 
 async function saveStateToCloud() {
   const options = arguments[0] || {};
   if ((!liveSync.paired && !isHostedAppHost()) || (liveSync.conflict && !options.allowDuringConflict) || corruptSaveInfo) return { ok: false };
   const meta = getLiveSyncMeta();
-  const snapshot = cloneStateForSafety(state);
+  const snapshot = cloneStateForSafety(options.snapshotOverride || state);
   const uploadedStateUpdatedAt = Number(snapshot.updatedAt || 0);
-  const baseRevision = Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
   const lineage = options.lineageOverride || pendingCloudMutation || newCloudMutation(snapshot);
+  const baseRevision = Number.isInteger(lineage.baseRevision)
+    ? lineage.baseRevision
+    : Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
   const size = stateSizeBreakdown(snapshot);
   liveSync.stateBytes = size.totalBytes;
   if (size.overLimit) {
@@ -7732,6 +7876,18 @@ async function saveStateToCloud() {
       throw new Error(result.error || 'Live account authorization is required.');
     }
     if (res.status === 409 && ['STATE_CONFLICT','BASE_HASH_MISMATCH','DESTRUCTIVE_CHANGE_REVIEW_REQUIRED'].includes(result.error)) {
+      if (result.error !== 'DESTRUCTIVE_CHANGE_REVIEW_REQUIRED') {
+        const automatic = await attemptAutomaticNonOverlappingMerge({
+          lineage,
+          localState:snapshot,
+          cloudState:normalizeState(result.state || {}),
+          cloudRevision:Number(result.revision || 0),
+          cloudStateHash:result.stateHash || null,
+          cloudUpdatedAt:result.updatedAt || null,
+          depth:Number(options.autoMergeDepth || 0),
+        });
+        if (automatic.merged) return automatic.outcome;
+      }
       liveSync.revision = Number(result.revision || 0);
       liveSync.stateHash = result.stateHash || null;
       confirmedCloudState = cloneStateForSafety(result.state || {});
@@ -7741,7 +7897,7 @@ async function saveStateToCloud() {
         revision: Number(result.revision || 0),
         cloudStateHash:result.stateHash || null,
         cloudUpdatedAt: result.updatedAt || null,
-        reason:result.error === 'DESTRUCTIVE_CHANGE_REVIEW_REQUIRED' ? 'destructive-save-blocked' : 'server-conflict',
+        reason:result.error === 'DESTRUCTIVE_CHANGE_REVIEW_REQUIRED' ? 'destructive-save-blocked' : 'concurrent-overlap',
       });
       return { ok: false, conflict: true };
     }
@@ -7753,34 +7909,44 @@ async function saveStateToCloud() {
       throw error;
     }
     if (!res.ok) throw new Error(result.error || 'Live save failed');
+    if (!result.acknowledgedMutationId || result.acknowledgedMutationId !== lineage.mutationId) {
+      throw new Error('Cloud acknowledgement did not match the pending device save.');
+    }
+    const expectedHash = await verifiedCloudStateHash(snapshot);
+    if (!result.stateHash || (expectedHash && result.stateHash !== expectedHash && !result.ignoredVolatileOnly)) {
+      throw new Error('Cloud acknowledgement hash did not verify.');
+    }
     liveSync.revision = Number(result.revision || baseRevision || 0);
     liveSync.stateHash = result.stateHash || liveSync.stateHash;
     confirmedCloudState = cloneStateForSafety(snapshot);
-    pendingCloudMutation = null;
     liveSync.lastCloudRevision = liveSync.revision;
     liveSync.updatedAt = result.savedAt || new Date().toISOString();
-    const newerLocalChanges = Number(state.updatedAt || 0) > uploadedStateUpdatedAt;
-    liveSync.pending = newerLocalChanges;
+    const newerMutationExists = !!pendingCloudMutation?.mutationId && pendingCloudMutation.mutationId !== lineage.mutationId;
+    const newerLocalChanges = newerMutationExists || Number(state.updatedAt || 0) > uploadedStateUpdatedAt;
+    const clearedAcknowledgedOutbox = await clearV13DeviceOutboxAcknowledged(lineage.mutationId, uploadedStateUpdatedAt)
+      .catch(error => { recordAppError('outbox-clear', error); return false; });
+    if (!newerLocalChanges && clearedAcknowledgedOutbox) pendingCloudMutation = null;
+    liveSync.pending = newerLocalChanges || !clearedAcknowledgedOutbox;
     liveSync.status = 'synced';
-    await clearV13DeviceOutboxThrough(uploadedStateUpdatedAt).catch(error => recordAppError('outbox-clear', error));
     setLiveSyncMeta({
       revision: liveSync.revision,
       stateHash:liveSync.stateHash,
-      pending:newerLocalChanges,
+      pending:liveSync.pending,
       lastSyncedStateUpdatedAt:uploadedStateUpdatedAt,
       latestCloudSaveAt: liveSync.updatedAt,
     });
     recordSuccessfulLiveSync('browser-to-cloud', liveSync.updatedAt);
     setSaveMeta({ latestCloudSaveAt: liveSync.updatedAt });
-    setSaveStatus(newerLocalChanges ? 'local' : 'saved', scheduledSyncStatusText());
+    setSaveStatus(liveSync.pending ? 'local' : 'saved', scheduledSyncStatusText());
     renderRecoveryCenter();
-    if (newerLocalChanges) queueLiveCloudSave();
-    return { ok:true, direction:'browser-to-cloud', at:liveSync.updatedAt, newerLocalChanges };
+    if (liveSync.pending) queueLiveCloudSave();
+    return { ok:true, direction:'browser-to-cloud', at:liveSync.updatedAt, newerLocalChanges, hashVerified:true };
   } catch (e) {
     if (!liveSync.conflict) {
       liveSync.pending = true;
       liveSync.status = 'offline';
       liveSync.message = e?.name === 'AbortError' ? 'Live server timed out' : String(e?.message || e);
+      recordLiveSyncFailure(liveSync.message);
       setLiveSyncMeta({ pending: true, lastError: liveSync.message });
       setSaveStatus(e?.code === 'STATE_TOO_LARGE' ? 'error' : 'offline', e?.code === 'STATE_TOO_LARGE' ? 'Saved locally · cloud size limit exceeded' : 'Saved locally · admin sync pending');
       recordAppError('live-save', e);
@@ -7817,15 +7983,14 @@ async function hydrateV13StateFromDeviceRecovery() {
     v13DurableOutboxPending = !!bundle.outbox;
     pendingCloudMutation = bundle.outbox?.lineage || null;
     const candidates = [
-      { state, priority:1 },
-      { state:bundle.accountState?.state, priority:2 },
-      { state:bundle.outbox?.state, priority:3 },
+      { state, priority:1, source:'browser' },
+      { state:bundle.accountState?.state, priority:2, capturedAtMs:Date.parse(bundle.accountState?.capturedAt || '') || 0, source:'account' },
+      { state:bundle.outbox?.localState || bundle.outbox?.state, priority:3, capturedAtMs:Date.parse(bundle.outbox?.queuedAt || '') || 0, source:'outbox' },
     ].filter(candidate => candidate.state && typeof candidate.state === 'object');
-    candidates.sort((left, right) => {
-      const timeDifference = Number(right.state.updatedAt || 0) - Number(left.state.updatedAt || 0);
-      return timeDifference || right.priority - left.priority;
-    });
-    const latest = bundle.outbox?.state || candidates[0]?.state;
+    const selected = SAFE_MULTI_DEVICE_SYNC_ENABLED && window.StudyQuestSafeSync
+      ? window.StudyQuestSafeSync.newestLocalSnapshot(candidates)
+      : candidates.sort((left, right) => Number(right.state.updatedAt || 0) - Number(left.state.updatedAt || 0) || right.priority - left.priority)[0];
+    const latest = selected?.state;
     if (latest && Number(latest.updatedAt || 0) >= Number(state.updatedAt || 0)) {
       setSQState(latest, { resetSyncBaseline:true });
       writeV13BrowserState(state);
@@ -7833,9 +7998,22 @@ async function hydrateV13StateFromDeviceRecovery() {
       ensureTravelState();
       renderAll();
     }
-    if (bundle.outbox?.state) {
+    if (bundle.outbox) {
+      const outboxState = bundle.outbox.localState || bundle.outbox.state;
+      if (SAFE_MULTI_DEVICE_SYNC_ENABLED && latest && Number(latest.updatedAt || 0) > Number(outboxState?.updatedAt || 0)) {
+        const prior = pendingCloudMutation || {};
+        pendingCloudMutation = {
+          ...prior,
+          mutationId:`v15-recovered-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`,
+          localState:cloneStateForSafety(latest),
+          changeSet:buildCloudChangeSet(prior.baseState || null, latest),
+          recoveredNewerLocalAt:new Date().toISOString(),
+        };
+        await persistV13DeviceState(latest, { pending:true, label:'newer-local-over-stale-outbox', lineage:pendingCloudMutation });
+      }
       liveSync.pending = true;
-      setLiveSyncMeta({ pending:true, localUpdatedAt:Number(bundle.outbox.state.updatedAt || state.updatedAt || 0) });
+      liveSync.pendingSince = bundle.outbox.queuedAt || new Date().toISOString();
+      setLiveSyncMeta({ pending:true, pendingSince:liveSync.pendingSince, localUpdatedAt:Number(latest?.updatedAt || state.updatedAt || 0) });
       setSaveStatus('local', 'Saved on this device · cloud backup pending');
     }
     return bundle;
@@ -8752,16 +8930,32 @@ function shouldOpenLiveSyncConflictModal(conflict, forceOpen = false) {
   return forceOpen
     || conflict?.sourceType === 'import'
     || conflict?.sourceType === 'local-server'
-    || ['manual-review', 'initial-pair'].includes(conflict?.reason);
+    || ['manual-review', 'initial-pair', 'concurrent-overlap', 'missing-merge-base', 'destructive-save-blocked'].includes(conflict?.reason);
 }
 
 function renderSyncReviewBanner() {
   const banner = document.getElementById('syncReviewBanner');
   if (!banner) return;
   const cloudConflict = liveSync.conflict && !['import', 'local-server'].includes(liveSync.conflict.sourceType);
-  banner.hidden = !cloudConflict;
-  if (!cloudConflict) return;
+  const pendingAgeMs = Date.now() - Date.parse(liveSync.pendingSince || getLiveSyncMeta().pendingSince || '');
+  const delayedUpload = SAFE_MULTI_DEVICE_SYNC_ENABLED && !cloudConflict && liveSync.pending
+    && (liveSync.failureCount >= 3 || (Number.isFinite(pendingAgeMs) && pendingAgeMs >= 60_000));
+  banner.hidden = !cloudConflict && !delayedUpload;
+  if (!cloudConflict && !delayedUpload) return;
   const copy = document.getElementById('syncReviewBannerCopy');
+  const title = document.getElementById('syncReviewBannerTitle');
+  const primary = document.getElementById('syncReviewPrimaryBtn');
+  const secondary = document.getElementById('syncReviewSecondaryBtn');
+  if (delayedUpload) {
+    if (title) title.textContent = 'Cloud sync is delayed — your device copy is safe';
+    if (copy) copy.textContent = 'StudyQuest will keep retrying automatically. You can retry now or inspect the recovery copies.';
+    if (primary) { primary.textContent = 'Retry Now'; primary.onclick = () => runLiveSyncCycle({ reason:'banner-retry', manual:true }); }
+    if (secondary) { secondary.textContent = 'Recovery Center'; secondary.onclick = () => openRecoveryCenter(); }
+    return;
+  }
+  if (title) title.textContent = 'Sync review needed — both copies are safe';
+  if (primary) { primary.textContent = 'Review Copies'; primary.onclick = () => reviewPendingLiveSyncConflict(); }
+  if (secondary) { secondary.textContent = 'Continue Working'; secondary.onclick = () => postponeLiveSyncReview(); }
   if (copy) copy.textContent = liveSync.pending || v13DurableOutboxPending
     ? 'Your latest work is saved on this device. Cloud sync is paused until you review both preserved copies.'
     : 'You can keep using StudyQuest. Both preserved copies will remain unchanged until you review them.';
@@ -10072,19 +10266,20 @@ async function applyCloudState(cloudState, revision, updatedAt, label = 'Before 
     pushAutoBackup(label, state);
   }
   setSQState(cloudState, { resetSyncBaseline:true });
+  const cloudLoadUpdatedAt = Number(state.updatedAt || 0);
   await queueV13DeviceStatePersistence(state, { pending:false, label:'cloud-load' });
   writeV13BrowserState(state);
-  await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
   liveSync.revision = Number(revision || 0);
   liveSync.lastCloudRevision = liveSync.revision;
   liveSync.updatedAt = updatedAt || null;
-  liveSync.pending = false;
+  const newerLocalChanges = v13DurableOutboxPending || liveSync.pending || !mergeRelevantStatesEquivalent(state, cloudState);
+  liveSync.pending = newerLocalChanges;
   liveSync.status = 'synced';
   const loadedAt = new Date().toISOString();
   setLiveSyncMeta({
     revision: liveSync.revision,
-    pending: false,
-    lastSyncedStateUpdatedAt: state.updatedAt,
+    pending: newerLocalChanges,
+    lastSyncedStateUpdatedAt: cloudLoadUpdatedAt,
     latestCloudLoadAt: recordCloudSync ? loadedAt : getLiveSyncMeta().latestCloudLoadAt,
   });
   if (recordCloudSync) {
@@ -10095,7 +10290,21 @@ async function applyCloudState(cloudState, revision, updatedAt, label = 'Before 
   ensureTravelState();
   renderAll();
   if (isLocalLabHost()) saveStateToLocalServerOnly();
+  if (newerLocalChanges) queueLiveCloudSave();
   return { ok: true, direction: recordCloudSync ? 'cloud-to-browser' : 'local-disk-to-browser', at: loadedAt };
+}
+
+async function fetchCloudStateMetadata(signal) {
+  if (!SAFE_MULTI_DEVICE_SYNC_ENABLED || !isHostedAppHost()) return null;
+  const response = await fetch(CLOUD_STATE_META_ENDPOINT, { credentials:'same-origin', cache:'no-store', signal });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    handleHostedAuthExpired();
+    return { authorizationRequired:true };
+  }
+  if (!response.ok) throw new Error(result.error || 'Could not check cloud metadata');
+  calibrateSyncClock(result.serverTime);
+  return result;
 }
 
 async function syncLiveState(options = {}) {
@@ -10105,6 +10314,25 @@ async function syncLiveState(options = {}) {
   try {
     liveSync.status = 'syncing';
     setSaveStatus('saving', 'Checking live...');
+    const storedMeta = getLiveSyncMeta();
+    const knownBeforeCheck = Number.isInteger(liveSync.revision)
+      ? liveSync.revision
+      : Number.isInteger(storedMeta.revision) ? storedMeta.revision : null;
+    const metadata = await fetchCloudStateMetadata(controller.signal);
+    if (metadata?.authorizationRequired) return { ok:false, authorizationRequired:true };
+    if (metadata && confirmedCloudState && statesEquivalent(state, confirmedCloudState)
+      && !v13DurableOutboxPending && !liveSync.pending && knownBeforeCheck !== null
+      && Number(metadata.revision || 0) === knownBeforeCheck
+      && (!storedMeta.stateHash || !metadata.stateHash || storedMeta.stateHash === metadata.stateHash)) {
+      liveSync.revision = Number(metadata.revision || 0);
+      liveSync.stateHash = metadata.stateHash || null;
+      liveSync.updatedAt = metadata.updatedAt || null;
+      liveSync.status = 'synced';
+      const checkedAt = new Date().toISOString();
+      recordSuccessfulLiveSync('no-change', checkedAt);
+      setSaveStatus('saved', scheduledSyncStatusText());
+      return { ok:true, direction:'no-change', at:checkedAt, metadataOnly:true };
+    }
     const res = await fetch(cloudStateEndpoint(), { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
     const result = await res.json().catch(() => ({}));
     if (res.status === 401) {
@@ -10145,10 +10373,11 @@ async function syncLiveState(options = {}) {
         && (!lineage.baseHash || !cloudStateHash || lineage.baseHash === cloudStateHash);
       liveSync.revision = knownRevision;
       if (!statesDiffer) {
-        liveSync.pending = false;
         confirmedCloudState = cloneStateForSafety(cloudState);
-        pendingCloudMutation = null;
-        await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
+        const cleared = await clearV13DeviceOutboxIfCloudMatches(cloudState, lineage?.mutationId)
+          .catch(error => { recordAppError('outbox-clear', error); return false; });
+        liveSync.pending = !cleared && v13DurableOutboxPending;
+        if (cleared) pendingCloudMutation = null;
       } else if (lineageMatches) {
         confirmedCloudState = cloneStateForSafety(cloudState);
         return await saveStateToCloud({ lineageOverride:lineage });
@@ -10161,6 +10390,24 @@ async function syncLiveState(options = {}) {
       }
     }
 
+    if (!options.initialPair && SAFE_MULTI_DEVICE_SYNC_ENABLED && v13DurableOutboxPending && knownRevision !== null && cloudRevisionChanged) {
+      const automatic = await attemptAutomaticNonOverlappingMerge({
+        lineage:pendingCloudMutation,
+        localState:cloneStateForSafety(state),
+        cloudState,
+        cloudRevision,
+        cloudStateHash,
+        cloudUpdatedAt:result.updatedAt || null,
+      });
+      if (automatic.merged) return automatic.outcome;
+      openLiveSyncConflict({
+        localState:cloneStateForSafety(state), cloudState, revision:cloudRevision,
+        cloudStateHash, cloudUpdatedAt:result.updatedAt || null, reason:'concurrent-overlap',
+        automaticMergeConflicts:automatic.conflicts,
+      });
+      return { ok:false, conflict:true, previewReady:true };
+    }
+
     if (!options.initialPair && v13DurableOutboxPending && knownRevision === null) {
       openLiveSyncConflict({
         localState:cloneStateForSafety(state),
@@ -10168,13 +10415,17 @@ async function syncLiveState(options = {}) {
         revision:cloudRevision,
         cloudStateHash,
         cloudUpdatedAt:result.updatedAt || null,
-        reason:'durable-outbox-without-known-revision',
+        reason:'missing-merge-base',
       });
       return { ok:false, conflict:true, previewReady:true };
     }
 
     liveSync.revision = cloudRevision;
     confirmedCloudState = cloneStateForSafety(cloudState);
+
+    if (statesDiffer && SAFE_MULTI_DEVICE_SYNC_ENABLED && !options.initialPair && !v13DurableOutboxPending && !liveSync.pending) {
+      return await applyCloudState(cloudState, cloudRevision, result.updatedAt || null, 'Before automatic cloud update');
+    }
 
     if (statesDiffer) {
       const reviewOpened = openLiveSyncConflict({
@@ -10188,19 +10439,25 @@ async function syncLiveState(options = {}) {
       });
       if (reviewOpened) return { ok:false, conflict:true, previewReady:true };
     }
-    liveSync.pending = false;
+    if (v13DurableOutboxPending) {
+      const cleared = await clearV13DeviceOutboxIfCloudMatches(cloudState, pendingCloudMutation?.mutationId)
+        .catch(error => { recordAppError('outbox-clear', error); return false; });
+      if (cleared) pendingCloudMutation = null;
+    }
+    liveSync.pending = v13DurableOutboxPending;
     liveSync.status = 'synced';
-    await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
     const syncedAt = new Date().toISOString();
-    pendingCloudMutation = null;
-    setLiveSyncMeta({ revision:cloudRevision, stateHash:cloudStateHash, pending:false, lastSyncedStateUpdatedAt:state.updatedAt });
+    if (!liveSync.pending) pendingCloudMutation = null;
+    setLiveSyncMeta({ revision:cloudRevision, stateHash:cloudStateHash, pending:liveSync.pending, lastSyncedStateUpdatedAt:state.updatedAt });
     recordSuccessfulLiveSync('no-change', syncedAt);
-    setSaveStatus('saved', scheduledSyncStatusText());
+    setSaveStatus(liveSync.pending ? 'local' : 'saved', scheduledSyncStatusText());
+    if (liveSync.pending) queueLiveCloudSave();
     return { ok:true, direction:'no-change', at:syncedAt };
   } catch (e) {
     liveSync.status = 'offline';
     liveSync.pending = !!getLiveSyncMeta().pending;
     liveSync.message = e?.name === 'AbortError' ? 'Live server timed out while waking.' : String(e?.message || e);
+    if (liveSync.pending) recordLiveSyncFailure(liveSync.message);
     setSaveStatus('offline', liveSync.pending ? 'Saved locally · admin sync pending' : 'Live server unavailable');
     recordAppError('live-load', e);
     return { ok: false, error: liveSync.message };
@@ -10234,8 +10491,9 @@ async function runLiveSyncCycle(options = {}) {
     return outcome;
   } finally {
     liveSync.inFlight = false;
-    scheduleNextLiveSync({ reset: true });
-    if (outcome?.ok && !liveSync.conflict) setSaveStatus('saved', scheduledSyncStatusText());
+    const shouldRetrySoon = SAFE_MULTI_DEVICE_SYNC_ENABLED && liveSync.pending && !outcome?.ok && !liveSync.conflict;
+    scheduleNextLiveSync(shouldRetrySoon ? { retry:true } : { reset:true });
+    if (outcome?.ok && !liveSync.conflict && !liveSync.pending) setSaveStatus('saved', scheduledSyncStatusText());
     renderRecoveryCenter();
   }
 }
@@ -10298,6 +10556,10 @@ function retryPendingServerSync() {
   if (!canUseServerStorage() || liveSync.conflict) return;
   if (isLocalLabHost() && pendingServerSync) queueServerStateSave();
   if (liveSync.paired || isHostedAppHost()) {
+    if (SAFE_MULTI_DEVICE_SYNC_ENABLED && document.visibilityState !== 'hidden') {
+      runLiveSyncCycle({ reason:liveSync.pending ? 'pending-resume' : 'metadata-refresh' });
+      return;
+    }
     const dueAt = Date.parse(getLiveSyncMeta().nextScheduledSyncAt || liveSync.nextSyncAt || '');
     if (Number.isFinite(dueAt) && dueAt <= Date.now()) runLiveSyncCycle({ reason: 'missed-schedule' });
     else scheduleNextLiveSync();
@@ -10508,7 +10770,11 @@ function setSaveStatus(status = 'saved', label = 'Saved') {
   clearTimeout(saveStatusClearTimer);
   el.className = `save-status-chip ${status}`;
   el.innerHTML = `<strong>${escapeHtml(label)}</strong>`;
-  el.title = `Save status: ${label}`;
+  const saveMeta = getSaveMeta();
+  const localTime = saveMeta.latestLocalSaveAt ? new Date(saveMeta.latestLocalSaveAt).toLocaleString() : 'not yet';
+  const cloudTime = saveMeta.latestCloudSaveAt ? new Date(saveMeta.latestCloudSaveAt).toLocaleString() : 'not yet';
+  const pendingAge = liveSync.pendingSince ? Math.max(0, Math.round((Date.now() - Date.parse(liveSync.pendingSince)) / 1000)) : 0;
+  el.title = `Save status: ${label}\nLast device save: ${localTime}\nLast verified cloud save: ${cloudTime}${liveSync.pending ? `\nPending: ${pendingAge}s · retry ${liveSync.failureCount || 0}` : ''}`;
 }
 
 function getUpcomingExamTasks() {

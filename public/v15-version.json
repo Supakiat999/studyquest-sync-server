@@ -1,7 +1,7 @@
 {
   "version": 15,
-  "hash": "72bc6e99ee3b67b5aa13ed12186111c5344a419be6348beeacb78b547936e25a",
-  "releasedAt": "2026-08-21T09:32:28.433Z",
+  "hash": "4e0f98d9b08ed24639c1e8862f02a2d8bd478d0b98dab7fb05ba7c0c604bbc52",
+  "releasedAt": "2026-08-28T06:20:21.919Z",
   "source": "claudever15.html",
   "route": "/",
   "aliases": ["/v15", "/claudever15.html"],
@@ -9,5 +9,6 @@
   "adminOnly": false,
   "access": "authenticated",
   "accessMode": "all",
-  "defaultAccessMode": "off"
+  "defaultAccessMode": "off",
+  "sync": "account-scoped-three-way-safe-sync-v3"
 }

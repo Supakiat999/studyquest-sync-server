@@ -82,7 +82,7 @@ const v15Hash = sha256('public/claudever15.html');
 const v16Hash = sha256('public/claudever16.html');
 assert(v13Hash === '9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7', 'Hosted v13 changed');
 assert(v14Hash === '9a4e7d2547db64d315f556dbc0b7ef061bb5ee0262f0413157cc1b7abad8ff62', 'Hosted v14 changed');
-assert(v15Hash === '72bc6e99ee3b67b5aa13ed12186111c5344a419be6348beeacb78b547936e25a', 'Hosted v15 changed');
+assert(v15Hash === '4e0f98d9b08ed24639c1e8862f02a2d8bd478d0b98dab7fb05ba7c0c604bbc52', 'Hosted v15 changed');
 assert(metadata.version === 16 && metadata.source === 'claudever16.html', 'v16 version metadata is invalid');
 assert(metadata.hash === v16Hash, `v16 version metadata hash does not match HTML: ${v16Hash}`);
 assert(metadata.route === '/v16' && metadata.aliases.includes('/claudever16.html'), 'v16 route metadata is invalid');

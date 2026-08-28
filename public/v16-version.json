@@ -1,7 +1,7 @@
 {
   "version": 16,
-  "hash": "07cc146fd49a257386f507e60b24e314b2693af88c333d6ede91286da54e4909",
-  "releasedAt": "2026-08-23T03:54:55.5754839Z",
+  "hash": "a709466f3d50e1d02344918e49c5ec24884ee4badc35b47d572f36def38c1422",
+  "releasedAt": "2026-08-28T06:20:21.919Z",
   "source": "claudever16.html",
   "route": "/v16",
   "aliases": ["/claudever16.html"],
@@ -12,5 +12,5 @@
   "defaultAccessMode": "off",
   "launched": true,
   "localOnly": false,
-  "sync": "account-scoped-revision-protected-v2-state"
+  "sync": "account-scoped-three-way-safe-sync-v3"
 }

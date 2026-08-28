@@ -79,6 +79,7 @@ create index if not exists state_save_events_result_created_idx
 alter table state_save_events add column if not exists base_hash text;
 alter table state_save_events add column if not exists mutation_id text;
 alter table state_save_events add column if not exists change_manifest jsonb;
+alter table state_save_events add column if not exists merge_source text;
 
 create unique index if not exists state_save_events_mutation_result_idx
   on state_save_events(username, mutation_id)

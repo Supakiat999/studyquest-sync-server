@@ -29,6 +29,7 @@ const V15_HTML_PATH = path.join(ROOT, "public", "claudever15.html");
 const V15_VERSION_PATH = path.join(ROOT, "public", "v15-version.json");
 const V16_HTML_PATH = path.join(ROOT, "public", "claudever16.html");
 const V16_FEATURES_PATH = path.join(ROOT, "public", "v16-local-features.js");
+const SAFE_SYNC_JS_PATH = path.join(ROOT, "public", "safe-sync.js");
 const V16_VERSION_PATH = path.join(ROOT, "public", "v16-version.json");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
@@ -49,6 +50,12 @@ const V16_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V16_ACCESS || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
+const SAFE_SYNC_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_SAFE_SYNC_MODE || "off").trim().toLowerCase();
+  return ["off", "admin", "users", "all"].includes(configured) ? configured : "off";
+})();
+const SAFE_SYNC_USERS = new Set(String(process.env.STUDYQUEST_SAFE_SYNC_USERS || "")
+  .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const USERNAME_PATTERN = /^[a-z0-9_-]{3,32}$/;
 const PASSWORD_MIN_LENGTH = 8;
 const PBKDF2_ITERATIONS = 210000;
@@ -77,19 +84,48 @@ if (IS_HOSTED && (!ADMIN_PASSWORD || !INVITE_CODE)) {
   throw new Error("Set STUDYQUEST_ADMIN_PASSWORD and STUDYQUEST_INVITE_CODE before hosting StudyQuest.");
 }
 
+function shouldUseSsl(databaseUrl) {
+  if (process.env.PGSSLMODE === "disable") return false;
+  if (process.env.PGSSLMODE === "require") return true;
+  return !/localhost|127\.0\.0\.1/i.test(databaseUrl);
+}
+
+function explicitSslConnectionString(databaseUrl) {
+  if (!shouldUseSsl(databaseUrl)) return databaseUrl;
+  try {
+    const parsed = new URL(databaseUrl);
+    parsed.searchParams.set("sslmode", "verify-full");
+    return parsed.toString();
+  } catch {
+    return databaseUrl;
+  }
+}
+
 const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: shouldUseSsl(DATABASE_URL) ? { rejectUnauthorized: false } : false,
+  connectionString: explicitSslConnectionString(DATABASE_URL),
+  ssl: shouldUseSsl(DATABASE_URL) ? { rejectUnauthorized: true } : false,
   max: 5,
   idleTimeoutMillis: 30000
 });
 
 const authBuckets = new Map();
 
-function shouldUseSsl(databaseUrl) {
-  if (process.env.PGSSLMODE === "disable") return false;
-  if (process.env.PGSSLMODE === "require") return true;
-  return !/localhost|127\.0\.0\.1/i.test(databaseUrl);
+function safeSyncEnabledFor(user) {
+  if (!user || SAFE_SYNC_MODE === "off") return false;
+  if (SAFE_SYNC_MODE === "all") return true;
+  if (SAFE_SYNC_MODE === "admin") return user.username === ADMIN_USERNAME;
+  return SAFE_SYNC_USERS.has(String(user.username || "").toLowerCase());
+}
+
+function serverLog(level, event, details = {}) {
+  const payload = JSON.stringify({
+    at:new Date().toISOString(), level, event,
+    service:process.env.RENDER_SERVICE_NAME || "studyquest-sync-server",
+    ...details,
+  });
+  if (level === "error") console.error(payload);
+  else if (level === "warn") console.warn(payload);
+  else console.log(payload);
 }
 
 function payloadTooLargeError(maxBytes) {
@@ -152,7 +188,7 @@ function canAccessV14(user) {
 
 function authenticatedV15Html(user) {
   const html = fs.readFileSync(V15_HTML_PATH, "utf8");
-  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
 
@@ -163,7 +199,7 @@ function canAccessV15(user) {
 
 function authenticatedV16Html(user) {
   const html = fs.readFileSync(V16_HTML_PATH, "utf8");
-  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
 
@@ -297,8 +333,8 @@ async function recordSaveEvent(client, details) {
   await client.query(
     `insert into state_save_events
        (username, result, base_revision, current_revision, resulting_revision,
-        state_hash, state_bytes, device_id, summary, detail, base_hash, mutation_id, change_manifest)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb)`,
+        state_hash, state_bytes, device_id, summary, detail, base_hash, mutation_id, change_manifest, merge_source)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14)`,
     [
       details.username,
       details.result,
@@ -313,6 +349,7 @@ async function recordSaveEvent(client, details) {
       details.baseHash || null,
       details.mutationId || null,
       details.changeManifest ? JSON.stringify(details.changeManifest) : null,
+      details.mergeSource || null,
     ]
   );
 }
@@ -1013,7 +1050,8 @@ async function handleAdminRecoverySnapshots(req, res, url) {
   );
   const events = await pool.query(
     `select id, result, base_revision, current_revision, resulting_revision,
-            state_hash, state_bytes, device_id, summary, detail, created_at
+            state_hash, state_bytes, device_id, summary, detail, base_hash,
+            mutation_id, change_manifest, merge_source, created_at
      from state_save_events where username = $1
      order by created_at desc, id desc limit 100`,
     [username]
@@ -1592,6 +1630,26 @@ function stateConflictPayload(row, error = "STATE_CONFLICT", extra = {}) {
   };
 }
 
+async function handleVersionedStateMeta(req, res) {
+  const user = await currentUser(req);
+  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  const revision = Number(user.state_revision || 0);
+  const currentHash = user.state_hash || (user.state ? stateHash(user.state) : stateHash(null));
+  const integrity = await stateIntegritySummary(user.username, user.state, revision);
+  sendJson(req, res, 200, {
+    ok:true,
+    revision,
+    stateHash:currentHash,
+    updatedAt:user.state_updated_at || user.updated_at || null,
+    stateBytes:Number(user.state_bytes || 0),
+    maxStateBytes:MAX_STATE_BYTES,
+    integrity,
+    activity:stateActivitySummary(user.state),
+    serverTime:new Date().toISOString(),
+  });
+}
+
 async function handleVersionedState(req, res) {
   const user = await currentUser(req);
   if (!user) {
@@ -1720,6 +1778,7 @@ async function handleVersionedState(req, res) {
         sendJson(req, res, 200, {
           ok: true,
           idempotent: true,
+          acknowledgedMutationId: mutationId || null,
           revision: currentRevision,
           stateHash: row.state_hash || stateHash(row.state),
           savedAt: row.state_updated_at || row.updated_at || null,
@@ -1798,6 +1857,7 @@ async function handleVersionedState(req, res) {
       sendJson(req, res, 200, {
         ok: true,
         unchanged: true,
+        acknowledgedMutationId: mutationId || null,
         ignoredVolatileOnly: rootTimestampOnlyMatch,
         revision: currentRevision,
         stateHash: unchangedHash,
@@ -1835,7 +1895,10 @@ async function handleVersionedState(req, res) {
       return;
     }
 
-    const approvedRecoverySources = new Set(["v13-smart-merge", "v14-smart-merge", "v15-smart-merge"]);
+    const approvedRecoverySources = new Set([
+      "v13-smart-merge", "v14-smart-merge", "v15-smart-merge",
+      "v15-auto-nonoverlap", "v16-auto-nonoverlap",
+    ]);
     const mergeApproved = approvedRecoverySources.has(body?.merge?.source) && body?.merge?.approvedAt;
     const preMergeBackupCreated = mergeApproved ? await createMergeStateBackup(client, row) : false;
     await createDailyStateBackup(client, row);
@@ -1868,12 +1931,14 @@ async function handleVersionedState(req, res) {
       baseHash,
       mutationId,
       changeManifest: changeSet,
+      mergeSource: mergeApproved ? body.merge.source : null,
       detail: mergeApproved ? `Approved ${body.merge.source}` : "Revision-protected save",
     });
     await client.query("commit");
     await pruneStateVersions(user.username).catch((error) => console.error("State history pruning failed", error));
     sendJson(req, res, 200, {
       ok: true,
+      acknowledgedMutationId: mutationId || null,
       revision: resultingRevision,
       stateHash: incomingVersion.hash,
       savedAt: saved.rows[0].state_updated_at,
@@ -2407,6 +2472,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/safe-sync.js") {
+      send(req, res, 200, fs.readFileSync(SAFE_SYNC_JS_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
     if (url.pathname === "/weekly-study-planner" || url.pathname === "/weekly-study-planner.html" || url.pathname === "/weekly-study-planner-lite.html") {
       send(req, res, 200, fs.readFileSync(WEEKLY_STUDY_PLANNER_LITE_PATH), { "content-type": "text/html; charset=utf-8" });
       return;
@@ -2481,6 +2553,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/v2/state") {
       await handleVersionedState(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/v2/state/meta") {
+      await handleVersionedStateMeta(req, res);
       return;
     }
 
@@ -2652,14 +2729,63 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureSchema()
+const STARTUP_RETRY_DELAYS_MS = [1000, 3000, 10000, 30000];
+let shuttingDown = false;
+
+async function ensureSchemaWithRetry() {
+  for (let attempt = 0; attempt <= STARTUP_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      serverLog("info", "database_schema_start", { attempt:attempt + 1 });
+      await ensureSchema();
+      serverLog("info", "database_schema_ready", { attempt:attempt + 1 });
+      return;
+    } catch (error) {
+      const retryDelayMs = STARTUP_RETRY_DELAYS_MS[attempt];
+      serverLog(retryDelayMs ? "warn" : "error", "database_schema_failed", {
+        attempt:attempt + 1,
+        retryDelayMs:retryDelayMs || null,
+        code:error?.code || null,
+        message:String(error?.message || error).slice(0, 500),
+      });
+      if (!retryDelayMs) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+}
+
+async function shutdownServer(signal, exitCode) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  serverLog(exitCode ? "error" : "info", "server_shutdown", { signal, exitCode });
+  const forceTimer = setTimeout(() => process.exit(exitCode), 10000);
+  forceTimer.unref();
+  await new Promise((resolve) => server.close(() => resolve())).catch(() => {});
+  await pool.end().catch((error) => serverLog("error", "database_pool_close_failed", { message:String(error?.message || error) }));
+  process.exit(exitCode);
+}
+
+process.on("SIGTERM", () => { void shutdownServer("SIGTERM", 0); });
+process.on("SIGINT", () => { void shutdownServer("SIGINT", 0); });
+process.on("unhandledRejection", (error) => {
+  serverLog("error", "unhandled_rejection", { message:String(error?.stack || error).slice(0, 2000) });
+});
+process.on("uncaughtException", (error) => {
+  serverLog("error", "uncaught_exception", { message:String(error?.stack || error).slice(0, 2000) });
+  void shutdownServer("uncaughtException", 1);
+});
+
+serverLog("info", "server_starting", { port:PORT, safeSyncMode:SAFE_SYNC_MODE });
+ensureSchemaWithRetry()
   .then(() => {
     server.listen(PORT, "0.0.0.0", () => {
-      console.log(`StudyQuest hosted server listening on ${PORT}`);
-      console.log(`Account limit: ${MAX_ACCOUNTS}; per-user state limit: ${MAX_STATE_BYTES} bytes`);
+      serverLog("info", "server_listening", {
+        port:PORT,
+        accountLimit:MAX_ACCOUNTS,
+        maxStateBytes:MAX_STATE_BYTES,
+      });
     });
   })
   .catch((error) => {
-    console.error(error);
+    serverLog("error", "server_startup_failed", { message:String(error?.stack || error).slice(0, 2000) });
     process.exit(1);
   });
