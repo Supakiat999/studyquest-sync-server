@@ -111,9 +111,9 @@ assert(!stable.includes('v15TryHeaderButton') && !stable.includes('openV15'), 'S
 assert(renderYaml.includes('key: STUDYQUEST_V15_ACCESS') && renderYaml.includes('value: "off"'), 'Render config must default v15 access to off');
 assert(renderNeonYaml.includes('key: STUDYQUEST_V15_ACCESS') && renderNeonYaml.includes('value: "off"'), 'Neon Render config must default v15 access to off');
 
-assert(sha256('public/claudever13.html') === '9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7', 'Hosted v13 changed');
+assert(sha256('public/claudever13.html') === 'c6b8073bcecca777c7ae0acf2d4948d208b6925965d6e6396166a4e1c14b645f', 'Hosted v13 changed');
 const v14Hash = sha256('public/claudever14.html');
-assert(v14Hash === '9a4e7d2547db64d315f556dbc0b7ef061bb5ee0262f0413157cc1b7abad8ff62', 'Hosted v14 changed');
+assert(v14Hash === '4dccb2a1fbd9023a1047f7197d900e7baf5e822fb6f62ec2862eb84bfeceab8d', 'Hosted v14 changed');
 assert(v14Version.version === 14 && v14Version.source === 'claudever14.html' && v14Version.hash === v14Hash, 'Hosted v14 metadata or hash changed');
 const v15Hash = sha256('public/claudever15.html');
 assert(v15Version.version === 15 && v15Version.source === 'claudever15.html', 'v15 version metadata is invalid');

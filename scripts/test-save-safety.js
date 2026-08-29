@@ -137,7 +137,9 @@ assert.ok(server.includes('"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED"'),
 assert.ok(server.includes('"BASE_HASH_MISMATCH"'),
   "Revision equality must be backed by a state hash");
 assert.ok(server.includes("if (duplicateRevision !== currentRevision)"),
-  "A retried mutation must conflict when Saved Online advanced after its original acceptance");
+  "A retried mutation must detect when Saved Online advanced after its original acceptance");
+assert.ok(server.includes("requiresRefresh:true"),
+  "An accepted retry acknowledgement must request a safe refresh when cloud advanced");
 assert.ok(server.includes("handleRecoveryVersionRecoverMissing"),
   "Every account needs additive missing-item recovery");
 assert.ok(server.includes("recovered.state.updatedAt = Date.now();"),

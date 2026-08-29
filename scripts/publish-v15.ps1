@@ -103,7 +103,7 @@ function Read-SafetyManifest {
   $revision = 0L
   if (-not [int64]::TryParse([string]$value.adminRevision, [ref]$revision)) { throw 'Admin revision is required.' }
   if ([string]$value.adminStateHash -notmatch '^[a-f0-9]{64}$') { throw 'Admin state hash is invalid.' }
-  if ([string]$value.v13Hash -ne '9667d4c65548327c25ced9f161edea902e398f94b59941e27c3b576b37dab4e7') { throw 'Recorded v13 hash does not match the protected release.' }
+  if ([string]$value.v13Hash -ne 'c6b8073bcecca777c7ae0acf2d4948d208b6925965d6e6396166a4e1c14b645f') { throw 'Recorded v13 hash does not match the protected release.' }
   $expectedV14 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $ReleaseRepo 'public\claudever14.html')).Hash.ToLowerInvariant()
   if ([string]$value.v14Hash -ne $expectedV14) { throw 'Recorded v14 hash does not match the release checkout.' }
   if ([string]$value.v15Hash -ne $sourceHash) { throw 'Recorded v15 hash does not match the protected HTML artifact.' }

@@ -139,14 +139,14 @@ assert.match(html, /Sync review needed — both copies are safe/);
 assert.doesNotMatch(html, /localStorage\.clear\s*\(/);
 assert.doesNotMatch(html, /localStorage\.removeItem\(\s*STORAGE_KEY\s*\)/);
 
-const noChangeStart = server.indexOf('const exactStateMatch');
-const noChangeEnd = server.indexOf('const destructive = unapprovedRemovals', noChangeStart);
+const noChangeStart = server.indexOf('const rootTimestampOnlyMatch');
+const noChangeEnd = server.indexOf('const destructive = unapprovedManifestRemovals', noChangeStart);
 const noChangeBranch = server.slice(noChangeStart, noChangeEnd);
 assert.ok(noChangeStart >= 0 && noChangeEnd > noChangeStart);
-assert.match(noChangeBranch, /statesEqualIgnoringRootUpdatedAt/);
+assert.match(noChangeBranch, /currentManifest\.contentHash === incomingManifest\.contentHash/);
 assert.match(noChangeBranch, /Ignored root updatedAt-only save/);
-assert.match(noChangeBranch, /ignoredVolatileOnly: rootTimestampOnlyMatch/);
-assert.match(noChangeBranch, /stateHash: unchangedHash/);
+assert.match(noChangeBranch, /ignoredVolatileOnly:true/);
+assert.match(noChangeBranch, /stateHash:currentHash/);
 assert.doesNotMatch(noChangeBranch, /update accounts/i);
 assert.doesNotMatch(noChangeBranch, /insertStateVersion/);
 

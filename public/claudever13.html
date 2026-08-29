@@ -6153,7 +6153,6 @@ const LOCAL_LIVE_STATUS_ENDPOINT = '/api/live-sync/status';
 const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
 const LOCAL_RELEASE_ENDPOINT = '/api/release/v13';
 const LOCAL_RELEASE_STATUS_ENDPOINT = '/api/release/v13/status';
-const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
 const DEVICE_RECOVERY_DB_VERSION = 2;
 const DEVICE_RECOVERY_COPY_LIMIT = 20;
@@ -6960,26 +6959,6 @@ function renderV13ModeUI() {
     : 'Browser and local-disk saves stay in place. Pair live admin sync only when you are ready.';
 }
 
-async function sendPageHeartbeat() {
-  if (!canUseServerStorage()) return;
-  try {
-    await fetch(PAGE_HEARTBEAT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: window.location.href,
-        title: document.title,
-        visibility: document.visibilityState,
-      }),
-    });
-  } catch (e) {
-    console.warn('StudyQuest heartbeat failed', e);
-  }
-}
-
-sendPageHeartbeat();
-setInterval(sendPageHeartbeat, 60 * 1000);
-document.addEventListener('visibilitychange', sendPageHeartbeat);
 
 function normalizeNotesOrdering(targetState) {
   if (!targetState || typeof targetState !== 'object') return targetState;
@@ -9864,7 +9843,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') retryPendingServerSync();
   else preserveV13StateBeforeExit();
 });
-setInterval(retryPendingServerSync, 60 * 1000);
 
 // ════════════════════════════════════════════════════════
 // UTILS

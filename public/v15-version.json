@@ -1,7 +1,7 @@
 {
   "version": 15,
-  "hash": "4e0f98d9b08ed24639c1e8862f02a2d8bd478d0b98dab7fb05ba7c0c604bbc52",
-  "releasedAt": "2026-08-28T06:20:21.919Z",
+  "hash": "c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3",
+  "releasedAt": "2026-08-29T09:03:06.618Z",
   "source": "claudever15.html",
   "route": "/",
   "aliases": ["/v15", "/claudever15.html"],
@@ -10,5 +10,5 @@
   "access": "authenticated",
   "accessMode": "all",
   "defaultAccessMode": "off",
-  "sync": "account-scoped-three-way-safe-sync-v3"
+  "sync": "neon-safe-conflict-escrow-v4"
 }

@@ -72,8 +72,10 @@ assert.equal(newest.source, "account", "a stale outbox must not replace newer du
 assert.deepEqual([1, 2, 3, 4, 5, 8].map(retryDelay), [1000, 3000, 10000, 30000, 60000, 60000]);
 
 for (const [version, source] of [[15, v15], [16, v16]]) {
-  assert.match(source, /<script src="\/safe-sync\.js"><\/script>/, `v${version} must load the shared safe sync helper`);
-  assert.match(source, /const LIVE_SYNC_INTERVAL_MS = 60 \* 1000;/, `v${version} must check cloud metadata every minute`);
+  assert.match(source, /<script src="\/safe-sync\.js\?v=2"><\/script>/, `v${version} must load the versioned shared safe sync helper`);
+  assert.doesNotMatch(source, /setInterval\(retryPendingServerSync/, `v${version} must not poll continuously`);
+  assert.doesNotMatch(source, /sendPageHeartbeat/, `v${version} must let free Render sleep`);
+  assert.match(source, /Sending saved device work/, `v${version} must upload a pending outbox without a metadata request first`);
   assert.match(source, /clearV13DeviceOutboxAcknowledged\(lineage\.mutationId/, `v${version} must only clear an acknowledged mutation`);
   assert.match(source, /pendingCloudMutation\.mutationId !== lineage\.mutationId/, `v${version} must preserve same-millisecond edits behind an older acknowledgement`);
   assert.match(source, /attemptAutomaticNonOverlappingMerge/, `v${version} must use three-way merge`);
@@ -89,6 +91,10 @@ for (const [version, source] of [[15, v15], [16, v16]]) {
 }
 
 assert.match(server, /url\.pathname === "\/api\/v2\/state\/meta"/, "server must expose authenticated metadata endpoint");
+assert.match(server, /state_conflict_copies/, "server must preserve overlapping candidates in conflict escrow");
+assert.match(server, /CONFLICT_COPY_BUDGET_BYTES/, "conflict escrow must have a per-user budget");
+assert.match(server, /status === 304/, "metadata endpoint must support conditional requests");
+assert.doesNotMatch(server, /pg_database_size\(current_database\(\)\)/, "health must not calculate database size");
 assert.match(server, /acknowledgedMutationId: mutationId \|\| null/g, "save responses must acknowledge mutation identity");
 assert.match(server, /v15-auto-nonoverlap/, "server must recognize audited automatic merges");
 assert.match(server, /ensureSchemaWithRetry/, "server startup must retry transient database failures");

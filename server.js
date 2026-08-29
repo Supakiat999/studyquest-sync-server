@@ -2,6 +2,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 const { Pool } = require("pg");
 const {
   additiveIncidentRecovery,
@@ -12,10 +13,12 @@ const {
   stableStringify,
   stateActivitySummary,
   stateHash,
+  stateManifest,
   statesEqualIgnoringRootUpdatedAt,
   stateRecordDiff,
   stateSummary,
   unapprovedRemovals,
+  unapprovedManifestRemovals,
 } = require("./lib/state-safety");
 
 const PORT = Number(process.env.PORT || 3001);
@@ -66,6 +69,7 @@ const MAX_AUTH_BODY_BYTES = 64 * 1024;
 const MAX_STATE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_BYTES || 10 * 1024 * 1024);
 const MAX_STATE_ENVELOPE_BYTES = Number(process.env.STUDYQUEST_MAX_STATE_ENVELOPE_BYTES || 256 * 1024);
 const STATE_HISTORY_BUDGET_BYTES = Number(process.env.STUDYQUEST_STATE_HISTORY_BUDGET_BYTES || 64 * 1024 * 1024);
+const CONFLICT_COPY_BUDGET_BYTES = Number(process.env.STUDYQUEST_CONFLICT_COPY_BUDGET_BYTES || 32 * 1024 * 1024);
 const TEMP_PASSWORD_MAX_AGE_SECONDS = 24 * 60 * 60;
 const IS_HOSTED = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
 
@@ -101,14 +105,34 @@ function explicitSslConnectionString(databaseUrl) {
   }
 }
 
+function databaseEndpointSafety(databaseUrl) {
+  try {
+    const parsed = new URL(databaseUrl);
+    return {
+      pooled:/-pooler(?:\.|$)/i.test(parsed.hostname),
+      tlsVerified:shouldUseSsl(databaseUrl),
+      provider:/\.neon\.tech$/i.test(parsed.hostname) ? "neon" : "postgres",
+    };
+  } catch {
+    return { pooled:false, tlsVerified:shouldUseSsl(databaseUrl), provider:"postgres" };
+  }
+}
+
 const pool = new Pool({
   connectionString: explicitSslConnectionString(DATABASE_URL),
   ssl: shouldUseSsl(DATABASE_URL) ? { rejectUnauthorized: true } : false,
-  max: 5,
-  idleTimeoutMillis: 30000
+  max: 3,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  query_timeout: 25000,
+  statement_timeout: 25000,
+  idle_in_transaction_session_timeout: 15000,
 });
 
 const authBuckets = new Map();
+const deviceTouchTimes = new Map();
+const metadataLoads = new Map();
+const htmlTemplates = new Map();
 
 function safeSyncEnabledFor(user) {
   if (!user || SAFE_SYNC_MODE === "off") return false;
@@ -147,7 +171,7 @@ function stateTooLargePayload(stateBytes) {
 function send(req, res, status, body, headers = {}) {
   const baseHeaders = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization",
+    "access-control-allow-headers": "content-type,authorization,if-none-match",
     "access-control-allow-credentials": "true",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
@@ -156,10 +180,28 @@ function send(req, res, status, body, headers = {}) {
   const origin = req.headers.origin;
   if (isAllowedOrigin(req, origin)) {
     baseHeaders["access-control-allow-origin"] = origin;
-    baseHeaders.vary = "Origin";
+    baseHeaders.vary = [baseHeaders.vary, "Origin"].filter(Boolean).join(", ");
   }
+  let responseBody = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ""), "utf8");
+  const contentType = String(baseHeaders["content-type"] || "");
+  const accepts = String(req.headers["accept-encoding"] || "");
+  const compressible = responseBody.length >= 1024
+    && /(?:json|javascript|text|css|html|svg)/i.test(contentType)
+    && !baseHeaders["content-encoding"]
+    && status !== 204 && status !== 304;
+  if (compressible && /\bbr\b/i.test(accepts)) {
+    responseBody = zlib.brotliCompressSync(responseBody, {
+      params:{ [zlib.constants.BROTLI_PARAM_QUALITY]:5 },
+    });
+    baseHeaders["content-encoding"] = "br";
+  } else if (compressible && /\bgzip\b/i.test(accepts)) {
+    responseBody = zlib.gzipSync(responseBody, { level:6 });
+    baseHeaders["content-encoding"] = "gzip";
+  }
+  if (compressible) baseHeaders.vary = [baseHeaders.vary, "Accept-Encoding"].filter(Boolean).join(", ");
+  baseHeaders["content-length"] = responseBody.length;
   res.writeHead(status, baseHeaders);
-  res.end(body);
+  res.end(req.method === "HEAD" || status === 204 || status === 304 ? undefined : responseBody);
 }
 
 function sendJson(req, res, status, data, headers = {}) {
@@ -169,14 +211,19 @@ function sendJson(req, res, status, data, headers = {}) {
   });
 }
 
+function htmlTemplate(filePath) {
+  if (!htmlTemplates.has(filePath)) htmlTemplates.set(filePath, fs.readFileSync(filePath, "utf8"));
+  return htmlTemplates.get(filePath);
+}
+
 function authenticatedV13Html(user) {
-  const html = fs.readFileSync(V13_HTML_PATH, "utf8");
+  const html = htmlTemplate(V13_HTML_PATH);
   const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
 
 function authenticatedV14Html(user) {
-  const html = fs.readFileSync(V14_HTML_PATH, "utf8");
+  const html = htmlTemplate(V14_HTML_PATH);
   const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
@@ -187,7 +234,7 @@ function canAccessV14(user) {
 }
 
 function authenticatedV15Html(user) {
-  const html = fs.readFileSync(V15_HTML_PATH, "utf8");
+  const html = htmlTemplate(V15_HTML_PATH);
   const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
@@ -198,7 +245,7 @@ function canAccessV15(user) {
 }
 
 function authenticatedV16Html(user) {
-  const html = fs.readFileSync(V16_HTML_PATH, "utf8");
+  const html = htmlTemplate(V16_HTML_PATH);
   const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};</script>`;
   return html.replace("</head>", `${bootstrap}\n</head>`);
 }
@@ -333,8 +380,9 @@ async function recordSaveEvent(client, details) {
   await client.query(
     `insert into state_save_events
        (username, result, base_revision, current_revision, resulting_revision,
-        state_hash, state_bytes, device_id, summary, detail, base_hash, mutation_id, change_manifest, merge_source)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14)`,
+        state_hash, state_bytes, device_id, summary, detail, base_hash, mutation_id,
+        change_manifest, merge_source, conflict_copy_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15)`,
     [
       details.username,
       details.result,
@@ -350,8 +398,61 @@ async function recordSaveEvent(client, details) {
       details.mutationId || null,
       details.changeManifest ? JSON.stringify(details.changeManifest) : null,
       details.mergeSource || null,
+      details.conflictCopyId || null,
     ]
   );
+}
+
+async function preserveConflictCopy(client, details) {
+  await client.query(
+    `delete from state_conflict_copies
+     where username = $1 and resolved_at is not null and retention_expires_at < now()`,
+    [details.username]
+  );
+  const mutationId = details.mutationId || `candidate:${details.candidate.hash}`;
+  const duplicate = await client.query(
+    `select id, candidate_hash, compressed_bytes
+     from state_conflict_copies
+     where username = $1 and mutation_id = $2 and candidate_hash = $3
+     order by created_at desc limit 1`,
+    [details.username, mutationId, details.candidate.hash]
+  );
+  if (duplicate.rowCount) {
+    return { id:String(duplicate.rows[0].id), deduplicated:true, storageFull:false };
+  }
+  const usage = await client.query(
+    `select coalesce(sum(compressed_bytes), 0)::bigint as bytes
+     from state_conflict_copies
+     where username = $1 and retention_expires_at >= now()`,
+    [details.username]
+  );
+  const usedBytes = Number(usage.rows[0]?.bytes || 0);
+  if (usedBytes + details.candidate.compressedBytes > CONFLICT_COPY_BUDGET_BYTES) {
+    return { id:null, deduplicated:false, storageFull:true, usedBytes };
+  }
+  const id = crypto.randomUUID();
+  await client.query(
+    `insert into state_conflict_copies
+       (id, username, mutation_id, device_id, reason, base_revision, base_hash,
+        cloud_revision, cloud_hash, candidate_hash, candidate_bytes, candidate_gzip, compressed_bytes)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      id,
+      details.username,
+      mutationId,
+      safeDeviceLabel(details.deviceId),
+      String(details.reason || "STATE_CONFLICT").slice(0, 80),
+      Number.isInteger(details.baseRevision) ? details.baseRevision : null,
+      details.baseHash || null,
+      Number(details.cloudRevision || 0),
+      details.cloudHash,
+      details.candidate.hash,
+      details.candidate.stateBytes,
+      details.candidate.stateGzip,
+      details.candidate.compressedBytes,
+    ]
+  );
+  return { id, deduplicated:false, storageFull:false, usedBytes };
 }
 
 function bangkokBucket(dateValue, includeHour) {
@@ -403,19 +504,38 @@ async function pruneStateVersions(username) {
   );
 }
 
-async function backfillCurrentStateVersions() {
-  const result = await pool.query(
+async function backfillCurrentStateVersions(client = pool) {
+  const result = await client.query(
     `select username, state, state_revision, state_updated_at, updated_at
      from accounts where state is not null`
   );
   for (const row of result.rows) {
-    await insertStateVersion(pool, {
+    await insertStateVersion(client, {
       username: row.username,
       revision: Number(row.state_revision || 0),
       state: row.state,
       sourceDevice: "startup-backfill",
       createdAt: row.state_updated_at || row.updated_at || null,
     });
+  }
+}
+
+async function backfillStateMetadata(client) {
+  const result = await client.query(
+    `select username, state, state_hash, state_manifest, state_manifest_version
+     from accounts
+     where state is not null
+       and (state_hash is null or state_manifest is null or state_manifest_version <> 1)`
+  );
+  for (const row of result.rows) {
+    const manifest = stateManifest(row.state);
+    await client.query(
+      `update accounts
+       set state_hash = coalesce(state_hash, $2), state_manifest = $3::jsonb,
+           state_manifest_version = $4
+       where username = $1`,
+      [row.username, stateHash(row.state), JSON.stringify(manifest), manifest.version]
+    );
   }
 }
 
@@ -525,28 +645,7 @@ function validateCredentials(username, password) {
   return "";
 }
 
-async function ensureSchema() {
-  await pool.query(fs.readFileSync(path.join(ROOT, "schema.sql"), "utf8"));
-  const hashBackfill = await pool.query("select username, state from accounts where state is not null and state_hash is null");
-  for (const row of hashBackfill.rows) {
-    await pool.query("update accounts set state_hash = $2 where username = $1 and state_hash is null", [row.username, stateHash(row.state)]);
-  }
-  await pool.query("delete from sessions where expires_at < now()");
-  await pool.query("delete from sync_pairing_codes where expires_at < now() or used_at is not null");
-  await pool.query("delete from state_backups where created_at < now() - interval '30 days'");
-  await pool.query(
-    `update password_recovery_requests
-     set status = 'expired', resolved_at = coalesce(resolved_at, now())
-     where status = 'approved' and expires_at < now()`
-  );
-  await pool.query("delete from sync_pairing_codes where username <> $1", [ADMIN_USERNAME]);
-  await pool.query(
-    "update sync_devices set revoked_at = coalesce(revoked_at, now()) where username <> $1",
-    [ADMIN_USERNAME]
-  );
-  await backfillCurrentStateVersions();
-  await pool.query("delete from state_save_events where created_at < now() - interval '180 days'");
-
+async function ensureAdminAccount() {
   const admin = await pool.query("select username, password_record from accounts where username = $1", [ADMIN_USERNAME]);
   if (!admin.rowCount) {
     const initialPassword = ADMIN_PASSWORD || crypto.randomBytes(18).toString("base64url");
@@ -567,18 +666,112 @@ async function ensureSchema() {
       [ADMIN_USERNAME, JSON.stringify(passwordRecord(ADMIN_PASSWORD))]
     );
     await pool.query("delete from sessions where username = $1", [ADMIN_USERNAME]);
-    console.log("Synced admin password from STUDYQUEST_ADMIN_PASSWORD.");
+    serverLog("info", "admin_password_synchronized");
   }
 }
 
-async function currentUser(req) {
+async function runSchemaMigrations() {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("select pg_advisory_xact_lock(hashtext('studyquest-schema-migrations'))");
+    await client.query(
+      `create table if not exists schema_migrations (
+         version integer primary key,
+         name text not null,
+         applied_at timestamptz not null default now()
+       )`
+    );
+    const applied = await client.query("select version from schema_migrations order by version");
+    const versions = new Set(applied.rows.map((row) => Number(row.version)));
+    if (!versions.has(1)) {
+      await client.query(fs.readFileSync(path.join(ROOT, "schema.sql"), "utf8"));
+      await client.query(
+        "insert into schema_migrations(version, name) values (1, 'baseline') on conflict do nothing"
+      );
+      await backfillCurrentStateVersions(client);
+    }
+    if (!versions.has(2)) {
+      await client.query(fs.readFileSync(path.join(ROOT, "migrations", "002_neon_safe_sync.sql"), "utf8"));
+      await backfillStateMetadata(client);
+      await client.query(
+        "insert into schema_migrations(version, name) values (2, 'neon-safe-sync') on conflict do nothing"
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function runDailyMaintenance() {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const lock = await client.query("select pg_try_advisory_xact_lock(hashtext('studyquest-daily-maintenance')) as locked");
+    if (!lock.rows[0]?.locked) {
+      await client.query("rollback");
+      return false;
+    }
+    const due = await client.query(
+      `select last_completed_at
+       from app_maintenance_state where task_name = 'daily-cleanup' for update`
+    );
+    if (due.rowCount && Date.now() - new Date(due.rows[0].last_completed_at).getTime() < 24 * 60 * 60 * 1000) {
+      await client.query("commit");
+      return false;
+    }
+    await client.query("delete from sessions where expires_at < now()");
+    await client.query("delete from sync_pairing_codes where expires_at < now() or used_at is not null");
+    await client.query("delete from state_backups where created_at < now() - interval '30 days'");
+    await client.query("delete from state_save_events where created_at < now() - interval '180 days'");
+    await client.query("delete from state_conflict_copies where retention_expires_at < now()");
+    await client.query(
+      `update password_recovery_requests
+       set status = 'expired', resolved_at = coalesce(resolved_at, now())
+       where status = 'approved' and expires_at < now()`
+    );
+    await client.query("delete from sync_pairing_codes where username <> $1", [ADMIN_USERNAME]);
+    await client.query(
+      "update sync_devices set revoked_at = coalesce(revoked_at, now()) where username <> $1",
+      [ADMIN_USERNAME]
+    );
+    await client.query(
+      `insert into app_maintenance_state(task_name, last_completed_at, detail)
+       values ('daily-cleanup', now(), '{"retention":"complete"}'::jsonb)
+       on conflict (task_name) do update
+       set last_completed_at = excluded.last_completed_at, detail = excluded.detail`
+    );
+    await client.query("commit");
+    serverLog("info", "daily_maintenance_complete");
+    return true;
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function ensureSchema() {
+  await runSchemaMigrations();
+  await ensureAdminAccount();
+  await runDailyMaintenance();
+}
+
+async function currentUser(req, { includeState = true } = {}) {
+  const stateProjection = includeState ? ", a.state" : "";
   const authorization = String(req.headers.authorization || "");
   if (authorization.startsWith("Bearer ")) {
     const deviceToken = authorization.slice(7).trim();
     if (!deviceToken) return null;
     const deviceResult = await pool.query(
-      `select a.username, a.display_name, a.password_record, a.state, a.state_bytes, a.state_hash,
-              a.state_revision, a.state_updated_at, a.created_at, a.updated_at,
+      `select a.username, a.display_name, a.password_record, a.state_bytes, a.state_hash,
+              a.state_revision, a.state_updated_at, a.state_manifest, a.state_manifest_version,
+              a.created_at, a.updated_at ${stateProjection},
               d.id as sync_device_id, d.device_name as sync_device_name
        from sync_devices d
        join accounts a on a.username = d.username
@@ -587,7 +780,11 @@ async function currentUser(req) {
     );
     const deviceUser = deviceResult.rows[0] || null;
     if (deviceUser) {
-      await pool.query("update sync_devices set last_used_at = now() where id = $1", [deviceUser.sync_device_id]);
+      const lastTouch = Number(deviceTouchTimes.get(deviceUser.sync_device_id) || 0);
+      if (Date.now() - lastTouch >= 5 * 60 * 1000) {
+        deviceTouchTimes.set(deviceUser.sync_device_id, Date.now());
+        await pool.query("update sync_devices set last_used_at = now() where id = $1", [deviceUser.sync_device_id]);
+      }
     }
     return deviceUser;
   }
@@ -596,8 +793,9 @@ async function currentUser(req) {
   if (!token) return null;
 
   const result = await pool.query(
-    `select a.username, a.display_name, a.password_record, a.state, a.state_bytes, a.state_hash,
-            a.state_revision, a.state_updated_at, a.created_at, a.updated_at
+    `select a.username, a.display_name, a.password_record, a.state_bytes, a.state_hash,
+            a.state_revision, a.state_updated_at, a.state_manifest, a.state_manifest_version,
+            a.created_at, a.updated_at ${stateProjection}
      from sessions s
      join accounts a on a.username = s.username
      where s.token_hash = $1 and s.expires_at > now()`,
@@ -640,7 +838,12 @@ async function handleLogin(req, res) {
     return;
   }
 
-  const result = await pool.query("select * from accounts where username = $1", [username]);
+  const result = await pool.query(
+    `select username, display_name, password_record, password_change_required,
+            temporary_password_expires_at, created_at, updated_at
+     from accounts where username = $1`,
+    [username]
+  );
   const user = result.rows[0];
   if (!user || !verifyPassword(password, user.password_record)) {
     sendJson(req, res, 401, { ok: false, error: "Wrong username or password." });
@@ -741,7 +944,7 @@ function recoveryContact() {
 }
 
 async function requireBrowserAdmin(req, res) {
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:false });
   if (!user || user.username !== ADMIN_USERNAME || user.sync_device_id) {
     sendJson(req, res, 403, { ok: false, error: "Admin access required." });
     return null;
@@ -1158,13 +1361,16 @@ async function handleAdminRecoverySnapshotRestore(req, res, snapshotId) {
     }
     const restoredState = snapshot.state || null;
     const stateBytes = Buffer.byteLength(JSON.stringify(restoredState));
+    const restoredManifest = stateManifest(restoredState);
     const updated = await client.query(
       `update accounts
        set state = $2::jsonb, state_bytes = $3, state_hash = $4, state_revision = state_revision + 1,
+           state_manifest = $5::jsonb, state_manifest_version = $6,
            state_updated_at = now(), updated_at = now()
        where username = $1
        returning state_revision, state_updated_at`,
-      [username, JSON.stringify(restoredState), stateBytes, snapshotHash]
+      [username, JSON.stringify(restoredState), stateBytes, snapshotHash,
+        JSON.stringify(restoredManifest), restoredManifest.version]
     );
     const resultingRevision = Number(updated.rows[0].state_revision);
     await insertStateVersion(client, {
@@ -1258,10 +1464,12 @@ async function handleAdminRecoveryVersionRestore(req, res, versionId) {
     const updated = await client.query(
       `update accounts
        set state = $2::jsonb, state_bytes = $3, state_hash = $4, state_revision = state_revision + 1,
+           state_manifest = $5::jsonb, state_manifest_version = $6,
            state_updated_at = now(), updated_at = now()
        where username = $1
        returning state_revision, state_updated_at`,
-      [username, prepared.serialized, prepared.stateBytes, prepared.hash]
+      [username, prepared.serialized, prepared.stateBytes, prepared.hash,
+        JSON.stringify(stateManifest(restoredState)), 1]
     );
     const resultingRevision = Number(updated.rows[0].state_revision);
     await insertStateVersion(client, {
@@ -1302,6 +1510,86 @@ async function handleAdminRecoveryVersionRestore(req, res, versionId) {
 const ANYA_INCIDENT_USERNAME = "anya";
 const ANYA_INCIDENT_BACKUP_REVISION = 4;
 const ANYA_INCIDENT_CONFIRMATION = "RECOVER ANYA ADDITIVELY";
+const ANYA_AUGUST_REVIEW_START = "2026-08-25T17:00:00.000Z";
+const ANYA_AUGUST_REVIEW_END = "2026-08-28T17:00:00.000Z";
+
+async function handleAnyaAugustRecoveryPreview(req, res) {
+  if (!await requireBrowserAdmin(req, res)) return;
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  const accountResult = await pool.query(
+    `select state, state_revision, state_hash, state_updated_at
+     from accounts where username = $1`,
+    [ANYA_INCIDENT_USERNAME]
+  );
+  const account = accountResult.rows[0];
+  if (!account) return sendJson(req, res, 404, { ok:false, error:"ANYA_ACCOUNT_NOT_FOUND" });
+  const currentSummary = stateSummary(account.state);
+  const metadata = await pool.query(
+    `select id, revision, state_hash, state_bytes, compressed_bytes, source_device, summary, created_at
+     from state_versions
+     where username = $1 and created_at >= $2::timestamptz and created_at < $3::timestamptz
+     order by revision desc`,
+    [ANYA_INCIDENT_USERNAME, ANYA_AUGUST_REVIEW_START, ANYA_AUGUST_REVIEW_END]
+  );
+  const countFields = ["tasks", "notes", "files", "checklist", "grades", "trips", "weeklyWeeks", "weeklySemesters"];
+  let selected = metadata.rows.filter((row) =>
+    countFields.some((field) => Number(row.summary?.[field] || 0) > Number(currentSummary[field] || 0))
+  ).slice(0, 12);
+  if (!selected.length) {
+    const days = new Set();
+    selected = metadata.rows.filter((row) => {
+      const day = new Date(row.created_at).toISOString().slice(0, 10);
+      if (days.has(day)) return false;
+      days.add(day);
+      return true;
+    }).slice(0, 3);
+  }
+  const selectedIds = selected.map((row) => String(row.id));
+  const states = selectedIds.length
+    ? await pool.query(
+        `select id, state_gzip from state_versions
+         where username = $1 and id = any($2::bigint[])`,
+        [ANYA_INCIDENT_USERNAME, selectedIds]
+      )
+    : { rows:[] };
+  const statesById = new Map(states.rows.map((row) => [String(row.id), deserializeStateVersion(row.state_gzip)]));
+  const candidates = selected.map((row) => {
+    const sourceState = statesById.get(String(row.id));
+    const recovery = sourceState ? recoverMissingRecords(account.state, sourceState) : { additions:[], unchanged:true, summary:currentSummary };
+    return {
+      id:String(row.id),
+      revision:Number(row.revision || 0),
+      stateHash:row.state_hash,
+      createdAt:row.created_at,
+      sourceDevice:row.source_device,
+      sourceSummary:row.summary || {},
+      proposedSummary:recovery.summary,
+      unchanged:recovery.unchanged,
+      additions:recovery.additions.slice(0, 300),
+      additionsTruncated:recovery.additions.length > 300,
+    };
+  });
+  const events = await pool.query(
+    `select result, base_revision, current_revision, resulting_revision, state_hash,
+            state_bytes, device_id, base_hash, mutation_id, merge_source, detail, created_at
+     from state_save_events
+     where username = $1 and created_at >= $2::timestamptz and created_at < $3::timestamptz
+     order by created_at asc limit 500`,
+    [ANYA_INCIDENT_USERNAME, ANYA_AUGUST_REVIEW_START, ANYA_AUGUST_REVIEW_END]
+  );
+  sendJson(req, res, 200, {
+    ok:true,
+    readOnly:true,
+    username:ANYA_INCIDENT_USERNAME,
+    range:{ start:ANYA_AUGUST_REVIEW_START, end:ANYA_AUGUST_REVIEW_END, timezone:"Asia/Bangkok" },
+    current:{ revision:Number(account.state_revision || 0), stateHash:account.state_hash, updatedAt:account.state_updated_at, summary:currentSummary },
+    versionsInspected:candidates.length,
+    availableVersionCount:metadata.rowCount,
+    candidates,
+    saveEvents:events.rows,
+    warning:"Preview only. Any future recovery must be additive by stable item ID and requires explicit approval.",
+  });
+}
 
 async function loadAnyaIncidentSource(client) {
   const result = await client.query(
@@ -1408,10 +1696,12 @@ async function handleAnyaIncidentRecovery(req, res) {
     const updated = await client.query(
       `update accounts
        set state = $2::jsonb, state_bytes = $3, state_hash = $4, state_revision = state_revision + 1,
+           state_manifest = $5::jsonb, state_manifest_version = $6,
            state_updated_at = now(), updated_at = now()
        where username = $1
        returning state_revision, state_updated_at`,
-      [ANYA_INCIDENT_USERNAME, prepared.serialized, prepared.stateBytes, prepared.hash]
+      [ANYA_INCIDENT_USERNAME, prepared.serialized, prepared.stateBytes, prepared.hash,
+        JSON.stringify(stateManifest(proposed.state)), 1]
     );
     const resultingRevision = Number(updated.rows[0].state_revision);
     await insertStateVersion(client, {
@@ -1451,7 +1741,7 @@ async function handleAnyaIncidentRecovery(req, res) {
 }
 
 async function handleMe(req, res) {
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:false });
   if (!user) {
     sendJson(req, res, 401, { ok: false, user: null });
     return;
@@ -1613,6 +1903,53 @@ async function stateIntegritySummary(username, currentState, currentRevision) {
   };
 }
 
+function metadataCredential(req) {
+  const authorization = String(req.headers.authorization || "");
+  if (authorization.startsWith("Bearer ")) {
+    const token = authorization.slice(7).trim();
+    return token ? { kind:"device", hash:tokenHash(token) } : null;
+  }
+  const token = parseCookies(req)[SESSION_COOKIE];
+  return token ? { kind:"session", hash:tokenHash(token) } : null;
+}
+
+async function queryAuthenticatedStateMetadata(req) {
+  const credential = metadataCredential(req);
+  if (!credential) return null;
+  const existing = metadataLoads.get(`${credential.kind}:${credential.hash}`);
+  if (existing) return existing;
+  const load = (async () => {
+    const authJoin = credential.kind === "device"
+      ? `from sync_devices auth join accounts a on a.username = auth.username`
+      : `from sessions auth join accounts a on a.username = auth.username`;
+    const authWhere = credential.kind === "device"
+      ? `auth.token_hash = $1 and auth.revoked_at is null and auth.username = $2`
+      : `auth.token_hash = $1 and auth.expires_at > now()`;
+    const parameters = credential.kind === "device"
+      ? [credential.hash, ADMIN_USERNAME]
+      : [credential.hash];
+    const result = await pool.query(
+      `select a.username, a.state_revision, a.state_hash, a.state_bytes, a.state_updated_at,
+              a.updated_at, a.state_manifest_version,
+              latest.revision as immutable_revision, latest.state_hash as immutable_hash
+       ${authJoin}
+       left join lateral (
+         select revision, state_hash from state_versions
+         where username = a.username order by revision desc, id desc limit 1
+       ) latest on true
+       where ${authWhere}`,
+      parameters
+    );
+    return result.rows[0] || null;
+  })();
+  metadataLoads.set(`${credential.kind}:${credential.hash}`, load);
+  try {
+    return await load;
+  } finally {
+    metadataLoads.delete(`${credential.kind}:${credential.hash}`);
+  }
+}
+
 function stateConflictPayload(row, error = "STATE_CONFLICT", extra = {}) {
   const currentState = row?.state || null;
   return {
@@ -1630,13 +1967,72 @@ function stateConflictPayload(row, error = "STATE_CONFLICT", extra = {}) {
   };
 }
 
+async function preserveAndSendStateConflict(req, res, client, details) {
+  const current = await client.query(
+    `select username, state, state_bytes, state_hash, state_revision, state_updated_at, updated_at
+     from accounts where username = $1`,
+    [details.username]
+  );
+  const row = current.rows[0];
+  const cloudHash = row?.state_hash || (row?.state ? stateHash(row.state) : stateHash(null));
+  const copy = await preserveConflictCopy(client, {
+    ...details,
+    cloudRevision:Number(row?.state_revision || 0),
+    cloudHash,
+  });
+  await recordSaveEvent(client, {
+    username:details.username,
+    result: "conflicted",
+    baseRevision:details.baseRevision,
+    currentRevision:Number(row?.state_revision || 0),
+    stateHash:details.candidate.hash,
+    stateBytes:details.candidate.stateBytes,
+    deviceId:details.deviceId,
+    baseHash:details.baseHash,
+    mutationId:details.mutationId,
+    changeManifest:details.changeSet,
+    detail:copy.storageFull ? "CONFLICT_STORAGE_FULL" : details.reason,
+    conflictCopyId:copy.id,
+  });
+  await client.query("commit");
+  const error = copy.storageFull ? "CONFLICT_STORAGE_FULL" : details.reason;
+  sendJson(req, res, copy.storageFull ? 507 : 409, stateConflictPayload(row, error, {
+    message:copy.storageFull
+      ? "Cloud conflict storage is full. Your device copy remains pending; export it or ask an administrator to review storage."
+      : "Two changes overlap. Both copies are safe.",
+    conflictCopyId:copy.id,
+    candidateHash:details.candidate.hash,
+    copiesPreserved:!copy.storageFull,
+    deviceCopyPreserved:true,
+    deduplicated:copy.deduplicated,
+    conflictBudgetBytes:CONFLICT_COPY_BUDGET_BYTES,
+    ...(details.extra || {}),
+  }));
+}
+
 async function handleVersionedStateMeta(req, res) {
-  const user = await currentUser(req);
-  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
   if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  const user = await queryAuthenticatedStateMetadata(req);
+  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
   const revision = Number(user.state_revision || 0);
-  const currentHash = user.state_hash || (user.state ? stateHash(user.state) : stateHash(null));
-  const integrity = await stateIntegritySummary(user.username, user.state, revision);
+  const currentHash = user.state_hash || stateHash(null);
+  const immutableRevision = user.immutable_revision === null ? null : Number(user.immutable_revision);
+  const integrityMatches = immutableRevision === revision && user.immutable_hash === currentHash;
+  const emptyAccountMatches = revision === 0 && !user.state_hash && immutableRevision === null;
+  const integrity = integrityMatches || emptyAccountMatches
+    ? { status:"ok", immutableRevision, immutableHash:user.immutable_hash }
+    : {
+        status:"mismatch",
+        immutableRevision,
+        immutableHash:user.immutable_hash || null,
+        accountRevision:revision,
+        accountHash:currentHash,
+      };
+  const etag = `"sq-${revision}-${currentHash}"`;
+  if (String(req.headers["if-none-match"] || "").split(",").map((value) => value.trim()).includes(etag)) {
+    send(req, res, 304, "", { etag });
+    return;
+  }
   sendJson(req, res, 200, {
     ok:true,
     revision,
@@ -1644,14 +2040,14 @@ async function handleVersionedStateMeta(req, res) {
     updatedAt:user.state_updated_at || user.updated_at || null,
     stateBytes:Number(user.state_bytes || 0),
     maxStateBytes:MAX_STATE_BYTES,
+    manifestVersion:Number(user.state_manifest_version || 0),
     integrity,
-    activity:stateActivitySummary(user.state),
     serverTime:new Date().toISOString(),
-  });
+  }, { etag });
 }
 
 async function handleVersionedState(req, res) {
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:req.method === "GET" });
   if (!user) {
     sendJson(req, res, 401, { ok: false, error: "AUTH_REQUIRED" });
     return;
@@ -1724,6 +2120,7 @@ async function handleVersionedState(req, res) {
     return;
   }
   const incomingVersion = serializeStateVersion(incomingState);
+  const incomingManifest = stateManifest(incomingState);
   const stateBytes = incomingVersion.stateBytes;
   if (stateBytes > MAX_STATE_BYTES) {
     await recordSaveEvent(pool, {
@@ -1745,7 +2142,8 @@ async function handleVersionedState(req, res) {
   try {
     await client.query("begin");
     const current = await client.query(
-      `select username, state, state_bytes, state_hash, state_revision, state_updated_at, updated_at
+      `select username, state_bytes, state_hash, state_revision, state_updated_at, updated_at,
+              state_manifest, state_manifest_version
        from accounts where username = $1 for update`,
       [user.username]
     );
@@ -1759,7 +2157,7 @@ async function handleVersionedState(req, res) {
     }
     if (mutationId) {
       const duplicate = await client.query(
-        `select resulting_revision from state_save_events
+        `select resulting_revision, state_hash from state_save_events
          where username = $1 and mutation_id = $2 and resulting_revision is not null
          order by id desc limit 1`,
         [user.username, mutationId]
@@ -1767,11 +2165,21 @@ async function handleVersionedState(req, res) {
       if (duplicate.rowCount) {
         const duplicateRevision = Number(duplicate.rows[0].resulting_revision || 0);
         if (duplicateRevision !== currentRevision) {
-          await client.query("rollback");
-          sendJson(req, res, 409, stateConflictPayload(row, "STATE_CONFLICT", {
-            message: "This save was already accepted, but Saved Online has changed since then. Reload and compare before saving again.",
-            acceptedRevision: duplicateRevision,
-          }));
+          await client.query("commit");
+          sendJson(req, res, 200, {
+            ok:true,
+            idempotent:true,
+            acknowledgedMutationId:mutationId,
+            revision:duplicateRevision,
+            stateHash:duplicate.rows[0].state_hash,
+            acceptedRevision:duplicateRevision,
+            currentRevision,
+            currentStateHash:row.state_hash || stateHash(null),
+            stateBytes,
+            maxStateBytes:MAX_STATE_BYTES,
+            serverTime:new Date().toISOString(),
+            requiresRefresh:true,
+          });
           return;
         }
         await client.query("commit");
@@ -1780,118 +2188,132 @@ async function handleVersionedState(req, res) {
           idempotent: true,
           acknowledgedMutationId: mutationId || null,
           revision: currentRevision,
-          stateHash: row.state_hash || stateHash(row.state),
+          stateHash: row.state_hash || stateHash(null),
           savedAt: row.state_updated_at || row.updated_at || null,
           stateBytes: Number(row.state_bytes || 0),
           maxStateBytes: MAX_STATE_BYTES,
-          activity: stateActivitySummary(row.state),
           serverTime: new Date().toISOString(),
           requiresRefresh: false,
         });
         return;
       }
     }
-    if (baseRevision !== currentRevision) {
-      await client.query("rollback");
-      await recordSaveEvent(pool, {
-        username: user.username,
-        result: "conflicted",
-        baseRevision,
-        currentRevision,
-        stateHash: incomingVersion.hash,
-        stateBytes,
-        deviceId,
-        baseHash,
-        mutationId,
-        changeManifest: changeSet,
-        detail: "STATE_CONFLICT",
-      }).catch((error) => console.error("Save audit failed", error));
-      sendJson(req, res, 409, stateConflictPayload(row));
-      return;
-    }
-
-    const currentHash = row.state_hash || (row.state ? stateHash(row.state) : stateHash(null));
-    if (baseHash && baseHash !== currentHash) {
-      await client.query("rollback");
-      await recordSaveEvent(pool, {
-        username: user.username,
-        result: "conflicted",
-        baseRevision,
-        currentRevision,
-        stateHash: incomingVersion.hash,
-        stateBytes,
-        deviceId,
-        baseHash,
-        mutationId,
-        changeManifest: changeSet,
-        detail: "BASE_HASH_MISMATCH",
-      }).catch((error) => console.error("Save audit failed", error));
-      sendJson(req, res, 409, stateConflictPayload(row, "BASE_HASH_MISMATCH"));
-      return;
-    }
-
-    const exactStateMatch = Boolean(row.state && currentHash === incomingVersion.hash);
-    const rootTimestampOnlyMatch = Boolean(
-      row.state
-      && !exactStateMatch
-      && statesEqualIgnoringRootUpdatedAt(row.state, incomingState)
-    );
-    if (exactStateMatch || rootTimestampOnlyMatch) {
-      const unchangedHash = currentHash;
-      const unchangedBytes = Number(row.state_bytes || Buffer.byteLength(JSON.stringify(row.state)));
+    const currentHash = row.state_hash || stateHash(null);
+    if (currentHash === incomingVersion.hash) {
       await recordSaveEvent(client, {
-        username: user.username,
-        result: "no_change",
+        username:user.username,
+        result:"no_change",
         baseRevision,
         currentRevision,
-        resultingRevision: currentRevision,
-        stateHash: unchangedHash,
-        stateBytes: unchangedBytes,
+        resultingRevision:currentRevision,
+        stateHash:currentHash,
+        stateBytes:Number(row.state_bytes || stateBytes),
         deviceId,
         baseHash,
         mutationId,
-        changeManifest: changeSet,
-        detail: rootTimestampOnlyMatch ? "Ignored root updatedAt-only save" : "State hash already current",
+        changeManifest:changeSet,
+        detail:"Candidate hash already current",
       });
       await client.query("commit");
       sendJson(req, res, 200, {
-        ok: true,
-        unchanged: true,
-        acknowledgedMutationId: mutationId || null,
-        ignoredVolatileOnly: rootTimestampOnlyMatch,
-        revision: currentRevision,
-        stateHash: unchangedHash,
-        savedAt: row.state_updated_at || row.updated_at || null,
-        stateBytes: unchangedBytes,
-        maxStateBytes: MAX_STATE_BYTES,
-        serverTime: new Date().toISOString(),
-        preMergeBackupCreated: false,
+        ok:true,
+        unchanged:true,
+        acknowledgedMutationId:mutationId || null,
+        revision:currentRevision,
+        stateHash:currentHash,
+        savedAt:row.state_updated_at || row.updated_at || null,
+        stateBytes:Number(row.state_bytes || stateBytes),
+        maxStateBytes:MAX_STATE_BYTES,
+        serverTime:new Date().toISOString(),
+      });
+      return;
+    }
+    if (baseRevision !== currentRevision) {
+      await preserveAndSendStateConflict(req, res, client, {
+        username:user.username,
+        candidate:incomingVersion,
+        baseRevision,
+        deviceId,
+        baseHash,
+        mutationId,
+        changeSet,
+        reason:"STATE_CONFLICT",
       });
       return;
     }
 
-    const destructive = unapprovedRemovals(row.state, incomingState, changeSet);
-    if (destructive.unapproved.length) {
-      const removals = destructive.unapproved.slice(0, 100).map(publicRecordDifference);
-      await client.query("rollback");
-      await recordSaveEvent(pool, {
-        username: user.username,
-        result: "rejected",
+    if (baseHash && baseHash !== currentHash) {
+      await preserveAndSendStateConflict(req, res, client, {
+        username:user.username,
+        candidate:incomingVersion,
         baseRevision,
-        currentRevision,
-        stateHash: incomingVersion.hash,
-        stateBytes,
         deviceId,
         baseHash,
         mutationId,
-        changeManifest: changeSet,
-        detail: `DESTRUCTIVE_CHANGE_REVIEW_REQUIRED:${destructive.unapproved.length}`,
-      }).catch((error) => console.error("Save audit failed", error));
-      sendJson(req, res, 409, stateConflictPayload(row, "DESTRUCTIVE_CHANGE_REVIEW_REQUIRED", {
-        message: "This save would remove information without a matching user deletion. Both copies were preserved.",
-        removalCount: destructive.unapproved.length,
-        removals,
-      }));
+        changeSet,
+        reason:"BASE_HASH_MISMATCH",
+      });
+      return;
+    }
+
+    let currentManifest = row.state_manifest;
+    if (!currentManifest || Number(row.state_manifest_version || 0) !== 1) {
+      const recoveryState = await client.query("select state from accounts where username = $1", [user.username]);
+      currentManifest = stateManifest(recoveryState.rows[0]?.state || null);
+      await client.query(
+        `update accounts set state_manifest = $2::jsonb, state_manifest_version = $3 where username = $1`,
+        [user.username, JSON.stringify(currentManifest), currentManifest.version]
+      );
+    }
+    const rootTimestampOnlyMatch = Boolean(
+      currentManifest?.contentHash
+      && incomingManifest?.contentHash
+      && currentManifest.contentHash === incomingManifest.contentHash
+    );
+    if (rootTimestampOnlyMatch) {
+      await recordSaveEvent(client, {
+        username:user.username,
+        result:"no_change",
+        baseRevision,
+        currentRevision,
+        resultingRevision:currentRevision,
+        stateHash:currentHash,
+        stateBytes:Number(row.state_bytes || stateBytes),
+        deviceId,
+        baseHash,
+        mutationId,
+        changeManifest:changeSet,
+        detail:"Ignored root updatedAt-only save",
+      });
+      await client.query("commit");
+      sendJson(req, res, 200, {
+        ok:true,
+        unchanged:true,
+        ignoredVolatileOnly:true,
+        acknowledgedMutationId:mutationId || null,
+        revision:currentRevision,
+        stateHash:currentHash,
+        savedAt:row.state_updated_at || row.updated_at || null,
+        stateBytes:Number(row.state_bytes || stateBytes),
+        maxStateBytes:MAX_STATE_BYTES,
+        serverTime:new Date().toISOString(),
+      });
+      return;
+    }
+    const destructive = unapprovedManifestRemovals(currentManifest, incomingManifest, changeSet);
+    if (destructive.unapproved.length) {
+      const removals = destructive.unapproved.slice(0, 100).map(publicRecordDifference);
+      await preserveAndSendStateConflict(req, res, client, {
+        username:user.username,
+        candidate:incomingVersion,
+        baseRevision,
+        deviceId,
+        baseHash,
+        mutationId,
+        changeSet,
+        reason:"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED",
+        extra:{ removalCount:destructive.unapproved.length, removals },
+      });
       return;
     }
 
@@ -1900,15 +2322,26 @@ async function handleVersionedState(req, res) {
       "v15-auto-nonoverlap", "v16-auto-nonoverlap",
     ]);
     const mergeApproved = approvedRecoverySources.has(body?.merge?.source) && body?.merge?.approvedAt;
-    const preMergeBackupCreated = mergeApproved ? await createMergeStateBackup(client, row) : false;
-    await createDailyStateBackup(client, row);
+    const mergeConflictCopyId = mergeApproved && /^[a-f0-9-]{36}$/i.test(String(body?.merge?.conflictCopyId || ""))
+      ? String(body.merge.conflictCopyId)
+      : null;
+    let preMergeBackupCreated = false;
+    if (mergeApproved) {
+      const currentStateResult = await client.query(
+        `select username, state, state_revision from accounts where username = $1`,
+        [user.username]
+      );
+      preMergeBackupCreated = await createMergeStateBackup(client, currentStateResult.rows[0]);
+    }
     const saved = await client.query(
       `update accounts
        set state = $2::jsonb, state_bytes = $3, state_hash = $4, state_revision = state_revision + 1,
+           state_manifest = $5::jsonb, state_manifest_version = $6,
            state_updated_at = now(), updated_at = now()
        where username = $1
        returning state_revision, state_updated_at`,
-      [user.username, JSON.stringify(incomingState), stateBytes, incomingVersion.hash]
+      [user.username, JSON.stringify(incomingState), stateBytes, incomingVersion.hash,
+        JSON.stringify(incomingManifest), incomingManifest.version]
     );
     const resultingRevision = Number(saved.rows[0].state_revision);
     await insertStateVersion(client, {
@@ -1933,7 +2366,17 @@ async function handleVersionedState(req, res) {
       changeManifest: changeSet,
       mergeSource: mergeApproved ? body.merge.source : null,
       detail: mergeApproved ? `Approved ${body.merge.source}` : "Revision-protected save",
+      conflictCopyId:mergeConflictCopyId,
     });
+    if (mergeConflictCopyId && /^[a-f0-9]{64}$/.test(String(body?.merge?.conflictCandidateHash || ""))) {
+      await client.query(
+        `update state_conflict_copies
+         set resolved_at = now(), resolved_revision = $3, resolution_mutation_id = $4,
+             retention_expires_at = now() + interval '30 days'
+         where id = $1 and username = $2 and candidate_hash = $5 and resolved_at is null`,
+        [mergeConflictCopyId, user.username, resultingRevision, mutationId || null, body.merge.conflictCandidateHash]
+      );
+    }
     await client.query("commit");
     await pruneStateVersions(user.username).catch((error) => console.error("State history pruning failed", error));
     sendJson(req, res, 200, {
@@ -1963,6 +2406,280 @@ async function handleVersionedState(req, res) {
       changeManifest: changeSet,
       detail: String(error?.code || error?.message || "SERVER_ERROR").slice(0, 120),
     }).catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function publicConflictCopy(row) {
+  return {
+    id:String(row.id),
+    mutationId:row.mutation_id,
+    deviceId:row.device_id,
+    reason:row.reason,
+    baseRevision:row.base_revision === null ? null : Number(row.base_revision),
+    baseHash:row.base_hash,
+    cloudRevision:Number(row.cloud_revision || 0),
+    cloudHash:row.cloud_hash,
+    candidateHash:row.candidate_hash,
+    candidateBytes:Number(row.candidate_bytes || 0),
+    compressedBytes:Number(row.compressed_bytes || 0),
+    createdAt:row.created_at,
+    resolvedAt:row.resolved_at,
+    resolvedRevision:row.resolved_revision === null ? null : Number(row.resolved_revision),
+    retentionExpiresAt:row.retention_expires_at,
+  };
+}
+
+async function handleStateConflicts(req, res) {
+  const user = await currentUser(req, { includeState:false });
+  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  const result = await pool.query(
+    `select id, mutation_id, device_id, reason, base_revision, base_hash,
+            cloud_revision, cloud_hash, candidate_hash, candidate_bytes, compressed_bytes,
+            created_at, resolved_at, resolved_revision, retention_expires_at
+     from state_conflict_copies
+     where username = $1 and resolved_at is null and retention_expires_at >= now()
+     order by created_at desc limit 100`,
+    [user.username]
+  );
+  sendJson(req, res, 200, { ok:true, conflicts:result.rows.map(publicConflictCopy), serverTime:new Date().toISOString() });
+}
+
+async function handleStateConflictDetail(req, res, conflictId) {
+  const user = await currentUser(req, { includeState:false });
+  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  if (!/^[a-f0-9-]{36}$/i.test(conflictId)) return sendJson(req, res, 400, { ok:false, error:"INVALID_CONFLICT_ID" });
+  const result = await pool.query(
+    `select c.*, a.state as cloud_state, a.state_revision as current_revision,
+            a.state_hash as current_hash, a.state_updated_at as current_updated_at
+     from state_conflict_copies c
+     join accounts a on a.username = c.username
+     where c.id = $1 and c.username = $2 and c.retention_expires_at >= now()`,
+    [conflictId, user.username]
+  );
+  const row = result.rows[0];
+  if (!row) return sendJson(req, res, 404, { ok:false, error:"CONFLICT_COPY_NOT_FOUND" });
+  let candidateState;
+  try {
+    candidateState = deserializeStateVersion(row.candidate_gzip);
+  } catch (error) {
+    serverLog("error", "conflict_copy_corrupt", { conflictCopyId:String(row.id), code:error?.code || null });
+    return sendJson(req, res, 500, { ok:false, error:"CONFLICT_COPY_CORRUPT", conflictCopyId:String(row.id) });
+  }
+  const candidateHash = stateHash(candidateState);
+  const cloudHash = row.current_hash || stateHash(row.cloud_state);
+  if (candidateHash !== row.candidate_hash || cloudHash !== stateHash(row.cloud_state)) {
+    serverLog("error", "conflict_copy_integrity_mismatch", { conflictCopyId:String(row.id) });
+    return sendJson(req, res, 500, { ok:false, error:"CONFLICT_INTEGRITY_MISMATCH", conflictCopyId:String(row.id) });
+  }
+  const comparison = stateRecordDiff(row.cloud_state, candidateState);
+  sendJson(req, res, 200, {
+    ok:true,
+    conflict:publicConflictCopy(row),
+    candidateState,
+    cloudState:row.cloud_state,
+    current:{
+      revision:Number(row.current_revision || 0),
+      stateHash:cloudHash,
+      updatedAt:row.current_updated_at,
+    },
+    comparison:{
+      removed:comparison.removed.slice(0, 300).map(publicRecordDifference),
+      added:comparison.added.slice(0, 300).map(publicRecordDifference),
+      byCollection:comparison.byCollection,
+      truncated:comparison.removed.length > 300 || comparison.added.length > 300,
+    },
+    previewToken:signRecoveryPreview({
+      purpose:"resolve-conflict",
+      username:user.username,
+      conflictId:String(row.id),
+      currentRevision:Number(row.current_revision || 0),
+      currentHash:cloudHash,
+      candidateHash,
+      expiresAt:Date.now() + RECOVERY_PREVIEW_MAX_AGE_MS,
+    }),
+    serverTime:new Date().toISOString(),
+  });
+}
+
+async function handleStateConflictResolve(req, res, conflictId) {
+  const user = await currentUser(req, { includeState:false });
+  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  if (!/^[a-f0-9-]{36}$/i.test(conflictId)) return sendJson(req, res, 400, { ok:false, error:"INVALID_CONFLICT_ID" });
+  const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES);
+  const mergedState = body?.state;
+  const expectedRevision = body?.expectedRevision;
+  const expectedHash = typeof body?.expectedHash === "string" ? body.expectedHash.trim().toLowerCase() : "";
+  const mutationId = typeof body?.mutationId === "string" ? body.mutationId.trim().slice(0, 120) : "";
+  const preview = verifyRecoveryPreview(body?.previewToken, {
+    purpose:"resolve-conflict",
+    username:user.username,
+    conflictId,
+  });
+  if (!mergedState || typeof mergedState !== "object" || !Array.isArray(mergedState.tasks)) {
+    return sendJson(req, res, 400, { ok:false, error:"INVALID_STATE" });
+  }
+  if (!Number.isInteger(expectedRevision) || !/^[a-f0-9]{64}$/.test(expectedHash)
+      || !/^[a-zA-Z0-9._:-]{8,120}$/.test(mutationId)) {
+    return sendJson(req, res, 400, { ok:false, error:"INVALID_RESOLUTION_ENVELOPE" });
+  }
+  const prepared = serializeStateVersion(mergedState);
+  if (prepared.stateBytes > MAX_STATE_BYTES) return sendJson(req, res, 413, stateTooLargePayload(prepared.stateBytes));
+  const manifest = stateManifest(mergedState);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const conflictResult = await client.query(
+      `select * from state_conflict_copies where id = $1 and username = $2 for update`,
+      [conflictId, user.username]
+    );
+    const conflict = conflictResult.rows[0];
+    if (!conflict) {
+      await client.query("rollback");
+      return sendJson(req, res, 404, { ok:false, error:"CONFLICT_COPY_NOT_FOUND" });
+    }
+    const accountResult = await client.query(
+      `select username, state, state_revision, state_hash, state_bytes, state_updated_at, updated_at
+       from accounts where username = $1 for update`,
+      [user.username]
+    );
+    const account = accountResult.rows[0];
+    const cloudHash = account?.state_hash || stateHash(account?.state);
+    if (conflict.resolved_at) {
+      if (conflict.resolution_mutation_id !== mutationId) {
+        await client.query("rollback");
+        return sendJson(req, res, 409, {
+          ok:false,
+          error:"CONFLICT_ALREADY_RESOLVED",
+          conflictCopyId:conflictId,
+          resolvedRevision:Number(conflict.resolved_revision || 0),
+        });
+      }
+      await client.query("commit");
+      return sendJson(req, res, 200, {
+        ok:true,
+        idempotent:true,
+        acknowledgedMutationId:mutationId,
+        revision:Number(conflict.resolved_revision || account?.state_revision || 0),
+        stateHash:cloudHash,
+        conflictCopyId:conflictId,
+      });
+    }
+    if (!preview || Number(preview.currentRevision) !== expectedRevision || preview.currentHash !== expectedHash) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, { ok:false, error:"PREVIEW_EXPIRED", message:"Cloud changed or this review expired. Rebuild the preview before applying." });
+    }
+    if (!account || Number(account.state_revision || 0) !== expectedRevision || cloudHash !== expectedHash) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, {
+        ok:false,
+        error:"PREVIEW_STALE",
+        message:"Saved online changed during review. Both copies remain safe; review the rebuilt comparison.",
+        currentRevision:Number(account?.state_revision || 0),
+        currentHash:cloudHash,
+        conflictCopyId:conflictId,
+        copiesPreserved:true,
+      });
+    }
+    let candidateState;
+    try { candidateState = deserializeStateVersion(conflict.candidate_gzip); }
+    catch {
+      await client.query("rollback");
+      return sendJson(req, res, 500, { ok:false, error:"CONFLICT_COPY_CORRUPT", conflictCopyId:conflictId });
+    }
+    if (stateHash(candidateState) !== conflict.candidate_hash || conflict.candidate_hash !== preview.candidateHash) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, { ok:false, error:"CONFLICT_INTEGRITY_MISMATCH", conflictCopyId:conflictId });
+    }
+    const destructive = unapprovedRemovals(account.state, mergedState, body?.changeSet);
+    if (destructive.unapproved.length) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, {
+        ok:false,
+        error:"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED",
+        conflictCopyId:conflictId,
+        copiesPreserved:true,
+        removalCount:destructive.unapproved.length,
+        removals:destructive.unapproved.slice(0, 100).map(publicRecordDifference),
+      });
+    }
+    if (prepared.hash === cloudHash) {
+      await client.query(
+        `update state_conflict_copies
+         set resolved_at = now(), resolved_revision = $2, resolution_mutation_id = $3,
+             retention_expires_at = now() + interval '30 days'
+         where id = $1`,
+        [conflictId, expectedRevision, mutationId]
+      );
+      await client.query("commit");
+      return sendJson(req, res, 200, {
+        ok:true,
+        unchanged:true,
+        acknowledgedMutationId:mutationId,
+        revision:expectedRevision,
+        stateHash:cloudHash,
+        conflictCopyId:conflictId,
+      });
+    }
+    await createMergeStateBackup(client, account);
+    const saved = await client.query(
+      `update accounts
+       set state = $2::jsonb, state_bytes = $3, state_hash = $4,
+           state_manifest = $5::jsonb, state_manifest_version = $6,
+           state_revision = state_revision + 1, state_updated_at = now(), updated_at = now()
+       where username = $1 returning state_revision, state_updated_at`,
+      [user.username, JSON.stringify(mergedState), prepared.stateBytes, prepared.hash,
+        JSON.stringify(manifest), manifest.version]
+    );
+    const revision = Number(saved.rows[0].state_revision);
+    await insertStateVersion(client, {
+      username:user.username,
+      revision,
+      state:mergedState,
+      sourceDevice:"conflict-review",
+      version:prepared,
+    });
+    await recordSaveEvent(client, {
+      username:user.username,
+      result:"accepted",
+      baseRevision:expectedRevision,
+      currentRevision:expectedRevision,
+      resultingRevision:revision,
+      stateHash:prepared.hash,
+      stateBytes:prepared.stateBytes,
+      deviceId:"conflict-review",
+      baseHash:expectedHash,
+      mutationId,
+      changeManifest:body?.changeSet,
+      mergeSource:"conflict-review",
+      detail:`Resolved conflict ${conflictId}`,
+      conflictCopyId:conflictId,
+    });
+    await client.query(
+      `update state_conflict_copies
+       set resolved_at = now(), resolved_revision = $2, resolution_mutation_id = $3,
+           retention_expires_at = now() + interval '30 days'
+       where id = $1`,
+      [conflictId, revision, mutationId]
+    );
+    await client.query("commit");
+    sendJson(req, res, 200, {
+      ok:true,
+      acknowledgedMutationId:mutationId,
+      revision,
+      stateHash:prepared.hash,
+      savedAt:saved.rows[0].state_updated_at,
+      conflictCopyId:conflictId,
+      copiesPreserved:true,
+      serverTime:new Date().toISOString(),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
     throw error;
   } finally {
     client.release();
@@ -2149,9 +2866,11 @@ async function handleRecoveryVersionRecoverMissing(req, res, versionId) {
     const updated = await client.query(
       `update accounts
        set state = $2::jsonb, state_bytes = $3, state_hash = $4,
+           state_manifest = $5::jsonb, state_manifest_version = $6,
            state_revision = state_revision + 1, state_updated_at = now(), updated_at = now()
        where username = $1 returning state_revision, state_updated_at`,
-      [user.username, prepared.serialized, prepared.stateBytes, prepared.hash]
+      [user.username, prepared.serialized, prepared.stateBytes, prepared.hash,
+        JSON.stringify(stateManifest(recovered.state)), 1]
     );
     const resultingRevision = Number(updated.rows[0].state_revision);
     await insertStateVersion(client, {
@@ -2257,7 +2976,7 @@ function randomPairingCode() {
 }
 
 async function handleAdminPairingCode(req, res) {
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:false });
   if (!user) return sendJson(req, res, 401, { ok: false, error: "AUTH_REQUIRED" });
   if (user.username !== ADMIN_USERNAME || user.sync_device_id) {
     return sendJson(req, res, 403, { ok: false, error: "ADMIN_BROWSER_SESSION_REQUIRED" });
@@ -2320,14 +3039,14 @@ async function handlePairDevice(req, res) {
 
 async function handleRevokeSelf(req, res) {
   if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:false });
   if (!user?.sync_device_id) return sendJson(req, res, 401, { ok: false, error: "DEVICE_AUTH_REQUIRED" });
   await pool.query("update sync_devices set revoked_at = now() where id = $1", [user.sync_device_id]);
   sendJson(req, res, 200, { ok: true });
 }
 
 async function handleAdminSyncDevices(req, res) {
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:false });
   if (!user || user.username !== ADMIN_USERNAME || user.sync_device_id) {
     return sendJson(req, res, 403, { ok: false, error: "Admin access required." });
   }
@@ -2348,7 +3067,7 @@ async function handleAdminSyncDevices(req, res) {
 }
 
 async function handleAdminUsers(req, res) {
-  const user = await currentUser(req);
+  const user = await currentUser(req, { includeState:false });
   if (!user || user.username !== ADMIN_USERNAME || user.sync_device_id) {
     sendJson(req, res, 403, { ok: false, error: "Admin access required." });
     return;
@@ -2376,7 +3095,7 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
     if (url.pathname === "/v13" || url.pathname === "/claudever13.html") {
-      const user = await currentUser(req);
+      const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
         send(req, res, 302, "Login required", { location: "/app.html?next=v13" });
         return;
@@ -2390,7 +3109,7 @@ const server = http.createServer(async (req, res) => {
     }
 
       if (url.pathname === "/v14" || url.pathname === "/claudever14.html") {
-        const user = await currentUser(req);
+        const user = await currentUser(req, { includeState:false });
         if (!user || user.sync_device_id) {
           send(req, res, 302, "Login required", { location: "/app.html?next=v14" });
           return;
@@ -2404,7 +3123,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/v15" || url.pathname === "/claudever15.html") {
-      const user = await currentUser(req);
+      const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
         send(req, res, 302, "Login required", { location: "/app.html?next=v15" });
         return;
@@ -2418,7 +3137,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/v16" || url.pathname === "/claudever16.html") {
-      const user = await currentUser(req);
+      const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
         send(req, res, 302, "Login required", { location: "/app.html?next=v16" });
         return;
@@ -2432,7 +3151,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/") {
-      const user = await currentUser(req);
+      const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
         send(req, res, 302, "Login required", { location: "/app.html?next=v15-main" });
         return;
@@ -2446,7 +3165,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/device-recovery" || url.pathname === "/data-recovery") {
-      const user = await currentUser(req);
+      const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
         send(req, res, 302, "Login required", { location: "/app.html?next=data-recovery&stable=1" });
         return;
@@ -2475,6 +3194,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/safe-sync.js") {
       send(req, res, 200, fs.readFileSync(SAFE_SYNC_JS_PATH), {
         "content-type": "text/javascript; charset=utf-8",
+        ...(url.searchParams.has("v") ? { "cache-control":"public, max-age=31536000, immutable" } : {}),
       });
       return;
     }
@@ -2561,6 +3281,23 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/v2/state/conflicts") {
+      await handleStateConflicts(req, res);
+      return;
+    }
+
+    const conflictResolveMatch = url.pathname.match(/^\/api\/v2\/state\/conflicts\/([a-f0-9-]{36})\/resolve$/i);
+    if (conflictResolveMatch) {
+      await handleStateConflictResolve(req, res, conflictResolveMatch[1]);
+      return;
+    }
+
+    const conflictDetailMatch = url.pathname.match(/^\/api\/v2\/state\/conflicts\/([a-f0-9-]{36})$/i);
+    if (conflictDetailMatch) {
+      await handleStateConflictDetail(req, res, conflictDetailMatch[1]);
+      return;
+    }
+
     if (url.pathname === "/api/admin/pairing-code") {
       await handleAdminPairingCode(req, res);
       return;
@@ -2603,6 +3340,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/admin/recovery/incidents/anya-2026-08-11") {
       await handleAnyaIncidentRecovery(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/admin/recovery/incidents/anya-2026-08-26-28/preview") {
+      await handleAnyaAugustRecoveryPreview(req, res);
       return;
     }
 
@@ -2663,47 +3405,21 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-    if (url.pathname === "/api/heartbeat" || url.pathname === "/api/health") {
-      let databaseBytes = null;
-      let stateBytes = null;
-      if (url.pathname === "/api/health") {
-        const [sizeResult, healthUser] = await Promise.all([
-          pool.query("select pg_database_size(current_database()) as bytes"),
-          currentUser(req),
-        ]);
-        databaseBytes = Number(sizeResult.rows[0]?.bytes || 0);
-        stateBytes = healthUser ? Number(healthUser.state_bytes || 0) : null;
-        const activity = healthUser ? stateActivitySummary(healthUser.state) : null;
-          sendJson(req, res, 200, {
-            ok: true,
-            auth: true,
-            db: "postgres",
-            serverTime: new Date().toISOString(),
-            v14AccessMode: V14_ACCESS_MODE,
-            v15AccessMode: V15_ACCESS_MODE,
-            v16AccessMode: V16_ACCESS_MODE,
-            maxStateBytes: MAX_STATE_BYTES,
-          maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
-          stateBytes,
-          databaseBytes,
-          activity,
-        });
-        return;
-      }
+    if (url.pathname === "/api/health") {
+      await pool.query("select 1 as healthy");
       sendJson(req, res, 200, {
         ok: true,
-        auth: true,
         db: "postgres",
         serverTime: new Date().toISOString(),
         v14AccessMode: V14_ACCESS_MODE,
         v15AccessMode: V15_ACCESS_MODE,
         v16AccessMode: V16_ACCESS_MODE,
-        maxStateBytes: MAX_STATE_BYTES,
-        maxRequestBytes: MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES,
-        stateBytes,
-        databaseBytes,
-        activity: null,
       });
+      return;
+    }
+
+    if (url.pathname === "/api/heartbeat") {
+      sendJson(req, res, 200, { ok:true, serverTime:new Date().toISOString() });
       return;
     }
 
@@ -2774,7 +3490,18 @@ process.on("uncaughtException", (error) => {
   void shutdownServer("uncaughtException", 1);
 });
 
-serverLog("info", "server_starting", { port:PORT, safeSyncMode:SAFE_SYNC_MODE });
+const databaseSafety = databaseEndpointSafety(DATABASE_URL);
+serverLog("info", "server_starting", {
+  port:PORT,
+  safeSyncMode:SAFE_SYNC_MODE,
+  databaseProvider:databaseSafety.provider,
+  databasePooled:databaseSafety.pooled,
+  databaseTlsVerified:databaseSafety.tlsVerified,
+  databasePoolMax:3,
+});
+if (IS_HOSTED && databaseSafety.provider === "neon" && !databaseSafety.pooled) {
+  serverLog("warn", "database_endpoint_not_pooled", { databaseProvider:"neon" });
+}
 ensureSchemaWithRetry()
   .then(() => {
     server.listen(PORT, "0.0.0.0", () => {
