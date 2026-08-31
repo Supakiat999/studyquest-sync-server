@@ -49,6 +49,8 @@ Deployment behavior:
 - v15 is the authenticated main app at `/`, with `/v15` and `/claudever15.html` retained as aliases. `STUDYQUEST_V15_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`, production activation is `all`, and `off` returns the root to `/app.html?stable=1` as an emergency stop.
 - v16 is a separate authenticated route at `/v16`, with `/claudever16.html` retained as an alias. `STUDYQUEST_V16_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`, and public activation occurs only after the admin canary, backup, hash, and account-isolation gates pass.
 - Hosted v16 uses the same account-scoped `studyquest_v3_<username>` storage, IndexedDB v3 recovery outbox, and revision/hash-protected `/api/v2/state` flow. Opening or rendering v16 is read-only; deliberate edits are saved locally before cloud retry, and conflicts preserve both copies.
+- v19 is a separate authenticated route at `/v19`, with `/claudever19.html` retained as an alias. `STUDYQUEST_V19_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`. The root and `/v15` remain v15. V19 keeps account-scoped storage, read-only startup, IndexedDB recovery, outbox retry, and revision/hash-protected cloud saves.
+- The v19 Course Reference criteria endpoint is authenticated and admin-only. Ordinary accounts neither receive the criteria pack nor save it into their state.
 - Logged-out requests use the stable login flow, bearer device-token sessions cannot open HTML routes, and every signed-in account receives only its own namespaced `studyquest_v3` state.
 - v15 uses the existing `/api/v2/state`, IndexedDB recovery, revisions, snapshots, undo, and cloud sync. Opening the route is read-only; task duration/progress fields are written only after the user interacts with a control. The stable app remains available at `/app.html?stable=1`, while v13 and v14 remain unchanged.
 - The committed HTML is served directly. Startup no longer rewrites the tested release with patch scripts.
@@ -67,7 +69,7 @@ Deployment behavior:
 - Existing Weekly semesters, weeks, notes, checks, and edited course lists are migrated additively. `Edit Subjects` remains the per-semester source for that user's course names and weekdays.
 - One-time admin pairing codes expire after 10 minutes. Device tokens are returned once, stored as hashes in PostgreSQL, and can be revoked.
 - One Bangkok-calendar-day recovery snapshot is retained before the first accepted write, with 30-day retention. A snapshot is skipped when its state matches the latest stored backup.
-- `/api/version` reports the v13 release hash; `/api/version?version=14`, `/api/version?version=15`, and `/api/version?version=16` report their separate hashes, access modes, and route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
+- `/api/version` reports the v13 release hash; `/api/version?version=14`, `/api/version?version=15`, `/api/version?version=16`, and `/api/version?version=19` report their separate hashes, access modes, and route metadata. `/api/v2/state` and `/api/health` include safe activity summaries without passwords, tokens, or other accounts.
 - Users can submit password-recovery cases from the login screen. Admin verifies them personally in v13 Recovery Center, which generates a one-time 24-hour temporary password without changing account state.
 - Admin can preview and restore 30-day account snapshots. Full replacement requires a fresh signed preview token, creates a `pre_restore` backup, and increments the cloud revision; credentials are not changed.
 - Every signed-in user can open `/data-recovery` (with `/device-recovery` kept as an alias), choose an earlier saved version, preview exact missing/current-only/changed records, and use **Recover Missing Items**. This is additive: current records and settings are not replaced.
@@ -89,6 +91,17 @@ confirmed with the admin canary; then change only the Render runtime value to
 `all` and verify an ordinary signed-in account. Logged-out and device-token
 sessions remain blocked, and a failed gate rolls v16 back to `off` without a
 database restore.
+
+### v19 Hosted Release Gate
+
+V19 is deployed only after a fresh encrypted Neon backup passes decryption,
+checksum, table-count, and every-account coverage validation. Record each
+account's revision, hash, byte size, and record summary before release. Push
+from a clean fast-forward checkout with `STUDYQUEST_V19_ACCESS=off`, verify the
+exact published hash and unchanged v15 root, then use `admin` for the canary.
+Change only the Render runtime value to `all` after read-only canary checks show
+no revision, hash, count, recovery, or account-isolation change. Any unexplained
+change sets v19 back to `off`; database restore is never the first rollback.
 
 Safe multi-device reconciliation has a separate rollback switch. Keep
 `STUDYQUEST_SAFE_SYNC_MODE=off` for the initial deploy, use `users` with a

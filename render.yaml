@@ -32,6 +32,8 @@ services:
         value: "off"
       - key: STUDYQUEST_V16_ACCESS
         value: "off"
+      - key: STUDYQUEST_V19_ACCESS
+        value: "off"
       - key: STUDYQUEST_SAFE_SYNC_MODE
         value: "off"
       - key: STUDYQUEST_SAFE_SYNC_USERS

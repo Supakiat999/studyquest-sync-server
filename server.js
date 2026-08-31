@@ -34,6 +34,11 @@ const V16_HTML_PATH = path.join(ROOT, "public", "claudever16.html");
 const V16_FEATURES_PATH = path.join(ROOT, "public", "v16-local-features.js");
 const SAFE_SYNC_JS_PATH = path.join(ROOT, "public", "safe-sync.js");
 const V16_VERSION_PATH = path.join(ROOT, "public", "v16-version.json");
+const V19_HTML_PATH = path.join(ROOT, "public", "claudever19.html");
+const V18_FEATURES_PATH = path.join(ROOT, "public", "v18-local-features.js");
+const V19_FEATURES_PATH = path.join(ROOT, "public", "v19-local-features.js");
+const V19_VERSION_PATH = path.join(ROOT, "public", "v19-version.json");
+const V18_ADMIN_COURSE_CRITERIA = require("./lib/v18-admin-course-criteria");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
 const WEEKLY_STUDY_PLANNER_LITE_PATH = path.join(ROOT, "public", "weekly-study-planner.html");
@@ -51,6 +56,10 @@ const V15_ACCESS_MODE = (() => {
 })();
 const V16_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V16_ACCESS || "off").trim().toLowerCase();
+  return ["off", "admin", "all"].includes(configured) ? configured : "off";
+})();
+const V19_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V19_ACCESS || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
 const SAFE_SYNC_MODE = (() => {
@@ -253,6 +262,17 @@ function authenticatedV16Html(user) {
 function canAccessV16(user) {
   if (!user || user.sync_device_id || V16_ACCESS_MODE === "off") return false;
   return V16_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
+}
+
+function authenticatedV19Html(user) {
+  const html = htmlTemplate(V19_HTML_PATH);
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};</script>`;
+  return html.replace("</head>", `${bootstrap}\n</head>`);
+}
+
+function canAccessV19(user) {
+  if (!user || user.sync_device_id || V19_ACCESS_MODE === "off") return false;
+  return V19_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
 }
 
 function readBody(req, maxBytes = MAX_AUTH_BODY_BYTES) {
@@ -3150,6 +3170,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/v19" || url.pathname === "/claudever19.html") {
+      const user = await currentUser(req, { includeState:false });
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?stable=1" });
+        return;
+      }
+      if (!canAccessV19(user)) {
+        send(req, res, 302, V19_ACCESS_MODE === "off" ? "v19 is temporarily unavailable" : "v19 is not enabled for this account", { location: "/app.html?stable=1" });
+        return;
+      }
+      send(req, res, 200, authenticatedV19Html(user), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
     if (url.pathname === "/") {
       const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
@@ -3186,6 +3220,20 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/v16-local-features.js") {
       send(req, res, 200, fs.readFileSync(V16_FEATURES_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
+    if (url.pathname === "/v18-local-features.js") {
+      send(req, res, 200, fs.readFileSync(V18_FEATURES_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
+    if (url.pathname === "/v19-local-features.js") {
+      send(req, res, 200, fs.readFileSync(V19_FEATURES_PATH), {
         "content-type": "text/javascript; charset=utf-8",
       });
       return;
@@ -3384,15 +3432,29 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+      if (url.pathname === "/api/v18/admin-course-criteria") {
+        const user = await currentUser(req, { includeState:false });
+        if (!user || user.sync_device_id) {
+          sendJson(req, res, 401, { ok:false, error:"LOGIN_REQUIRED" });
+          return;
+        }
+        if (user.username !== ADMIN_USERNAME) {
+          sendJson(req, res, 403, { ok:false, error:"ADMIN_ONLY" });
+          return;
+        }
+        sendJson(req, res, 200, { ok:true, ...V18_ADMIN_COURSE_CRITERIA });
+        return;
+      }
+
       if (url.pathname === "/api/version") {
         const requestedVersion = url.searchParams.get("version");
-        const versionNumber = requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
-        const versionPath = versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
+        const versionNumber = requestedVersion === "19" ? 19 : requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
+        const versionPath = versionNumber === 19 ? V19_VERSION_PATH : versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
         let version = {
           version: versionNumber,
           hash: null,
           releasedAt: null,
-          source: versionNumber === 16 ? "claudever16.html" : versionNumber === 15 ? "claudever15.html" : versionNumber === 14 ? "claudever14.html" : "claudever13.html",
+          source: versionNumber === 19 ? "claudever19.html" : versionNumber === 16 ? "claudever16.html" : versionNumber === 15 ? "claudever15.html" : versionNumber === 14 ? "claudever14.html" : "claudever13.html",
         };
         try { version = JSON.parse(fs.readFileSync(versionPath, "utf8")); } catch {}
         sendJson(req, res, 200, {
@@ -3401,6 +3463,7 @@ const server = http.createServer(async (req, res) => {
           ...(versionNumber === 14 ? { accessMode: V14_ACCESS_MODE, adminOnly: V14_ACCESS_MODE !== "all" } : {}),
           ...(versionNumber === 15 ? { accessMode: V15_ACCESS_MODE, adminOnly: V15_ACCESS_MODE !== "all" } : {}),
           ...(versionNumber === 16 ? { accessMode: V16_ACCESS_MODE, adminOnly: V16_ACCESS_MODE !== "all" } : {}),
+          ...(versionNumber === 19 ? { accessMode: V19_ACCESS_MODE, adminOnly: V19_ACCESS_MODE !== "all" } : {}),
         });
         return;
       }
@@ -3414,6 +3477,7 @@ const server = http.createServer(async (req, res) => {
         v14AccessMode: V14_ACCESS_MODE,
         v15AccessMode: V15_ACCESS_MODE,
         v16AccessMode: V16_ACCESS_MODE,
+        v19AccessMode: V19_ACCESS_MODE,
       });
       return;
     }
