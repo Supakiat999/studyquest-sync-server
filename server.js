@@ -8,6 +8,7 @@ const {
   additiveIncidentRecovery,
   collectStateRecords,
   deserializeStateVersion,
+  massDeletionRisk,
   recoverMissingRecords,
   serializeStateVersion,
   stableStringify,
@@ -2337,6 +2338,28 @@ async function handleVersionedState(req, res) {
         changeSet,
         reason:"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED",
         extra:{ removalCount:destructive.unapproved.length, removals },
+      });
+      return;
+    }
+
+    const massDeletion = massDeletionRisk(currentManifest, incomingManifest);
+    if (massDeletion.risky) {
+      await preserveAndSendStateConflict(req, res, client, {
+        username:user.username,
+        candidate:incomingVersion,
+        baseRevision,
+        deviceId,
+        baseHash,
+        mutationId,
+        changeSet,
+        reason:"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED",
+        extra:{
+          massDeletion:true,
+          removalCount:massDeletion.removedCount,
+          currentRecordCount:massDeletion.currentCount,
+          incomingRecordCount:massDeletion.incomingCount,
+          removalPercent:Math.round(massDeletion.removalRatio * 10000) / 100,
+        },
       });
       return;
     }

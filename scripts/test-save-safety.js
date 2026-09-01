@@ -5,6 +5,7 @@ const {
   additiveIncidentRecovery,
   recoverMissingRecords,
   deserializeStateVersion,
+  massDeletionRisk,
   serializeStateVersion,
   stableStringify,
   stateHash,
@@ -103,6 +104,22 @@ assert.equal(unapprovedRemovals(completeState, intentionalTaskDelete, {
   deletes:[{ key:taskRemoval.key }],
 }).unapproved.length, 0, "an explicitly manifested user deletion must be accepted");
 
+const completeManifest = require("../lib/state-safety").stateManifest(completeState);
+const oneDeleteManifest = require("../lib/state-safety").stateManifest(intentionalTaskDelete);
+assert.equal(massDeletionRisk(completeManifest, oneDeleteManifest).risky, false,
+  "one deliberate deletion must not be quarantined as a mass deletion");
+
+const catastrophicState = structuredClone(completeState);
+catastrophicState.tasks = catastrophicState.tasks.slice(0, 10);
+catastrophicState.tracker.weeks = [];
+const catastrophicRisk = massDeletionRisk(
+  completeManifest,
+  require("../lib/state-safety").stateManifest(catastrophicState)
+);
+assert.equal(catastrophicRisk.risky, true,
+  "a broad deletion must be quarantined even when the client declares every removal");
+assert.ok(catastrophicRisk.removedCount >= 20);
+
 const broadRecoveryCurrent = structuredClone(staleState);
 broadRecoveryCurrent.notes = [];
 broadRecoveryCurrent.fileLinks = [];
@@ -134,6 +151,8 @@ assert.ok(server.includes('result: "conflicted"'), "Conflicted saves must be aud
 assert.ok(server.includes('result: "oversized"'), "Oversized saves must be audited");
 assert.ok(server.includes('"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED"'),
   "Unexplained destructive saves must be blocked by the server");
+assert.ok(server.includes("massDeletionRisk(currentManifest, incomingManifest)"),
+  "Declared mass deletions must also be quarantined for explicit recovery review");
 assert.ok(server.includes('"BASE_HASH_MISMATCH"'),
   "Revision equality must be backed by a state hash");
 assert.ok(server.includes("if (duplicateRevision !== currentRevision)"),
