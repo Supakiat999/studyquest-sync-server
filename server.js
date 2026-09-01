@@ -42,6 +42,10 @@ const V19_VERSION_PATH = path.join(ROOT, "public", "v19-version.json");
 const V18_ADMIN_COURSE_CRITERIA = require("./lib/v18-admin-course-criteria");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
+const DEVICE_RECOVERY_V2_HTML_PATH = path.join(ROOT, "public", "device-recovery-v2.html");
+const DEVICE_RECOVERY_V2_JS_PATH = path.join(ROOT, "public", "device-recovery-v2.js");
+const RECOVERY_UX_V2_CORE_PATH = path.join(ROOT, "public", "recovery-ux-v2-core.js");
+const RECOVERY_UX_V2_PATCH_PATH = path.join(ROOT, "public", "recovery-ux-v2.js");
 const WEEKLY_STUDY_PLANNER_LITE_PATH = path.join(ROOT, "public", "weekly-study-planner.html");
 const WEEKLY_STUDY_PLANNER_FULL_PATH = path.join(ROOT, "public", "weekly-study-planner-full.html");
 const SESSION_COOKIE = "sq_session";
@@ -61,6 +65,10 @@ const V16_ACCESS_MODE = (() => {
 })();
 const V19_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V19_ACCESS || "off").trim().toLowerCase();
+  return ["off", "admin", "all"].includes(configured) ? configured : "off";
+})();
+const RECOVERY_UX_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_RECOVERY_UX || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
 const MAIN_APP_VERSION = (() => {
@@ -93,6 +101,15 @@ const ADMIN_CONTACT_LABEL = String(process.env.STUDYQUEST_ADMIN_CONTACT_LABEL ||
 const ADMIN_CONTACT_URL = safeContactUrl(process.env.STUDYQUEST_ADMIN_CONTACT_URL);
 const DATABASE_URL = process.env.DATABASE_URL;
 const RECOVERY_PREVIEW_MAX_AGE_MS = 10 * 60 * 1000;
+const RECOVERY_UX_ARTIFACT_HASHES = Object.freeze({
+  core:crypto.createHash("sha256").update(fs.readFileSync(RECOVERY_UX_V2_CORE_PATH)).digest("hex"),
+  stablePatch:crypto.createHash("sha256").update(fs.readFileSync(RECOVERY_UX_V2_PATCH_PATH)).digest("hex"),
+  recoveryPage:crypto.createHash("sha256").update(fs.readFileSync(DEVICE_RECOVERY_V2_HTML_PATH)).digest("hex"),
+  recoveryScript:crypto.createHash("sha256").update(fs.readFileSync(DEVICE_RECOVERY_V2_JS_PATH)).digest("hex"),
+});
+const RECOVERY_UX_HASH = crypto.createHash("sha256")
+  .update(Object.entries(RECOVERY_UX_ARTIFACT_HASHES).sort(([left], [right]) => left.localeCompare(right)).map(([name, hash]) => `${name}:${hash}`).join("|"))
+  .digest("hex");
 
 if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is required.");
@@ -278,6 +295,18 @@ function authenticatedV19Html(user) {
 function canAccessV19(user) {
   if (!user || user.sync_device_id || V19_ACCESS_MODE === "off") return false;
   return V19_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
+}
+
+function canUseRecoveryUxV2(user) {
+  if (!user || user.sync_device_id || RECOVERY_UX_MODE === "off") return false;
+  return RECOVERY_UX_MODE === "all" || user.username === ADMIN_USERNAME;
+}
+
+function stableHtmlWithRecoveryUxV2() {
+  const html = htmlTemplate(HTML_PATH);
+  const bootstrap = `<script>window.__STUDYQUEST_RECOVERY_UX_MODE__=${JSON.stringify(RECOVERY_UX_MODE)};</script>`;
+  const scripts = `${bootstrap}<script src="/recovery-ux-v2-core.js"></script><script src="/recovery-ux-v2.js"></script>`;
+  return html.replace("</body>", `${scripts}\n</body>`);
 }
 
 function readBody(req, maxBytes = MAX_AUTH_BODY_BYTES) {
@@ -2479,6 +2508,100 @@ function publicConflictCopy(row) {
   };
 }
 
+async function handleDeviceCopyReview(req, res) {
+  const user = await currentUser(req, { includeState:false });
+  if (!user || user.sync_device_id) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  if (!canUseRecoveryUxV2(user)) return sendJson(req, res, 404, { ok:false, error:"RECOVERY_UX_UNAVAILABLE" });
+  if (req.method !== "POST") return send(req, res, 405, "Method not allowed");
+  const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES);
+  const candidateState = body?.state;
+  const expectedRevision = body?.expectedRevision;
+  const expectedHash = typeof body?.expectedHash === "string" ? body.expectedHash.trim().toLowerCase() : "";
+  const mutationId = typeof body?.mutationId === "string" ? body.mutationId.trim().slice(0, 120) : "";
+  if (!candidateState || typeof candidateState !== "object" || !Array.isArray(candidateState.tasks)) {
+    return sendJson(req, res, 400, { ok:false, error:"INVALID_STATE" });
+  }
+  if (!Number.isInteger(expectedRevision) || !/^[a-f0-9]{64}$/.test(expectedHash)
+      || !/^[a-zA-Z0-9._:-]{8,120}$/.test(mutationId)) {
+    return sendJson(req, res, 400, { ok:false, error:"INVALID_REVIEW_ENVELOPE" });
+  }
+  const candidate = serializeStateVersion(candidateState);
+  if (candidate.stateBytes > MAX_STATE_BYTES) return sendJson(req, res, 413, stateTooLargePayload(candidate.stateBytes));
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const accountResult = await client.query(
+      `select username, state, state_revision, state_hash, state_bytes, state_updated_at, updated_at
+       from accounts where username = $1 for update`,
+      [user.username]
+    );
+    const account = accountResult.rows[0];
+    const currentRevision = Number(account?.state_revision || 0);
+    const currentHash = account?.state_hash || stateHash(account?.state);
+    if (!account || currentRevision !== expectedRevision || currentHash !== expectedHash) {
+      await client.query("rollback");
+      return sendJson(req, res, 409, {
+        ok:false,
+        error:"REVIEW_STALE",
+        message:"The Account backup changed before the protected review was created. Refresh both copies and choose again.",
+        currentRevision,
+        currentHash,
+        copiesPreserved:true,
+      });
+    }
+    const copy = await preserveConflictCopy(client, {
+      username:user.username,
+      candidate,
+      mutationId,
+      deviceId:"recovery-ux-v2-review",
+      reason:"USER_REQUESTED_DEVICE_REVIEW",
+      baseRevision:expectedRevision,
+      baseHash:expectedHash,
+      cloudRevision:currentRevision,
+      cloudHash:currentHash,
+    });
+    await recordSaveEvent(client, {
+      username:user.username,
+      result:"conflicted",
+      baseRevision:expectedRevision,
+      currentRevision,
+      stateHash:candidate.hash,
+      stateBytes:candidate.stateBytes,
+      deviceId:"recovery-ux-v2-review",
+      baseHash:expectedHash,
+      mutationId,
+      changeManifest:body?.changeSet,
+      detail:copy.storageFull ? "CONFLICT_STORAGE_FULL" : "USER_REQUESTED_DEVICE_REVIEW",
+      conflictCopyId:copy.id,
+    });
+    await client.query("commit");
+    if (copy.storageFull || !copy.id) {
+      return sendJson(req, res, 507, {
+        ok:false,
+        error:"CONFLICT_STORAGE_FULL",
+        message:"Protected conflict storage is full. The computer copy remains local; download both copies and ask an administrator to review storage.",
+        copiesPreserved:false,
+      });
+    }
+    sendJson(req, res, 201, {
+      ok:true,
+      reviewOnly:true,
+      conflictCopyId:copy.id,
+      candidateHash:candidate.hash,
+      currentRevision,
+      currentHash,
+      copiesPreserved:true,
+      accountStateChanged:false,
+      serverTime:new Date().toISOString(),
+    });
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function handleStateConflicts(req, res) {
   const user = await currentUser(req, { includeState:false });
   if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
@@ -3232,10 +3355,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/device-recovery" || url.pathname === "/data-recovery") {
       const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
-        send(req, res, 302, "Login required", { location: "/app.html?next=data-recovery&stable=1" });
+        send(req, res, 302, "Login required", { location: "/app.html?next=data-recovery" });
         return;
       }
-      send(req, res, 200, fs.readFileSync(DEVICE_RECOVERY_HTML_PATH), {
+      const recoveryPage = canUseRecoveryUxV2(user) ? DEVICE_RECOVERY_V2_HTML_PATH : DEVICE_RECOVERY_HTML_PATH;
+      send(req, res, 200, fs.readFileSync(recoveryPage), {
         "content-type": "text/html; charset=utf-8",
         "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
       });
@@ -3244,6 +3368,27 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/device-recovery.js") {
       send(req, res, 200, fs.readFileSync(DEVICE_RECOVERY_JS_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
+    if (url.pathname === "/device-recovery-v2.js") {
+      send(req, res, 200, fs.readFileSync(DEVICE_RECOVERY_V2_JS_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
+    if (url.pathname === "/recovery-ux-v2-core.js") {
+      send(req, res, 200, fs.readFileSync(RECOVERY_UX_V2_CORE_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
+    if (url.pathname === "/recovery-ux-v2.js") {
+      send(req, res, 200, fs.readFileSync(RECOVERY_UX_V2_PATCH_PATH), {
         "content-type": "text/javascript; charset=utf-8",
       });
       return;
@@ -3289,7 +3434,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/app.html" || url.pathname === "/claudever9.html") {
-      send(req, res, 200, fs.readFileSync(HTML_PATH), { "content-type": "text/html; charset=utf-8" });
+      const stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
+      send(req, res, 200, stableHtml, { "content-type": "text/html; charset=utf-8" });
       return;
     }
 
@@ -3320,6 +3466,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/recovery/versions") {
       await handleRecoveryVersions(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/recovery/device-copy-review") {
+      await handleDeviceCopyReview(req, res);
       return;
     }
 
@@ -3521,6 +3672,10 @@ const server = http.createServer(async (req, res) => {
         v19AccessMode: V19_ACCESS_MODE,
         mainVersion: MAIN_APP_VERSION,
         saveSafetyMode: "mass-deletion-quarantine-v1",
+        recoveryUxMode: RECOVERY_UX_MODE,
+        recoveryUxVersion: 2,
+        recoveryUxHash: RECOVERY_UX_HASH,
+        recoveryUxArtifacts: RECOVERY_UX_ARTIFACT_HASHES,
       });
       return;
     }

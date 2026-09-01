@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudyQuest Data Recovery</title>
+  <style>
+    :root { color-scheme:dark; font-family:system-ui,sans-serif; background:#0d0f1a; color:#eef0ff; }
+    * { box-sizing:border-box; letter-spacing:0; }
+    body { margin:0; min-height:100vh; background:#0d0f1a; }
+    header { border-bottom:1px solid #2d3354; background:#13162a; }
+    .bar, main { width:min(1020px,calc(100% - 28px)); margin:auto; }
+    .bar { min-height:64px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    h1 { margin:0; font-size:20px; } h2 { margin:0 0 10px; font-size:18px; } h3 { margin:0 0 8px; font-size:15px; }
+    main { padding:26px 0 48px; }
+    section { border:1px solid #2d3354; background:#13162a; padding:18px; border-radius:10px; min-width:0; margin-top:16px; }
+    .notice { border-left:4px solid #6af7b0; padding:13px 15px; background:#171b31; line-height:1.6; }
+    .status { min-height:24px; margin:16px 0; color:#a9b7ff; font-weight:700; line-height:1.5; }
+    .muted, .summary { color:#b9c0e4; line-height:1.55; overflow-wrap:anywhere; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:14px; }
+    .grid > section { margin-top:0; background:#101326; }
+    .recommended { border-color:rgba(106,247,176,.55); box-shadow:inset 0 0 0 1px rgba(106,247,176,.1); }
+    .tag { display:inline-block; margin-bottom:9px; padding:3px 8px; border-radius:999px; color:#6af7b0; border:1px solid rgba(106,247,176,.35); background:rgba(106,247,176,.1); font-size:10px; font-weight:800; }
+    .tag[hidden] { display:none !important; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+    button, a.button, select { min-height:42px; border-radius:7px; border:1px solid #4a5487; padding:10px 14px; color:#eef0ff; background:#252b49; font-weight:750; text-decoration:none; }
+    button { cursor:pointer; } button.primary { border-color:#6af7b0; background:#6af7b0; color:#10131f; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    select { width:min(100%,670px); font-weight:600; }
+    .comparison { margin-top:14px; padding:14px; background:#0f1222; border:1px solid #343b63; border-radius:7px; }
+    .explanation { margin-top:10px; color:#ffd38a; line-height:1.5; }
+    .good { color:#79e7ad; } .warning { color:#ffd38a; }
+    details { margin-top:12px; color:#b9c0e4; } summary { cursor:pointer; font-weight:750; color:#dfe2ff; }
+    code { overflow-wrap:anywhere; color:#a99ef9; } ul { margin:8px 0 0; padding-left:20px; color:#c9cfee; line-height:1.55; }
+    @media (max-width:680px) { .grid { grid-template-columns:1fr; } .bar { align-items:flex-start; padding:14px 0; } .actions > * { width:100%; } }
+  </style>
+</head>
+<body>
+  <header><div class="bar"><h1>StudyQuest Data Recovery</h1><a class="button" href="/">Back to StudyQuest</a></div></header>
+  <main>
+    <div class="notice"><strong>Nothing changes just by opening this page.</strong> Loading the Account backup changes only this computer. Recover Missing Items is a separate additive action that changes the online account only after preview and confirmation.</div>
+    <p class="status" id="status" role="status">Checking your saved copies...</p>
+
+    <section>
+      <h2>Choose what this computer should show</h2>
+      <div class="grid">
+        <section id="cloudCard">
+          <span class="tag" id="cloudTag" hidden>RECOMMENDED — KEEPS MORE RECORDS</span>
+          <h3 id="cloudHeading">Account backup</h3>
+          <p class="muted">This is the current online copy available to your other signed-in devices.</p>
+          <div class="summary" id="cloudSummary">Checking...</div>
+        </section>
+        <section>
+          <h3>This computer's saved copy</h3>
+          <p class="muted">This browser and IndexedDB may contain older information or edits still waiting to upload.</p>
+          <div class="summary" id="computerSummary">Checking...</div>
+        </section>
+      </div>
+      <div class="explanation" id="copyRecommendation"></div>
+      <details><summary>Compare exact differences</summary><div class="comparison" id="copyDifferences"></div></details>
+      <div class="actions">
+        <button class="primary" id="loadAccountBackup" disabled>Load Account backup on this computer</button>
+        <button id="exportBundle" disabled>Download all device copies</button>
+      </div>
+      <p class="muted">Loading the Account backup archives the existing browser, IndexedDB, and pending-upload copies first. It does not POST data, change the online revision, or delete recovery history.</p>
+    </section>
+
+    <section>
+      <h2>Recover records missing from the Account backup</h2>
+      <p class="muted"><strong>Recover Missing Items</strong> is not a device-copy selector. It adds records from an earlier online version only when those records are absent from the current Account backup. Current records and settings stay unchanged.</p>
+      <div class="actions">
+        <select id="versionSelect" aria-label="Earlier account backup" disabled><option>Loading earlier account backups...</option></select>
+        <button id="previewVersion" disabled>Preview missing records</button>
+      </div>
+      <div class="comparison" id="versionPreview" hidden></div>
+      <div class="actions"><button id="recoverMissing" disabled>Recover Missing Items</button></div>
+      <p class="explanation" id="recoverDisabledReason">Preview an earlier account backup to check whether anything is missing.</p>
+    </section>
+
+    <section>
+      <h2>Copies preserved on this computer</h2>
+      <div class="grid">
+        <section><h3>Browser copy</h3><div class="summary" id="browserSummary">Checking...</div></section>
+        <section><h3>IndexedDB recovery copy</h3><div class="summary" id="durableSummary">Checking...</div></section>
+        <section><h3>Pending upload</h3><div class="summary" id="outboxSummary">Checking...</div></section>
+        <section><h3>Legacy browser copy</h3><div class="summary" id="legacySummary">Checking...</div></section>
+      </div>
+      <details><summary>Technical details</summary><p class="summary">Account-scoped storage key: <code id="storageKey">Checking...</code></p></details>
+      <div class="actions"><button id="exportRaw" disabled>Download browser copy only</button></div>
+    </section>
+  </main>
+  <script src="/recovery-ux-v2-core.js"></script>
+  <script src="/device-recovery-v2.js"></script>
+</body>
+</html>

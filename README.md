@@ -51,6 +51,7 @@ Deployment behavior:
 - Hosted v16 uses the same account-scoped `studyquest_v3_<username>` storage, IndexedDB v3 recovery outbox, and revision/hash-protected `/api/v2/state` flow. Opening or rendering v16 is read-only; deliberate edits are saved locally before cloud retry, and conflicts preserve both copies.
 - v19 is a separate authenticated route at `/v19`, with `/claudever19.html` retained as an alias. `STUDYQUEST_V19_ACCESS` supports `off`, `admin`, and `all`; the committed default is `off`. The root and `/v15` remain v15. V19 keeps account-scoped storage, read-only startup, IndexedDB recovery, outbox retry, and revision/hash-protected cloud saves.
 - `STUDYQUEST_MAIN_VERSION` is a fail-closed root selector. Its committed default is `15`; only `15` and `19` are accepted, and invalid values fall back to v15. Selecting v19 still requires the v19 account access gate, while `/v15` remains the emergency fallback.
+- `STUDYQUEST_RECOVERY_UX` is a fail-closed recovery-interface switch supporting `off`, `admin`, and `all`. The committed default is `off`. Recovery UX v2 explains the Account backup versus this computer's saved copy, loads the Account backup locally without a cloud write, and keeps computer-to-account replacement behind exported, signed Advanced Recovery review.
 - The v19 Course Reference criteria endpoint is authenticated and admin-only. Ordinary accounts neither receive the criteria pack nor save it into their state.
 - Logged-out requests use the stable login flow, bearer device-token sessions cannot open HTML routes, and every signed-in account receives only its own namespaced `studyquest_v3` state.
 - v15 uses the existing `/api/v2/state`, IndexedDB recovery, revisions, snapshots, undo, and cloud sync. Opening the route is read-only; task duration/progress fields are written only after the user interacts with a control. The stable app remains available at `/app.html?stable=1`, while v13 and v14 remain unchanged.
@@ -222,6 +223,7 @@ STUDYQUEST_ADMIN_CONTACT_LABEL=<public contact label shown during recovery>
 STUDYQUEST_ADMIN_CONTACT_URL=<optional mailto or https contact link>
 STUDYQUEST_SAFE_SYNC_MODE=<off, admin, users, or all>
 STUDYQUEST_SAFE_SYNC_USERS=<private comma-separated canary usernames>
+STUDYQUEST_RECOVERY_UX=<off, admin, or all>
 STUDYQUEST_MAX_ACCOUNTS=5
 STUDYQUEST_MAX_STATE_BYTES=10485760
 STUDYQUEST_MAX_STATE_ENVELOPE_BYTES=262144
