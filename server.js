@@ -3520,6 +3520,7 @@ const server = http.createServer(async (req, res) => {
         v16AccessMode: V16_ACCESS_MODE,
         v19AccessMode: V19_ACCESS_MODE,
         mainVersion: MAIN_APP_VERSION,
+        saveSafetyMode: "mass-deletion-quarantine-v1",
       });
       return;
     }

@@ -153,6 +153,8 @@ assert.ok(server.includes('"DESTRUCTIVE_CHANGE_REVIEW_REQUIRED"'),
   "Unexplained destructive saves must be blocked by the server");
 assert.ok(server.includes("massDeletionRisk(currentManifest, incomingManifest)"),
   "Declared mass deletions must also be quarantined for explicit recovery review");
+assert.ok(server.includes('saveSafetyMode: "mass-deletion-quarantine-v1"'),
+  "Health must identify the deployed mass-deletion safeguard exactly");
 assert.ok(server.includes('"BASE_HASH_MISMATCH"'),
   "Revision equality must be backed by a state hash");
 assert.ok(server.includes("if (duplicateRevision !== currentRevision)"),
