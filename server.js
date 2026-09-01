@@ -62,6 +62,10 @@ const V19_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V19_ACCESS || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
+const MAIN_APP_VERSION = (() => {
+  const configured = String(process.env.STUDYQUEST_MAIN_VERSION || "15").trim();
+  return ["15", "19"].includes(configured) ? configured : "15";
+})();
 const SAFE_SYNC_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_SAFE_SYNC_MODE || "off").trim().toLowerCase();
   return ["off", "admin", "users", "all"].includes(configured) ? configured : "off";
@@ -3190,6 +3194,10 @@ const server = http.createServer(async (req, res) => {
         send(req, res, 302, "Login required", { location: "/app.html?next=v15-main" });
         return;
       }
+      if (MAIN_APP_VERSION === "19" && canAccessV19(user)) {
+        send(req, res, 200, authenticatedV19Html(user), { "content-type": "text/html; charset=utf-8" });
+        return;
+      }
       if (!canAccessV15(user)) {
         send(req, res, 302, V15_ACCESS_MODE === "off" ? "v15 is temporarily unavailable" : "v15 is not enabled for this account", { location: "/app.html?stable=1" });
         return;
@@ -3461,9 +3469,19 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           ...version,
           ...(versionNumber === 14 ? { accessMode: V14_ACCESS_MODE, adminOnly: V14_ACCESS_MODE !== "all" } : {}),
-          ...(versionNumber === 15 ? { accessMode: V15_ACCESS_MODE, adminOnly: V15_ACCESS_MODE !== "all" } : {}),
+          ...(versionNumber === 15 ? {
+            accessMode: V15_ACCESS_MODE,
+            adminOnly: V15_ACCESS_MODE !== "all",
+            main: MAIN_APP_VERSION === "15",
+            route: MAIN_APP_VERSION === "15" ? "/" : "/v15",
+          } : {}),
           ...(versionNumber === 16 ? { accessMode: V16_ACCESS_MODE, adminOnly: V16_ACCESS_MODE !== "all" } : {}),
-          ...(versionNumber === 19 ? { accessMode: V19_ACCESS_MODE, adminOnly: V19_ACCESS_MODE !== "all" } : {}),
+          ...(versionNumber === 19 ? {
+            accessMode: V19_ACCESS_MODE,
+            adminOnly: V19_ACCESS_MODE !== "all",
+            main: MAIN_APP_VERSION === "19",
+            route: MAIN_APP_VERSION === "19" ? "/" : "/v19",
+          } : {}),
         });
         return;
       }
@@ -3478,6 +3496,7 @@ const server = http.createServer(async (req, res) => {
         v15AccessMode: V15_ACCESS_MODE,
         v16AccessMode: V16_ACCESS_MODE,
         v19AccessMode: V19_ACCESS_MODE,
+        mainVersion: MAIN_APP_VERSION,
       });
       return;
     }

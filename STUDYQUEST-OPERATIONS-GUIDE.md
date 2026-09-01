@@ -776,4 +776,25 @@ Then verify:
 - database backup task last result is 0 and a new backup validates;
 - account counts and content summaries did not change during read-only checks.
 
-Last reviewed: 12 August 2026, Asia/Bangkok.
+## 15. v19 Canary, Monitoring, and Main Promotion
+
+- Keep `STUDYQUEST_MAIN_VERSION=15` and deploy v19 with access `off` first.
+- Run `npm run monitor:v19` with the expected v15/v19 hashes, v19 access mode,
+  and main version supplied as environment variables. The monitor is read-only
+  and fails on Render incidents, unhealthy PostgreSQL, hash/access mismatches,
+  or unprotected logged-out routes.
+- Run `scripts/run-v19-rollout-audit.ps1` every six hours. It reads all account
+  metadata in a repeatable-read transaction, stores no account state in its
+  report, and blocks promotion on hash mismatches, missing accounts, revision
+  decreases, or record-count decreases.
+- Use a 72-hour window: six hours with v19 access `admin`, then 66 hours with
+  access `all`. Keep `/` on v15 for the full window.
+- The encrypted backup task remains daily at 03:30 Bangkok. Create and validate
+  another encrypted backup immediately before the canary and main promotion.
+- After the evidence report is approved, set `STUDYQUEST_MAIN_VERSION=19` while
+  keeping v19 access `all`. `/v15` remains the immediate fallback.
+- Roll back root routing by setting `STUDYQUEST_MAIN_VERSION=15`. If v19 itself
+  is unsafe, also set `STUDYQUEST_V19_ACCESS=off`. Do not restore the database
+  as the first response.
+
+Last reviewed: 1 September 2026, Asia/Bangkok.

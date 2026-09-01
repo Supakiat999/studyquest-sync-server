@@ -49,9 +49,12 @@ const rootRoute = rootRouteStart >= 0 && rootRouteEnd > rootRouteStart
   : '';
 assert.ok(rootRoute.includes('if (!user || user.sync_device_id)'), 'root must reject logged-out and device-token requests');
 assert.ok(rootRoute.includes('location: "/app.html?next=v15-main"'), 'root must send logged-out users through stable login');
+assert.ok(rootRoute.includes('MAIN_APP_VERSION === "19" && canAccessV19(user)'), 'root must use the guarded v19 main selector');
+assert.ok(rootRoute.includes('authenticatedV19Html(user)'), 'root must serve v19 only when the guarded selector and access gate both allow it');
 assert.ok(rootRoute.includes('if (!canAccessV15(user))'), 'root must use the fail-closed v15 access gate');
 assert.ok(rootRoute.includes('location: "/app.html?stable=1"'), 'root must retain the stable fallback');
 assert.ok(rootRoute.includes('authenticatedV15Html(user)'), 'root must serve authenticated v15 HTML');
+assert.ok(server.includes('return ["15", "19"].includes(configured) ? configured : "15"'), 'invalid main-version values must fall back to v15');
 
 assert.ok(stable.includes('next === "v15-main"'), 'stable login must recognize the main v15 return path');
 assert.ok(stable.includes('window.location.replace("/")'), 'stable login must return authenticated users to the clean root');

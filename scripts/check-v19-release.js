@@ -61,6 +61,8 @@ for (const marker of [
   'url.pathname === "/v19-local-features.js"',
   'requestedVersion === "19"',
   'v19AccessMode',
+  'mainVersion: MAIN_APP_VERSION',
+  'MAIN_APP_VERSION === "19" && canAccessV19(user)',
   'url.pathname === "/api/v18/admin-course-criteria"',
 ]) assert(server.includes(marker), `Hosted server is missing v19 marker: ${marker}`);
 
@@ -84,6 +86,8 @@ for (const yaml of ['render.yaml', 'render-neon-free.yaml']) {
   const content = read(yaml);
   const setting = /key:\s*STUDYQUEST_V19_ACCESS\s*\r?\n\s*value:\s*["']?off["']?/;
   assert(setting.test(content), `${yaml} must default v19 access to off`);
+  const mainSetting = /key:\s*STUDYQUEST_MAIN_VERSION\s*\r?\n\s*value:\s*["']?15["']?/;
+  assert(mainSetting.test(content), `${yaml} must default the main route to v15`);
 }
 
 console.log(JSON.stringify({ ok:true, v19Sha256:v19Hash, route:'/v19', access:'authenticated', defaultAccessMode:'off' }, null, 2));

@@ -53,6 +53,10 @@ assert.ok(route.includes('location: "/app.html?stable=1"'));
 assert.ok(server.includes('requestedVersion === "19"'));
 assert.ok(server.includes('V19_VERSION_PATH'));
 assert.ok(server.includes('v19AccessMode: V19_ACCESS_MODE'));
+assert.ok(server.includes('mainVersion: MAIN_APP_VERSION'));
+assert.ok(server.includes('MAIN_APP_VERSION === "19" && canAccessV19(user)'));
+assert.ok(server.includes('route: MAIN_APP_VERSION === "19" ? "/" : "/v19"'));
+assert.ok(server.includes('return ["15", "19"].includes(configured) ? configured : "15"'));
 
 assert.equal(criteria.entries.length, 7);
 assert.equal(criteria.entries.some(entry => /advanced math/i.test(entry.courseName)), false);
