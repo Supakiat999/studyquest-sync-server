@@ -5,8 +5,8 @@
   "route": "/v19",
   "aliases": ["/claudever19.html"],
   "featureLayer": "v19-local-features.js",
-  "hash": "fbc099eff8d2b2bf8697469441558fc297615db2422d5acdf072caf5c8ad4e07",
-  "releasedAt": "2026-08-31T16:22:51.4031782Z",
+  "hash": "39828309ce93e0c9080e440414636f9c838bcfc8ff6114df4095b596d55b56f2",
+  "releasedAt": "2026-09-03T06:22:07.176Z",
   "localOnly": false,
   "launched": true,
   "deployed": true,
@@ -16,5 +16,6 @@
   "defaultAccessMode": "off",
   "startupReadOnly": true,
   "sync": "neon-safe-conflict-escrow-v4",
+  "recoveryUx": "archive-first-device-only-account-backup-load-v1",
   "dataModel": "additive-category-contexts-device-ui-and-workload-bands"
 }

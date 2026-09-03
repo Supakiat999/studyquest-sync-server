@@ -6608,11 +6608,16 @@
     </div>
     <div id="liveSyncConflictBody" style="padding:14px 0;"></div>
     <div class="modal-btns" style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;flex-wrap:wrap;">
-      <button class="btn btn-ghost" onclick="closeModal('liveSyncConflictModal')">Not Now</button>
-      <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Export Chrome + Live + Merged</button>
-      <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Use Live</button>
-      <button class="btn btn-ghost" onclick="resolveLiveSyncConflict('local')">Use Chrome</button>
-      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Approve Merge</button>
+      <button class="btn btn-ghost" onclick="closeModal('liveSyncConflictModal')">Decide later</button>
+      <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Download both copies + reviewed merge</button>
+      <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Load account backup on this computer</button>
+      <details class="smart-merge-details" style="flex:1 1 100%;">
+        <summary><span>Advanced recovery choices</span><span>Review carefully</span></summary>
+        <div class="smart-merge-details-body recovery-actions">
+          <button class="btn btn-ghost" id="useBrowserMergeBtn" onclick="prepareLiveSyncConflictChoice('local')">Review replacing the account backup with this computer's copy</button>
+        </div>
+      </details>
+      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Approve reviewed merge</button>
     </div>
   </div>
 </div>
@@ -6621,8 +6626,8 @@
   <div class="modal" style="max-width:760px;width:95vw;">
     <div class="task-modal-head" style="padding:0 0 12px;border-bottom:1px solid var(--border);">
       <div>
-        <div class="modal-title" style="margin-bottom:4px;">Chrome and Live Comparison</div>
-        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">This review is read-only. It prepares per-field winners and never writes automatically.</div>
+        <div class="modal-title" style="margin-bottom:4px;">Saved Copy Comparison</div>
+        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">This review is read-only. It compares this computer's saved copy with the protected account backup.</div>
       </div>
       <button class="task-modal-close" type="button" onclick="closeLiveSyncComparison()" title="Close comparison" aria-label="Close comparison">×</button>
     </div>
@@ -9193,7 +9198,7 @@ function renderSmartMergeGroups(items, otherLabel) {
 function renderSmartMergeReport(preview) {
   if (!preview?.smartMerge) return '<div class="recovery-empty">Smart merge preview unavailable.</div>';
   const smart = preview.smartMerge;
-  const otherLabel = preview.cloudLabel || 'Live admin';
+  const otherLabel = preview.cloudLabel || (isHostedAppHost() ? 'Account backup' : 'Live admin');
   const browserLabel = smartMergeBrowserLabel();
   const indexed = smart.decisions.map((decision, index) => ({ decision, index }));
   const unresolved = indexed.filter(item => !item.decision.selected);
@@ -9216,20 +9221,31 @@ function renderSmartMergeReport(preview) {
     <div class="smart-merge-notice${unresolved.length || size.overLimit ? ' is-warning' : ''}">
       ${size.overLimit ? 'This proposed merge is over the 10 MiB limit and cannot be approved.'
         : unresolved.length ? `${unresolved.length} uncertain change${unresolved.length === 1 ? '' : 's'} must be selected below. Nothing will be changed before approval.`
-          : 'Every change has a reliable suggested winner. Nothing will be changed until you click Approve Merge.'}
+          : 'Every change has a reliable suggested winner. Nothing will be changed until you approve the reviewed action.'}
     </div>
     <div class="sync-conflict-grid">
       <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div>${renderActivitySummary(preview.localState, browserLabel)}</div>
       <div class="sync-conflict-card"><strong>${escapeHtml(otherLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.cloudState))}</div>${renderActivitySummary(preview.cloudState, otherLabel)}</div>
     </div>
-    ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;">This live-site browser is separate from 127.0.0.1. Localhost reaches this page through the admin cloud copy.</div>' : ''}
+    ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;"><strong>Account backup</strong> is protected online and follows your sign-in. <strong>This computer\'s saved copy</strong> is stored only in this browser and may contain unsent edits. Loading the account backup changes only this computer and does not create an online save.</div>' : ''}
     ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose ${escapeHtml(browserLabel)} for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose ${escapeHtml(otherLabel)} for all manual</button></div>` : ''}
     ${unresolved.length ? renderSmartMergeGroups(unresolved, otherLabel) : ''}
     ${resolved.length ? `<details class="smart-merge-details"><summary><span>Review selected details</span><span>${resolved.length} suggested change${resolved.length === 1 ? '' : 's'}</span></summary><div class="smart-merge-details-body">${renderSmartMergeGroups(resolved, otherLabel)}</div></details>` : ''}`;
 }
 
 function smartMergeBrowserLabel() {
-  return isHostedAppHost() ? 'This live-site browser' : 'Local Chrome';
+  return isHostedAppHost() ? "This computer's saved copy" : 'Local Chrome';
+}
+
+function selectedSmartMergeChoice(preview, decision) {
+  return preview?.selections?.[decision.path] || decision.selected || decision.recommended || '';
+}
+
+function smartMergeUsesOnly(preview, choice) {
+  const decisions = Array.isArray(preview?.smartMerge?.decisions) ? preview.smartMerge.decisions : [];
+  return decisions.length > 0
+    && Number(preview.smartMerge.unresolved || 0) === 0
+    && decisions.every(decision => selectedSmartMergeChoice(preview, decision) === choice);
 }
 
 function updateSmartMergeApplyButton(preview) {
@@ -9237,10 +9253,19 @@ function updateSmartMergeApplyButton(preview) {
   if (!button || !preview?.smartMerge) return;
   const unresolved = Number(preview.smartMerge.unresolved || 0);
   button.disabled = preview.smartMerge.size.overLimit;
-  button.textContent = unresolved ? `Choose ${unresolved} field${unresolved === 1 ? '' : 's'} first` : 'Approve Merge';
+  button.textContent = unresolved
+    ? `Choose ${unresolved} field${unresolved === 1 ? '' : 's'} first`
+    : smartMergeUsesOnly(preview, 'cloud') && isHostedAppHost()
+      ? 'Load account backup on this computer'
+      : smartMergeUsesOnly(preview, 'local') && isHostedAppHost()
+        ? 'Replace account backup with reviewed computer copy'
+        : 'Approve reviewed merge';
   button.title = preview.smartMerge.size.overLimit
     ? 'The merged save exceeds the 10 MiB cloud limit.'
-    : unresolved ? 'Click to jump to the first unresolved field.' : 'Approve the reviewed field merge.';
+    : unresolved ? 'Click to jump to the first unresolved field.'
+      : smartMergeUsesOnly(preview, 'cloud') && isHostedAppHost()
+        ? 'Archives this computer copy, verifies the archive, and loads the account backup without an online save.'
+        : 'Approve the reviewed field merge.';
 }
 
 function explainUnresolvedSmartMerge(preview) {
@@ -9259,15 +9284,17 @@ function renderComparisonNameList(title, values) {
 
 function renderStateComparisonReport(comparison, chromeState, liveState) {
   if (!comparison) return '<div class="recovery-empty">Comparison unavailable.</div>';
+  const browserLabel = isHostedAppHost() ? "This computer's saved copy" : 'Chrome on this PC';
+  const accountLabel = isHostedAppHost() ? 'Account backup' : 'Live admin account';
   const changedSections = comparison.sections.filter(item => item.differenceCount);
   const summary = comparison.different
     ? `${comparison.differenceCount} saved item${comparison.differenceCount === 1 ? '' : 's'} differ across ${comparison.changedSectionCount} area${comparison.changedSectionCount === 1 ? '' : 's'}. Review the names and fields below before choosing a copy.`
-    : 'Chrome and the live admin account contain the same user data. Save timestamps and navigation-only settings are ignored.';
+    : `${browserLabel} and ${accountLabel} contain the same user data. Save timestamps and navigation-only settings are ignored.`;
   return `
     <div class="sync-compare-summary${comparison.different ? '' : ' is-equal'}"><strong>${comparison.different ? 'Differences found' : 'Both versions match'}</strong><br>${escapeHtml(summary)}<br><span class="recovery-row-meta" style="white-space:normal;">Compared ${escapeHtml(formatRecoveryDate(comparison.comparedAt))}</span></div>
     <div class="sync-conflict-grid">
-      <div class="sync-conflict-card"><strong>Chrome on this PC</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.chromeUpdatedAt))}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(chromeState || {}))}</div>${renderActivitySummary(chromeState || {}, 'Chrome on this PC')}</div>
-      <div class="sync-conflict-card"><strong>Live admin account</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div>${renderActivitySummary(liveState || {}, 'Live admin account')}</div>
+      <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.chromeUpdatedAt))}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(chromeState || {}))}</div>${renderActivitySummary(chromeState || {}, browserLabel)}</div>
+      <div class="sync-conflict-card"><strong>${escapeHtml(accountLabel)}</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div>${renderActivitySummary(liveState || {}, accountLabel)}</div>
     </div>
     ${changedSections.length ? `<div class="sync-diff-list">${changedSections.map(section => `
       <details class="sync-diff-section" open>
@@ -9398,6 +9425,7 @@ function openLiveSyncConflict(conflict) {
   liveSync.lastComparedAt = conflict.comparison.comparedAt;
   liveSync.pending = false;
   liveSync.status = 'conflict';
+  if (isHostedAppHost() && !conflict.cloudLabel && conflict.sourceType !== 'local-server') conflict.cloudLabel = 'Account backup';
   const otherLabel = conflict.cloudLabel || 'Live';
   const browserLabel = smartMergeBrowserLabel();
   if (!conflict.snapshotsPrepared) {
@@ -9407,14 +9435,16 @@ function openLiveSyncConflict(conflict) {
   setLiveSyncMeta({ pending: false, conflictAt: new Date().toISOString() });
   const title = document.getElementById('liveSyncConflictTitle');
   const copy = document.getElementById('liveSyncConflictCopy');
-  if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Review Smart Merge';
+  if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Two saved copies need review';
   if (copy) copy.textContent = conflict.reason === 'initial-pair'
     ? 'First pairing preserves every copy. Review the proposed field winners before anything is written.'
-    : `${browserLabel} and ${otherLabel} are both preserved. Review field times and choices, then approve once.`;
+    : `${browserLabel} and ${otherLabel} are both preserved. Loading the account backup changes only this computer; a reviewed merge is required before any online change.`;
   const exportButton = document.getElementById('exportSmartMergeBtn');
   const otherButton = document.getElementById('useOtherMergeBtn');
-  if (exportButton) exportButton.textContent = `Export Browser + ${otherLabel} + Merged`;
-  if (otherButton) otherButton.textContent = `Use ${otherLabel}`;
+  if (exportButton) exportButton.textContent = `Download both copies + reviewed merge`;
+  if (otherButton) otherButton.textContent = isHostedAppHost() && otherLabel === 'Account backup'
+    ? 'Load account backup on this computer'
+    : `Use ${otherLabel}`;
   const body = document.getElementById('liveSyncConflictBody');
   if (body) body.innerHTML = renderSmartMergeReport(conflict);
   updateSmartMergeApplyButton(conflict);
@@ -9513,7 +9543,7 @@ async function compareChromeAndLive() {
   try {
     liveSync.status = 'comparing';
     liveSync.message = 'Reading both saves without changing either one...';
-    setSaveStatus('saving', 'Comparing Chrome and live...');
+    setSaveStatus('saving', isHostedAppHost() ? 'Comparing saved copies...' : 'Comparing Chrome and live...');
     renderRecoveryCenter();
     const res = await fetch(cloudStateEndpoint(), { credentials:'same-origin', cache:'no-store', signal:controller.signal });
     const result = await res.json().catch(() => ({}));
@@ -9552,7 +9582,7 @@ async function compareChromeAndLive() {
     liveSync.status = comparison.different ? 'comparison-ready' : 'synced';
     liveSync.message = comparison.different
       ? `${comparison.differenceCount} saved item(s) differ. Nothing was changed.`
-      : 'Chrome and live user data match.';
+      : isHostedAppHost() ? 'This computer and the account backup contain the same user data.' : 'Chrome and live user data match.';
     const body = document.getElementById('liveSyncComparisonBody');
     if (body) body.innerHTML = renderStateComparisonReport(comparison, chromeState, cloudState);
     const reviewButton = document.getElementById('reviewLiveSyncChoicesBtn');
@@ -9620,6 +9650,15 @@ async function resolveLiveSyncConflict(choice) {
   await applySmartMerge();
 }
 
+function prepareLiveSyncConflictChoice(choice) {
+  if (!['local','cloud'].includes(choice)) return;
+  v16UserInteracted = true;
+  chooseEveryMergeField(choice);
+  showToast(choice === 'local'
+    ? "This computer's copy is selected for review. No account data changed; read the replacement button before continuing."
+    : 'The account backup is selected. Nothing changes until you confirm the load.', '#f7c06a');
+}
+
 function finalizeSmartMergeState(preview) {
   const merged = syncClone(preview.smartMerge.mergedState);
   const meta = normalizeSyncMeta(merged._syncMeta);
@@ -9652,6 +9691,48 @@ function finalizeSmartMergeState(preview) {
   merged._syncMeta = meta;
   merged.updatedAt = Date.now();
   return normalizeState(merged);
+}
+
+async function loadReviewedAccountBackupOnThisComputer(preview, latest) {
+  if (!isHostedAppHost() || !smartMergeUsesOnly(preview, 'cloud')) {
+    throw new Error('The reviewed choices are not an account-backup-only load.');
+  }
+  const recovery = window.StudyQuestRecoveryV2;
+  if (!recovery?.archiveAndLoadAccountBackup) {
+    throw new Error('Safe device recovery is unavailable. Nothing was changed; reload v19 and try again.');
+  }
+  const username = String(AUTHENTICATED_STORAGE_USERNAME || '').trim().toLowerCase();
+  if (!username) throw new Error('The signed-in account could not be verified. Nothing was changed.');
+  const loaded = await recovery.archiveAndLoadAccountBackup({ username, envelope:latest });
+  setSQState(loaded.state, { resetSyncBaseline:true });
+  liveSync.revision = Number(loaded.revision || 0);
+  liveSync.lastCloudRevision = liveSync.revision;
+  liveSync.stateHash = String(loaded.stateHash || '');
+  liveSync.updatedAt = latest.updatedAt || null;
+  liveSync.pending = false;
+  liveSync.status = 'synced';
+  liveSync.message = 'Account backup loaded on this computer. The online revision was not changed.';
+  confirmedCloudState = cloneStateForSafety(loaded.state);
+  pendingCloudMutation = null;
+  v13DurableOutboxPending = false;
+  setLiveSyncMeta({
+    revision:liveSync.revision,
+    stateHash:liveSync.stateHash,
+    pending:false,
+    lastSyncedStateUpdatedAt:state.updatedAt,
+    lastDeviceAccountLoadAt:new Date().toISOString(),
+  });
+  liveSync.preview = null;
+  liveSync.conflict = null;
+  closeModal('liveSyncConflictModal');
+  closeModal('liveSyncComparisonModal');
+  ensureTrackerSemesters();
+  ensureTravelState();
+  renderAll();
+  scheduleNextLiveSync({ reset:true });
+  setSaveStatus('saved', scheduledSyncStatusText());
+  showToast(`Account backup loaded on this computer. ${loaded.archivedCount} previous device cop${loaded.archivedCount === 1 ? 'y was' : 'ies were'} archived. Online revision ${liveSync.revision} did not change.`, '#6af7b0');
+  return { ok:true, deviceOnly:true, revision:liveSync.revision };
 }
 
 async function applySmartMerge() {
@@ -9725,6 +9806,11 @@ async function applySmartMerge() {
       return;
     }
 
+    if (isHostedAppHost() && smartMergeUsesOnly(preview, 'cloud')) {
+      await loadReviewedAccountBackupOnThisComputer(preview, latest);
+      return;
+    }
+
     liveSync.stateHash = latest.stateHash || liveSync.stateHash;
     confirmedCloudState = cloneStateForSafety(latest.state || defaultState());
 
@@ -9783,7 +9869,11 @@ async function applySmartMerge() {
     showToast(error?.name === 'AbortError' ? 'Live recheck timed out. Nothing was overwritten.' : String(error?.message || error), '#f76a6a');
   } finally {
     clearTimeout(timeout);
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+      const activePreview = liveSync.conflict || liveSync.preview;
+      if (activePreview?.smartMerge) updateSmartMergeApplyButton(activePreview);
+    }
     renderRecoveryCenter();
   }
 }
@@ -26518,5 +26608,6 @@ handleSpotifyCallback().catch(err => {
 });
 spotifyInitSelection();
 </script>
+<script src="/recovery-ux-v2-core.js"></script>
 </body>
 </html>
