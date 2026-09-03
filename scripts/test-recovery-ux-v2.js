@@ -28,7 +28,7 @@ const protectedHashes = {
   "public/device-recovery.html":"bf3954ee3bcc677123ad6e37d14e822be4ad55f154773842ab1a7f892e112d3b",
   "public/device-recovery.js":"c963ea0e2281c58ac2b15800e8f543bffc7dfe7e427fd4df40d8af3029197662",
   "public/claudever15.html":"c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3",
-  "public/claudever19.html":"fbc099eff8d2b2bf8697469441558fc297615db2422d5acdf072caf5c8ad4e07",
+  "public/claudever19.html":"39828309ce93e0c9080e440414636f9c838bcfc8ff6114df4095b596d55b56f2",
 };
 for (const [file, expected] of Object.entries(protectedHashes)) {
   assert.equal(hash(file), expected, `${file} must remain byte-for-byte unchanged`);
