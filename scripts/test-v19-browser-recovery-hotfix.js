@@ -5,6 +5,9 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'public', 'claudever19.html'), 'utf8');
+assert.match(html, /indexedDB\.open\(DEVICE_RECOVERY_DB\)/, 'v19 must accept existing newer recovery schemas');
+assert.doesNotMatch(html, /indexedDB\.open\(DEVICE_RECOVERY_DB,/, 'v19 must not downgrade recovery storage');
+assert.match(html, /<details class="smart-merge-details"><summary>Show copy counts, dates, and selection totals<\/summary>/);
 
 function extractFunction(source, name) {
   const candidates = [`function ${name}`, `async function ${name}`];
