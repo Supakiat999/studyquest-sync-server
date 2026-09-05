@@ -529,7 +529,7 @@
   .smart-merge-overview { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0; }
   .smart-merge-stat { border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.024);padding:10px;display:grid;gap:3px; }
   .smart-merge-stat strong { color:var(--text);font:700 18px/1 'Space Mono',monospace; }
-  .smart-merge-stat span { color:var(--text-muted);font-size:9px;font-weight:800;text-transform:uppercase; }
+  .smart-merge-stat span { color:var(--text);font-size:12px;font-weight:600;overflow-wrap:anywhere; }
   .smart-merge-stat.is-warning { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.07); }
   .smart-merge-notice { border:1px solid rgba(106,247,176,.32);border-radius:8px;background:rgba(106,247,176,.055);padding:10px 12px;color:var(--text-dim);font-size:11px;line-height:1.5; }
   .smart-merge-notice.is-warning { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.07); }
@@ -6987,9 +6987,13 @@ function v13DurableUsername() {
 function openV13DeviceRecoveryDb() {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) return reject(new Error('IndexedDB is unavailable'));
-    const request = indexedDB.open(DEVICE_RECOVERY_DB, DEVICE_RECOVERY_DB_VERSION);
+    const request = indexedDB.open(DEVICE_RECOVERY_DB);
     request.onerror = () => reject(request.error || new Error('IndexedDB could not be opened'));
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains('accountStates')) db.createObjectStore('accountStates', { keyPath:'username' });
@@ -9210,24 +9214,26 @@ function renderSmartMergeReport(preview) {
   return `
     <div class="sync-compare-summary${smart.different ? '' : ' is-equal'}">
       <strong>${smart.different ? 'Suggested merge is ready to review' : 'Both versions match'}</strong><br>
-      ${smart.different ? 'Latest trustworthy update times are already selected. Review the summary, resolve any uncertain values, then approve.' : 'No cross-copy changes are needed.'}<br>
-      <span class="recovery-row-meta" style="white-space:normal;">Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</span>
+      ${smart.different ? 'Review the suggested changes below. Approving saves the reviewed result; closing keeps both copies for later.' : 'No cross-copy changes are needed.'}
     </div>
+    <details class="smart-merge-details"><summary>Show copy counts, dates, and selection totals</summary><div class="smart-merge-details-body">
     <div class="smart-merge-overview">
       <div class="smart-merge-stat"><strong>${localCount}</strong><span>Use ${escapeHtml(browserLabel)}</span></div>
       <div class="smart-merge-stat"><strong>${cloudCount}${combinedCount ? ` + ${combinedCount}` : ''}</strong><span>Use ${escapeHtml(otherLabel)}${combinedCount ? ' / combined' : ''}</span></div>
       <div class="smart-merge-stat${unresolved.length ? ' is-warning' : ''}"><strong>${unresolved.length}</strong><span>Need your choice</span></div>
-    </div>
-    <div class="smart-merge-notice${unresolved.length || size.overLimit ? ' is-warning' : ''}">
-      ${size.overLimit ? 'This proposed merge is over the 10 MiB limit and cannot be approved.'
-        : unresolved.length ? `${unresolved.length} uncertain change${unresolved.length === 1 ? '' : 's'} must be selected below. Nothing will be changed before approval.`
-          : 'Every change has a reliable suggested winner. Nothing will be changed until you approve the reviewed action.'}
     </div>
     <div class="sync-conflict-grid">
       <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div>${renderActivitySummary(preview.localState, browserLabel)}</div>
       <div class="sync-conflict-card"><strong>${escapeHtml(otherLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.cloudState))}</div>${renderActivitySummary(preview.cloudState, otherLabel)}</div>
     </div>
     ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;"><strong>Account backup</strong> is protected online and follows your sign-in. <strong>This computer\'s saved copy</strong> is stored only in this browser and may contain unsent edits. Loading the account backup changes only this computer and does not create an online save.</div>' : ''}
+    <p>Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</p>
+    </div></details>
+    <div class="smart-merge-notice${unresolved.length || size.overLimit ? ' is-warning' : ''}">
+      ${size.overLimit ? 'This proposed merge is over the 10 MiB limit and cannot be approved.'
+        : unresolved.length ? `${unresolved.length} changes need your choice below before you can approve.`
+          : 'No choices are missing. You can expand the suggested changes before approving.'}
+    </div>
     ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose ${escapeHtml(browserLabel)} for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose ${escapeHtml(otherLabel)} for all manual</button></div>` : ''}
     ${unresolved.length ? renderSmartMergeGroups(unresolved, otherLabel) : ''}
     ${resolved.length ? `<details class="smart-merge-details"><summary><span>Review selected details</span><span>${resolved.length} suggested change${resolved.length === 1 ? '' : 's'}</span></summary><div class="smart-merge-details-body">${renderSmartMergeGroups(resolved, otherLabel)}</div></details>` : ''}`;

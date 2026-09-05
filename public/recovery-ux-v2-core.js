@@ -2,7 +2,6 @@
   "use strict";
 
   const DB_NAME = "studyquest_device_recovery_v1";
-  const DB_VERSION = 1;
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -36,9 +35,20 @@
   function openDatabase() {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) return reject(new Error("IndexedDB recovery is unavailable on this device."));
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      // Omit the version: other app generations may already use a newer schema.
+      // Existing databases are opened without upgrading or downgrading them.
+      const request = indexedDB.open(DB_NAME);
       request.onerror = () => reject(request.error || new Error("IndexedDB recovery could not be opened."));
-      request.onsuccess = () => resolve(request.result);
+      request.onblocked = () => reject(new Error("Another tab is using recovery storage. Close that tab and try again."));
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!["accountStates", "outbox", "recovery"].every(name => db.objectStoreNames.contains(name))) {
+          db.close();
+          return reject(new Error("This device's recovery storage is incomplete. Your saved copies have not been changed."));
+        }
+        db.onversionchange = () => db.close();
+        resolve(db);
+      };
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains("accountStates")) db.createObjectStore("accountStates", { keyPath:"username" });

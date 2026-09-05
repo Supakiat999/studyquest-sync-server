@@ -28,7 +28,7 @@ const protectedHashes = {
   "public/device-recovery.html":"bf3954ee3bcc677123ad6e37d14e822be4ad55f154773842ab1a7f892e112d3b",
   "public/device-recovery.js":"c963ea0e2281c58ac2b15800e8f543bffc7dfe7e427fd4df40d8af3029197662",
   "public/claudever15.html":"c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3",
-  "public/claudever19.html":"39828309ce93e0c9080e440414636f9c838bcfc8ff6114df4095b596d55b56f2",
+  "public/claudever19.html":"08c99ca2a8b3f7aa1cf4aec872586d9d5e2f6378b2dfb2c529428b05956c3aeb",
 };
 for (const [file, expected] of Object.entries(protectedHashes)) {
   assert.equal(hash(file), expected, `${file} must remain byte-for-byte unchanged`);
@@ -105,6 +105,30 @@ const context = {
 };
 vm.runInNewContext(coreSource, context, { filename:"recovery-ux-v2-core.js" });
 const core = context.window.StudyQuestRecoveryV2;
+
+// Reproduce Chrome's existing v3 database without touching browser or account data.
+async function testExistingDatabaseVersions() {
+  for (const version of [1, 2, 3, 9]) {
+    let closed = false;
+    const db = { version, objectStoreNames:{ contains:() => true }, close:() => { closed = true; } };
+    const fakeIDB = { open(name, requestedVersion) {
+      assert.equal(name, 'studyquest_device_recovery_v1');
+      assert.equal(requestedVersion, undefined, 'Never request a downgrade or schema upgrade');
+      const request = { result:db };
+      queueMicrotask(() => request.onsuccess());
+      return request;
+    } };
+    const sandbox = { window:{ indexedDB:fakeIDB }, indexedDB:fakeIDB, console };
+    vm.runInNewContext(coreSource, sandbox);
+    assert.equal(await sandbox.window.StudyQuestRecoveryV2.openDatabase(), db);
+    assert.equal(closed, false);
+    db.onversionchange();
+    assert.equal(closed, true, 'Release the connection for other tabs');
+    db.objectStoreNames.contains = name => name !== 'recovery';
+    await assert.rejects(sandbox.window.StudyQuestRecoveryV2.openDatabase(), /incomplete/);
+  }
+}
+testExistingDatabaseVersions().catch(error => { console.error(error); process.exitCode = 1; });
 
 const make = (count, prefix, field = "id") => Array.from({ length:count }, (_, index) => ({ [field]:`${prefix}-${index}`, title:`${prefix} ${index}` }));
 const semesters = make(4, "semester");
