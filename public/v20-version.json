@@ -1,0 +1,23 @@
+{
+  "version": 20,
+  "name": "StudyQuest v20 Weekly Subject Tracking",
+  "source": "claudever20.html",
+  "route": "/v20",
+  "aliases": [
+    "/claudever20.html"
+  ],
+  "featureLayer": "v20-local-features.js",
+  "hash": "f5d44904047d6908ff73c9d196d00d8fa11ac3ed289b9989b8cea7bb42834f16",
+  "releasedAt": "2026-09-06T03:38:54.4433779Z",
+  "localOnly": false,
+  "launched": true,
+  "deployed": true,
+  "main": false,
+  "authenticated": true,
+  "accessMode": "off",
+  "defaultAccessMode": "off",
+  "launchState": "protected-rollout",
+  "startupReadOnly": true,
+  "sync": "neon-safe-conflict-escrow-v4-with-weeklyV20",
+  "dataModel": "additive-account-scoped-command-center-note-and-opt-in-weeklyV20-subject-track-overlay"
+}

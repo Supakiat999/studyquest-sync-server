@@ -191,6 +191,26 @@
     return { account, outbox };
   }
 
+  async function restoreDeviceRecords(db, username, previous) {
+    const rollback = db.transaction(["accountStates", "outbox"], "readwrite");
+    const accountStore = rollback.objectStore("accountStates");
+    const outboxStore = rollback.objectStore("outbox");
+    if (previous?.account) accountStore.put(previous.account);
+    else accountStore.delete(username);
+    if (previous?.outbox) outboxStore.put(previous.outbox);
+    else outboxStore.delete(username);
+    await transactionDone(rollback);
+
+    const restored = await readCurrentDeviceRecords(db, username);
+    const accountMatches = (!previous?.account && !restored.account)
+      || (previous?.account && restored.account && stableString(previous.account) === stableString(restored.account));
+    const outboxMatches = (!previous?.outbox && !restored.outbox)
+      || (previous?.outbox && restored.outbox && stableString(previous.outbox) === stableString(restored.outbox));
+    if (!accountMatches || !outboxMatches) {
+      throw new Error("The previous device copy could not be verified after rollback.");
+    }
+  }
+
   function recoveryRecord(username, label, state, extra = {}) {
     const capturedAtMs = Date.now();
     const serialized = JSON.stringify(state);
@@ -212,11 +232,16 @@
   async function archiveAndLoadAccountBackup({ username:value, envelope }) {
     const username = normalizeUsername(value);
     if (!username) throw new Error("The signed-in account could not be identified.");
-    if (!envelope?.state || !Number.isInteger(Number(envelope.revision)) || !String(envelope.stateHash || "")) {
+    if (!envelope?.state || !Number.isInteger(Number(envelope.revision)) || Number(envelope.revision) < 0 || !String(envelope.stateHash || "")) {
       throw new Error("The account backup revision could not be verified.");
     }
     const key = storageKey(username);
-    const browserRaw = localStorage.getItem(key);
+    let browserRaw = null;
+    try {
+      browserRaw = localStorage.getItem(key);
+    } catch (error) {
+      throw new Error(`This computer's browser copy could not be read. Export it before loading another copy. ${error?.message || ""}`.trim());
+    }
     let browserState = null;
     if (browserRaw) {
       try { browserState = JSON.parse(browserRaw); }
@@ -252,6 +277,11 @@
         updatedAt:Number(cloudState.updatedAt || Date.now()),
         capturedAt:new Date().toISOString(),
         stateBytes:serialized.length,
+        source:"account-backup-load",
+        authoritative:true,
+        storageMode:"indexeddb-authoritative",
+        cloudRevision:Number(envelope.revision),
+        cloudStateHash:String(envelope.stateHash),
       });
       deviceTransaction.objectStore("outbox").delete(username);
       await transactionDone(deviceTransaction);
@@ -259,27 +289,49 @@
       const active = await requestResult(db.transaction("accountStates", "readonly").objectStore("accountStates").get(username));
       const pending = await requestResult(db.transaction("outbox", "readonly").objectStore("outbox").get(username));
       if (!active || stableString(active.state) !== stableString(cloudState) || pending) {
-        const rollback = db.transaction(["accountStates", "outbox"], "readwrite");
-        const accountStore = rollback.objectStore("accountStates");
-        const outboxStore = rollback.objectStore("outbox");
-        if (previous.account) accountStore.put(previous.account); else accountStore.delete(username);
-        if (previous.outbox) outboxStore.put(previous.outbox); else outboxStore.delete(username);
-        await transactionDone(rollback).catch(() => {});
-        throw new Error("The Account backup could not be verified in IndexedDB; the previous active copy was kept.");
+        try {
+          await restoreDeviceRecords(db, username, previous);
+        } catch (rollbackError) {
+          throw new Error(`The Account backup could not be verified in IndexedDB, and rollback could not be verified. Recovery archives remain available. ${rollbackError?.message || ""}`.trim());
+        }
+        throw new Error("The Account backup could not be verified in IndexedDB; the previous active copy was restored and verified.");
       }
 
+      let localStorageAvailable = true;
+      let localStorageError = null;
       try {
         localStorage.setItem(key, serialized);
       } catch (error) {
-        const rollback = db.transaction(["accountStates", "outbox"], "readwrite");
-        const accountStore = rollback.objectStore("accountStates");
-        const outboxStore = rollback.objectStore("outbox");
-        if (previous.account) accountStore.put(previous.account); else accountStore.delete(username);
-        if (previous.outbox) outboxStore.put(previous.outbox); else outboxStore.delete(username);
-        await transactionDone(rollback).catch(() => {});
-        throw new Error(`Browser storage could not be updated; the previous active copy was kept. ${error?.message || ""}`.trim());
+        localStorageAvailable = false;
+        localStorageError = String(error?.message || error);
       }
-      return { state:cloudState, archivedCount:archives.length, revision:Number(envelope.revision), stateHash:String(envelope.stateHash) };
+
+      if (localStorageAvailable) {
+        try {
+          if (localStorage.getItem(key) !== serialized) {
+            localStorageAvailable = false;
+            localStorageError = "The browser copy did not match the verified account backup after writing.";
+          }
+        } catch (error) {
+          localStorageAvailable = false;
+          localStorageError = String(error?.message || error);
+        }
+      }
+
+      const durable = await requestResult(db.transaction("accountStates", "readonly").objectStore("accountStates").get(username));
+      const durableOutbox = await requestResult(db.transaction("outbox", "readonly").objectStore("outbox").get(username));
+      if (!durable || stableString(durable.state) !== stableString(cloudState) || durableOutbox) {
+        throw new Error("The verified device recovery copy was unexpectedly changed after storage mirroring; no success was reported.");
+      }
+      return {
+        state:cloudState,
+        archivedCount:archives.length,
+        revision:Number(envelope.revision),
+        stateHash:String(envelope.stateHash),
+        activeStorage:"indexeddb",
+        localStorageAvailable,
+        localStorageError,
+      };
     } finally {
       db.close();
     }
@@ -293,6 +345,7 @@
     openDatabase,
     openExistingDatabase,
     readCurrentDeviceRecords,
+    restoreDeviceRecords,
     stableString,
     storageKey,
     summarizeState,

@@ -5,7 +5,7 @@
   "route": "/v19",
   "aliases": ["/claudever19.html"],
   "featureLayer": "v19-local-features.js",
-  "hash": "08c99ca2a8b3f7aa1cf4aec872586d9d5e2f6378b2dfb2c529428b05956c3aeb",
+  "hash": "8436ed03383e3693b88f5b25bc0936a453bec947740ee642377c971e57fc2c3d",
   "releasedAt": "2026-09-03T06:22:07.176Z",
   "localOnly": false,
   "launched": true,

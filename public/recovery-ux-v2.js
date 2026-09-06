@@ -253,8 +253,13 @@
       renderAll();
       accountStateRecovery = null;
       closeModal("accountStateRecoveryModal");
-      setSaveStatus("saved", "Account backup loaded on this computer");
-      showToast(`Account backup loaded. ${loaded.archivedCount} previous device cop${loaded.archivedCount === 1 ? "y remains" : "ies remain"} in recovery.`, "#6af7b0");
+      const mirrorNotice = loaded.localStorageAvailable === false
+        ? " Browser localStorage is unavailable (full or blocked), so v19 will use the verified IndexedDB recovery copy on reload; the online account was not changed."
+        : "";
+      setSaveStatus("saved", loaded.localStorageAvailable === false
+        ? "Saved in device recovery · browser mirror full"
+        : "Account backup loaded on this computer");
+      showToast(`Account backup loaded. ${loaded.archivedCount} previous device cop${loaded.archivedCount === 1 ? "y remains" : "ies remain"} in recovery.${mirrorNotice}`, "#6af7b0");
     } catch (error) {
       if (status) status.textContent = loadedLocally
         ? `The Account backup was safely loaded on this computer, but the screen could not refresh: ${String(error?.message || error)} Reload the page. Nothing was replaced online.`

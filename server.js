@@ -39,6 +39,9 @@ const V19_HTML_PATH = path.join(ROOT, "public", "claudever19.html");
 const V18_FEATURES_PATH = path.join(ROOT, "public", "v18-local-features.js");
 const V19_FEATURES_PATH = path.join(ROOT, "public", "v19-local-features.js");
 const V19_VERSION_PATH = path.join(ROOT, "public", "v19-version.json");
+const V20_HTML_PATH = path.join(ROOT, "public", "claudever20.html");
+const V20_FEATURES_PATH = path.join(ROOT, "public", "v20-local-features.js");
+const V20_VERSION_PATH = path.join(ROOT, "public", "v20-version.json");
 const V18_ADMIN_COURSE_CRITERIA = require("./lib/v18-admin-course-criteria");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
@@ -65,6 +68,10 @@ const V16_ACCESS_MODE = (() => {
 })();
 const V19_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V19_ACCESS || "off").trim().toLowerCase();
+  return ["off", "admin", "all"].includes(configured) ? configured : "off";
+})();
+const V20_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V20_ACCESS || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
 const RECOVERY_UX_MODE = (() => {
@@ -94,6 +101,7 @@ const STATE_HISTORY_BUDGET_BYTES = Number(process.env.STUDYQUEST_STATE_HISTORY_B
 const CONFLICT_COPY_BUDGET_BYTES = Number(process.env.STUDYQUEST_CONFLICT_COPY_BUDGET_BYTES || 32 * 1024 * 1024);
 const TEMP_PASSWORD_MAX_AGE_SECONDS = 24 * 60 * 60;
 const IS_HOSTED = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
+const V20_OVERLAY_KEY = "weeklyV20";
 
 const ADMIN_PASSWORD = process.env.STUDYQUEST_ADMIN_PASSWORD;
 const INVITE_CODE = process.env.STUDYQUEST_INVITE_CODE;
@@ -295,6 +303,17 @@ function authenticatedV19Html(user) {
 function canAccessV19(user) {
   if (!user || user.sync_device_id || V19_ACCESS_MODE === "off") return false;
   return V19_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
+}
+
+function authenticatedV20Html(user) {
+  const html = htmlTemplate(V20_HTML_PATH);
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};window.__STUDYQUEST_V20_HOSTED__=true;</script>`;
+  return html.replace("</head>", `${bootstrap}\n</head>`);
+}
+
+function canAccessV20(user) {
+  if (!user || user.sync_device_id || V20_ACCESS_MODE === "off") return false;
+  return V20_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
 }
 
 function canUseRecoveryUxV2(user) {
@@ -2021,6 +2040,26 @@ function stateConflictPayload(row, error = "STATE_CONFLICT", extra = {}) {
   };
 }
 
+function preserveV20Overlay(currentState, incomingState) {
+  const currentOverlay = currentState?.tracker?.[V20_OVERLAY_KEY];
+  const incomingTracker = incomingState?.tracker;
+  const incomingHasOverlay = incomingTracker
+    && typeof incomingTracker === "object"
+    && !Array.isArray(incomingTracker)
+    && Object.prototype.hasOwnProperty.call(incomingTracker, V20_OVERLAY_KEY);
+  if (currentOverlay === undefined || incomingHasOverlay) {
+    return { state: incomingState, preserved:false };
+  }
+  const nextTracker = incomingTracker && typeof incomingTracker === "object" && !Array.isArray(incomingTracker)
+    ? { ...incomingTracker }
+    : {};
+  nextTracker[V20_OVERLAY_KEY] = JSON.parse(JSON.stringify(currentOverlay));
+  return {
+    state: { ...incomingState, tracker:nextTracker },
+    preserved:true,
+  };
+}
+
 async function preserveAndSendStateConflict(req, res, client, details) {
   const current = await client.query(
     `select username, state, state_bytes, state_hash, state_revision, state_updated_at, updated_at
@@ -2132,7 +2171,7 @@ async function handleVersionedState(req, res) {
   }
 
   const body = await readJsonBody(req, MAX_STATE_BYTES + MAX_STATE_ENVELOPE_BYTES);
-  const incomingState = body?.state;
+  let incomingState = body?.state;
   const baseRevision = body?.baseRevision;
   const baseHash = typeof body?.baseHash === "string" ? body.baseHash.trim().toLowerCase() : "";
   const mutationId = typeof body?.mutationId === "string" ? body.mutationId.trim().slice(0, 120) : "";
@@ -2173,9 +2212,9 @@ async function handleVersionedState(req, res) {
     sendJson(req, res, 400, { ok: false, error: "INVALID_MUTATION_ID" });
     return;
   }
-  const incomingVersion = serializeStateVersion(incomingState);
-  const incomingManifest = stateManifest(incomingState);
-  const stateBytes = incomingVersion.stateBytes;
+  let incomingVersion = serializeStateVersion(incomingState);
+  let incomingManifest = stateManifest(incomingState);
+  let stateBytes = incomingVersion.stateBytes;
   if (stateBytes > MAX_STATE_BYTES) {
     await recordSaveEvent(pool, {
       username: user.username,
@@ -2196,7 +2235,7 @@ async function handleVersionedState(req, res) {
   try {
     await client.query("begin");
     const current = await client.query(
-      `select username, state_bytes, state_hash, state_revision, state_updated_at, updated_at,
+      `select username, state, state_bytes, state_hash, state_revision, state_updated_at, updated_at,
               state_manifest, state_manifest_version
        from accounts where username = $1 for update`,
       [user.username]
@@ -2208,6 +2247,31 @@ async function handleVersionedState(req, res) {
       await client.query("rollback");
       sendJson(req, res, 404, { ok: false, error: "ACCOUNT_NOT_FOUND" });
       return;
+    }
+    const protectedV20Overlay = preserveV20Overlay(row.state, incomingState);
+    if (protectedV20Overlay.preserved) {
+      incomingState = protectedV20Overlay.state;
+      incomingVersion = serializeStateVersion(incomingState);
+      incomingManifest = stateManifest(incomingState);
+      stateBytes = incomingVersion.stateBytes;
+      if (stateBytes > MAX_STATE_BYTES) {
+        await recordSaveEvent(client, {
+          username:user.username,
+          result:"oversized",
+          baseRevision,
+          currentRevision,
+          stateHash:incomingVersion.hash,
+          stateBytes,
+          deviceId,
+          baseHash,
+          mutationId,
+          changeManifest:changeSet,
+          detail:"STATE_TOO_LARGE_AFTER_V20_OVERLAY_PRESERVATION",
+        });
+        await client.query("commit");
+        sendJson(req, res, 413, stateTooLargePayload(stateBytes));
+        return;
+      }
     }
     if (mutationId) {
       const duplicate = await client.query(
@@ -2441,7 +2505,9 @@ async function handleVersionedState(req, res) {
       mutationId,
       changeManifest: changeSet,
       mergeSource: mergeApproved ? body.merge.source : null,
-      detail: mergeApproved ? `Approved ${body.merge.source}` : "Revision-protected save",
+      detail: mergeApproved
+        ? `Approved ${body.merge.source}`
+        : protectedV20Overlay.preserved ? "Revision-protected save; preserved tracker.weeklyV20" : "Revision-protected save",
       conflictCopyId:mergeConflictCopyId,
     });
     if (mergeConflictCopyId && /^[a-f0-9]{64}$/.test(String(body?.merge?.conflictCandidateHash || ""))) {
@@ -2464,6 +2530,7 @@ async function handleVersionedState(req, res) {
       stateBytes,
       maxStateBytes: MAX_STATE_BYTES,
       activity: stateActivitySummary(incomingState),
+      v20OverlayPreserved:protectedV20Overlay.preserved,
       serverTime: new Date().toISOString(),
       preMergeBackupCreated,
     });
@@ -3334,6 +3401,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/v20" || url.pathname === "/claudever20.html") {
+      const user = await currentUser(req, { includeState:false });
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?next=v20" });
+        return;
+      }
+      if (!canAccessV20(user)) {
+        send(req, res, 302, V20_ACCESS_MODE === "off" ? "v20 is temporarily unavailable" : "v20 is not enabled for this account", { location: "/app.html?stable=1" });
+        return;
+      }
+      send(req, res, 200, authenticatedV20Html(user), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
     if (url.pathname === "/") {
       const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
@@ -3410,6 +3491,13 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/v19-local-features.js") {
       send(req, res, 200, fs.readFileSync(V19_FEATURES_PATH), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
+    if (url.pathname === "/v20-local-features.js") {
+      send(req, res, 200, fs.readFileSync(V20_FEATURES_PATH), {
         "content-type": "text/javascript; charset=utf-8",
       });
       return;
@@ -3630,13 +3718,13 @@ const server = http.createServer(async (req, res) => {
 
       if (url.pathname === "/api/version") {
         const requestedVersion = url.searchParams.get("version");
-        const versionNumber = requestedVersion === "19" ? 19 : requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
-        const versionPath = versionNumber === 19 ? V19_VERSION_PATH : versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
+        const versionNumber = requestedVersion === "20" ? 20 : requestedVersion === "19" ? 19 : requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
+        const versionPath = versionNumber === 20 ? V20_VERSION_PATH : versionNumber === 19 ? V19_VERSION_PATH : versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
         let version = {
           version: versionNumber,
           hash: null,
           releasedAt: null,
-          source: versionNumber === 19 ? "claudever19.html" : versionNumber === 16 ? "claudever16.html" : versionNumber === 15 ? "claudever15.html" : versionNumber === 14 ? "claudever14.html" : "claudever13.html",
+          source: versionNumber === 20 ? "claudever20.html" : versionNumber === 19 ? "claudever19.html" : versionNumber === 16 ? "claudever16.html" : versionNumber === 15 ? "claudever15.html" : versionNumber === 14 ? "claudever14.html" : "claudever13.html",
         };
         try { version = JSON.parse(fs.readFileSync(versionPath, "utf8")); } catch {}
         sendJson(req, res, 200, {
@@ -3656,6 +3744,13 @@ const server = http.createServer(async (req, res) => {
             main: MAIN_APP_VERSION === "19",
             route: MAIN_APP_VERSION === "19" ? "/" : "/v19",
           } : {}),
+          ...(versionNumber === 20 ? {
+            accessMode: V20_ACCESS_MODE,
+            adminOnly: V20_ACCESS_MODE !== "all",
+            main: false,
+            route: "/v20",
+            aliases: ["/claudever20.html"],
+          } : {}),
         });
         return;
       }
@@ -3670,6 +3765,7 @@ const server = http.createServer(async (req, res) => {
         v15AccessMode: V15_ACCESS_MODE,
         v16AccessMode: V16_ACCESS_MODE,
         v19AccessMode: V19_ACCESS_MODE,
+        v20AccessMode: V20_ACCESS_MODE,
         mainVersion: MAIN_APP_VERSION,
         saveSafetyMode: "mass-deletion-quarantine-v1",
         recoveryUxMode: RECOVERY_UX_MODE,

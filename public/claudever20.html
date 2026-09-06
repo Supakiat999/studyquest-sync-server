@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StudyQuest v19 — Study and Life Workspace Lab</title>
-<meta name="description" content="StudyQuest v19 is an authenticated Study and Life workspace. Modes change only what is displayed; records and recovery data are never removed.">
+  <title>StudyQuest v20 — Study and Life Workspace Lab</title>
+<meta name="description" content="StudyQuest v20 is a protected Study and Life workspace pilot with an account-scoped command-center note. Local mode remains browser-local; hosted mode uses revision-protected account sync.">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -529,7 +529,7 @@
   .smart-merge-overview { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0; }
   .smart-merge-stat { border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.024);padding:10px;display:grid;gap:3px; }
   .smart-merge-stat strong { color:var(--text);font:700 18px/1 'Space Mono',monospace; }
-  .smart-merge-stat span { color:var(--text);font-size:12px;font-weight:600;overflow-wrap:anywhere; }
+  .smart-merge-stat span { color:var(--text-muted);font-size:9px;font-weight:800;text-transform:uppercase; }
   .smart-merge-stat.is-warning { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.07); }
   .smart-merge-notice { border:1px solid rgba(106,247,176,.32);border-radius:8px;background:rgba(106,247,176,.055);padding:10px 12px;color:var(--text-dim);font-size:11px;line-height:1.5; }
   .smart-merge-notice.is-warning { border-color:rgba(247,192,106,.55);background:rgba(247,192,106,.07); }
@@ -1071,6 +1071,50 @@
     background: rgba(247,192,106,0.10);
     color: var(--gold);
   }
+  .v20-quick-note-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(92px, auto);
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid rgba(124,106,247,.38);
+    border-radius: 8px;
+    background: rgba(124,106,247,.08);
+  }
+  .v20-quick-note-label {
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .v20-quick-note-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface2);
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+  }
+  .v20-quick-note-input::placeholder { color: var(--text-muted); }
+  .v20-quick-note-input:focus {
+    outline: none;
+    border-color: rgba(124,106,247,.72);
+    box-shadow: 0 0 0 2px rgba(124,106,247,.14);
+  }
+  .v20-quick-note-status {
+    min-width: 0;
+    color: var(--text-muted);
+    font: 700 9px/1.35 'Space Mono', monospace;
+    overflow-wrap: anywhere;
+  }
+  .v20-quick-note-status[data-state="saved"] { color: var(--green); }
+  .v20-quick-note-status[data-state="error"] { color: var(--red); }
   .next-exam-card {
     display:flex;
     align-items:center;
@@ -3633,12 +3677,108 @@
   .v14-activation-summary { display:grid; gap:8px; margin-top:12px; }
   .v14-activation-row { display:flex; justify-content:space-between; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:7px; background:var(--surface2); color:var(--text-dim); font-size:11px; }
   .v14-activation-row strong { color:var(--text); }
+  .v20-weekly-original-surface { min-width:0; }
+  .v20-weekly-original-surface[hidden] { display:none !important; }
+  .v20-weekly-tracking-card {
+    display:grid; gap:12px; margin:12px 0 0; padding:12px;
+    border:1px solid rgba(106,247,224,.28); border-left:4px solid var(--accent2);
+    border-radius:8px; background:rgba(106,247,224,.045); min-width:0;
+  }
+  .v20-weekly-toolbar-controls { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-left:3px; }
+  .v20-weekly-toolbar-controls .v20-weekly-view-switch { flex:0 0 auto; }
+  .v20-weekly-tracking-head {
+    display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:start; gap:10px; min-width:0;
+  }
+  .v20-weekly-tracking-title { color:var(--text); font-size:13px; font-weight:900; }
+  .v20-weekly-tracking-copy { margin-top:3px; color:var(--text-muted); font-size:10px; line-height:1.45; }
+  .v20-weekly-view-switch { display:flex; gap:4px; padding:3px; border:1px solid var(--border); border-radius:8px; background:var(--surface2); }
+  .v20-weekly-view-btn { padding:6px 9px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-muted); cursor:pointer; font:800 10px 'Space Mono',monospace; white-space:nowrap; }
+  .v20-weekly-view-btn:hover { color:var(--text); border-color:var(--accent); }
+  .v20-weekly-view-btn[aria-pressed="true"] { color:#fff; border-color:var(--accent); background:var(--accent); }
+  .v20-weekly-tracking-status { min-height:14px; color:var(--text-muted); font:700 9px/1.4 'Space Mono',monospace; }
+  .v20-weekly-tracking-status[data-state="error"] { color:var(--red); }
+  .v20-weekly-range-controls { display:grid; gap:8px; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.08); }
+  .v20-weekly-range-heading { display:flex; justify-content:space-between; align-items:baseline; gap:9px; min-width:0; color:var(--text-muted); font:700 9px/1.4 'Space Mono',monospace; }
+  .v20-weekly-range-heading > div:first-child { display:flex; gap:7px; align-items:baseline; min-width:0; flex-wrap:wrap; }
+  .v20-weekly-range-heading strong { color:var(--text); font-family:'Syne',sans-serif; font-size:11px; }
+  .v20-weekly-range-heading span { color:var(--accent2); overflow-wrap:anywhere; }
+  .v20-weekly-range-help { text-align:right; }
+  .v20-weekly-range-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:8px; align-items:end; }
+  .v20-weekly-range-field { display:grid; gap:4px; min-width:0; color:var(--text-muted); font-size:9px; font-weight:800; text-transform:uppercase; }
+  .v20-weekly-range-field select { width:100%; min-width:0; box-sizing:border-box; }
+  .v20-weekly-range-actions { display:flex; gap:6px; align-items:end; flex-wrap:wrap; }
+  .v20-weekly-range-status { min-height:13px; color:var(--text-muted); font:700 9px/1.4 'Space Mono',monospace; }
+  .v20-weekly-range-status[data-state="error"], .v20-weekly-tracking-status[data-state="error"] { color:var(--red); }
+  .v20-weekly-setup { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; padding:10px; border:1px dashed rgba(106,247,224,.42); border-radius:7px; background:rgba(106,247,224,.035); }
+  .v20-weekly-setup strong { color:var(--text); font-size:11px; }
+  .v20-weekly-setup p { margin:3px 0 0; color:var(--text-muted); font-size:10px; line-height:1.45; }
+  .v20-weekly-overview { display:flex; gap:6px; flex-wrap:wrap; color:var(--text-muted); font:700 9px 'Space Mono',monospace; }
+  .v20-weekly-overview span { padding:4px 7px; border:1px solid var(--border); border-radius:999px; background:var(--surface2); }
+  .v20-weekly-week-list, .v20-weekly-subject-list { display:grid; gap:9px; min-width:0; }
+  .v20-weekly-week, .v20-weekly-subject-section { border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.07); overflow:hidden; min-width:0; }
+  .v20-weekly-week-head, .v20-weekly-subject-head { display:flex; justify-content:space-between; align-items:flex-start; gap:9px; padding:9px 10px; background:var(--surface2); }
+  .v20-weekly-week-title, .v20-weekly-subject-title { color:var(--text); font-size:11px; font-weight:900; }
+  .v20-weekly-week-meta, .v20-weekly-subject-meta { margin-top:2px; color:var(--text-muted); font:700 9px/1.4 'Space Mono',monospace; }
+  .v20-weekly-table-wrap { overflow:auto; border-top:1px solid var(--border); }
+  .v20-weekly-table { width:100%; min-width:850px; border-collapse:separate; border-spacing:0; }
+  .v20-weekly-table th { padding:7px 6px; color:var(--text-muted); background:rgba(255,255,255,.02); border-right:1px solid var(--border); border-bottom:1px solid var(--border); font:800 8px 'Space Mono',monospace; text-align:center; text-transform:uppercase; white-space:nowrap; }
+  .v20-weekly-table th:first-child, .v20-weekly-table th:nth-child(2), .v20-weekly-table th:nth-child(3) { text-align:left; }
+  .v20-weekly-table td { padding:6px; border-right:1px solid var(--border); border-bottom:1px solid var(--border); color:var(--text-dim); font-size:10px; vertical-align:middle; }
+  .v20-weekly-table th:last-child, .v20-weekly-table td:last-child { border-right:0; }
+  .v20-weekly-table tbody tr:last-child td { border-bottom:0; }
+  .v20-weekly-row-muted { opacity:.6; }
+  .v20-weekly-date { white-space:nowrap; font:700 9px 'Space Mono',monospace; }
+  .v20-weekly-subject { min-width:145px; color:var(--text); font-weight:800; }
+  .v20-weekly-note { max-width:180px; min-width:115px; color:var(--text-muted); overflow-wrap:anywhere; }
+  .v20-weekly-check-cell { width:72px; text-align:center; }
+  .v20-weekly-check { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:6px; background:transparent; color:transparent; cursor:pointer; font-weight:900; }
+  .v20-weekly-check:hover { border-color:var(--accent2); transform:translateY(-1px); }
+  .v20-weekly-check:focus-visible, .v20-weekly-view-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .v20-weekly-check[aria-pressed="true"] { border-color:var(--accent2); background:rgba(106,247,224,.18); color:var(--accent2); }
+  .v20-weekly-check:disabled { cursor:not-allowed; opacity:.42; transform:none; }
+  .v20-weekly-progress { min-width:145px; }
+  .v20-weekly-progress-line { display:flex; justify-content:space-between; gap:7px; margin-bottom:5px; font:700 8px 'Space Mono',monospace; }
+  .v20-weekly-progress-line strong { color:var(--accent2); }
+  .v20-weekly-progress-bar { height:5px; overflow:hidden; border-radius:4px; background:var(--border); }
+  .v20-weekly-progress-fill { height:100%; border-radius:4px; background:var(--accent2); transition:width .2s; }
+  .v20-weekly-break { padding:8px 10px; color:var(--red); font:800 9px 'Space Mono',monospace; }
+  .v20-weekly-empty { padding:18px 10px; color:var(--text-muted); font-size:10px; text-align:center; }
+  .v20-weekly-subject-section { overflow:visible; }
+  .v20-weekly-subject-head { border-radius:8px 8px 0 0; }
+  .v20-weekly-subject-progress { min-width:120px; text-align:right; }
+  .v20-weekly-manager-list { display:grid; gap:7px; max-height:min(52vh,480px); overflow:auto; padding-right:3px; }
+  .v20-weekly-manager-row { display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:7px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--surface2); }
+  .v20-weekly-manager-row.archived { opacity:.62; }
+  .v20-weekly-manager-order { color:var(--text-muted); font:700 10px 'Space Mono',monospace; text-align:center; }
+  .v20-weekly-manager-name { min-width:0; }
+  .v20-weekly-manager-name input { width:100%; min-width:0; }
+  .v20-weekly-manager-meta { margin-top:3px; color:var(--text-muted); font-size:9px; }
+  .v20-weekly-manager-actions { display:flex; gap:4px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+  .v20-weekly-manager-add { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:end; margin-bottom:12px; }
+  .v20-weekly-manager-add label { display:grid; gap:4px; color:var(--text-muted); font-size:9px; font-weight:800; text-transform:uppercase; }
   @media (max-width:800px) {
     .v14-weekly-notice { grid-template-columns:1fr; }
     .v14-weekly-notice .btn { width:100%; }
     .v14-column-row { grid-template-columns:24px minmax(0,1fr); }
     .v14-column-actions { grid-column:2; justify-content:flex-start; }
     .v14-column-add { grid-template-columns:1fr; }
+    .v20-weekly-tracking-head { grid-template-columns:1fr; }
+    .v20-weekly-toolbar-controls { width:100%; margin-left:0; }
+    .v20-weekly-toolbar-controls .btn, .v20-weekly-toolbar-controls .v20-weekly-view-switch { flex:1; }
+    .v20-weekly-view-switch { width:100%; }
+    .v20-weekly-view-btn { flex:1; }
+    .v20-weekly-range-heading { align-items:flex-start; flex-direction:column; }
+    .v20-weekly-range-help { text-align:left; }
+    .v20-weekly-range-fields { grid-template-columns:1fr; }
+    .v20-weekly-range-actions { align-items:stretch; }
+    .v20-weekly-range-actions .btn { flex:1; }
+    .v20-weekly-setup { grid-template-columns:1fr; }
+    .v20-weekly-setup .btn { width:100%; }
+    .v20-weekly-subject-head { flex-direction:column; }
+    .v20-weekly-subject-progress { min-width:0; width:100%; text-align:left; }
+    .v20-weekly-manager-row { grid-template-columns:24px minmax(0,1fr); }
+    .v20-weekly-manager-actions { grid-column:2; justify-content:flex-start; }
+    .v20-weekly-manager-add { grid-template-columns:1fr; }
   }
   .wt-note-input {
     background:transparent; border:1px solid transparent; color:var(--text);
@@ -4043,6 +4183,8 @@
     .tab { padding: 8px 12px; }
     .today-command-top,
     .today-inline-capture { grid-template-columns: 1fr; }
+    .v20-quick-note-card { grid-template-columns: 1fr; gap: 6px; }
+    .v20-quick-note-input { width: 100%; }
     .today-inline-capture .btn { width: 100%; }
     .recovery-row { grid-template-columns: 1fr; }
     .recovery-row .btn { width: 100%; }
@@ -5363,9 +5505,9 @@
         </div>
       </div>
       <details class="local-lab-wrap" id="localLabMenuWrap">
-        <summary class="local-lab-chip" title="Local v19 Study and Life workspace menu">
+        <summary class="local-lab-chip" title="Local v20 Study and Life workspace menu">
           <span class="local-lab-dot"></span>
-          <span id="v13ModeLabel">Local v19</span>
+          <span id="v13ModeLabel">Local v20</span>
         </summary>
         <div class="local-lab-menu">
           <div class="local-lab-title" id="v13ModeTitle">Local test lab</div>
@@ -5491,6 +5633,11 @@
           </div>
           <div class="today-stat-row" id="todayStatRow"></div>
           <div class="today-filter-row" id="todayFilterRow"></div>
+          <div class="v20-quick-note-card" id="v20QuickNoteCard">
+            <label class="v20-quick-note-label" for="v20ExamNoteInput">Quick note</label>
+            <input class="v20-quick-note-input" id="v20ExamNoteInput" type="text" autocomplete="off" placeholder="Type something you want to remember..." aria-describedby="v20QuickNoteStatus">
+            <span class="v20-quick-note-status" id="v20QuickNoteStatus" role="status" aria-live="polite"></span>
+          </div>
           <div class="today-warning-row" id="todayWarningRow"></div>
           <div class="today-inline-capture">
             <input class="today-inline-input" id="todayInlineCapture" placeholder="Quick add: biology review weekly Friday !important" onkeydown="handleTodayInlineCapture(event)">
@@ -6608,16 +6755,11 @@
     </div>
     <div id="liveSyncConflictBody" style="padding:14px 0;"></div>
     <div class="modal-btns" style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;flex-wrap:wrap;">
-      <button class="btn btn-ghost" onclick="closeModal('liveSyncConflictModal')">Decide later</button>
-      <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Download both copies + reviewed merge</button>
-      <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Load account backup on this computer</button>
-      <details class="smart-merge-details" style="flex:1 1 100%;">
-        <summary><span>Advanced recovery choices</span><span>Review carefully</span></summary>
-        <div class="smart-merge-details-body recovery-actions">
-          <button class="btn btn-ghost" id="useBrowserMergeBtn" onclick="prepareLiveSyncConflictChoice('local')">Review replacing the account backup with this computer's copy</button>
-        </div>
-      </details>
-      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Approve reviewed merge</button>
+      <button class="btn btn-ghost" onclick="closeModal('liveSyncConflictModal')">Not Now</button>
+      <button class="btn btn-ghost" id="exportSmartMergeBtn" onclick="exportSmartMergeBundle()">Export Chrome + Live + Merged</button>
+      <button class="btn btn-ghost" id="useOtherMergeBtn" onclick="resolveLiveSyncConflict('cloud')">Use Live</button>
+      <button class="btn btn-ghost" onclick="resolveLiveSyncConflict('local')">Use Chrome</button>
+      <button class="btn btn-primary" id="applySmartMergeBtn" onclick="applySmartMerge()">Approve Merge</button>
     </div>
   </div>
 </div>
@@ -6626,8 +6768,8 @@
   <div class="modal" style="max-width:760px;width:95vw;">
     <div class="task-modal-head" style="padding:0 0 12px;border-bottom:1px solid var(--border);">
       <div>
-        <div class="modal-title" style="margin-bottom:4px;">Saved Copy Comparison</div>
-        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">This review is read-only. It compares this computer's saved copy with the protected account backup.</div>
+        <div class="modal-title" style="margin-bottom:4px;">Chrome and Live Comparison</div>
+        <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">This review is read-only. It prepares per-field winners and never writes automatically.</div>
       </div>
       <button class="task-modal-close" type="button" onclick="closeLiveSyncComparison()" title="Close comparison" aria-label="Close comparison">×</button>
     </div>
@@ -6643,25 +6785,30 @@
 <!-- v19 workload bands use total planned minutes; completion remains a separate state. -->
 <script src="/v18-local-features.js"></script>
 <script src="/v19-local-features.js"></script>
+<script src="/v20-local-features.js"></script>
 <script>
 // ════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════
-const STUDYQUEST_VERSION = 19;
+const STUDYQUEST_VERSION = 20;
 const STUDYQUEST_RELEASE = {
   title: 'StudyQuest: Study and Life Workspace Lab',
-  file: 'claudever19.html',
-  summary: 'Authenticated v19 Study and Life workspace mode with display-only filtering and explicit category labels.',
+  file: 'claudever20.html',
+  summary: 'Protected v20 Study and Life workspace pilot with a browser-local lab mode and a revision-protected hosted account mode.',
   highlights: [
     'Keeps the existing studyquest_v3 account data, recovery copies, and revision-protected sync flow intact.',
-    'Study mode preserves the complete v18 workspace; Life mode changes only derived on-screen views.',
-    'Stores the active mode in an account-and-device UI key without calling saveState or cloud sync.',
+    'Study mode preserves the complete v19 workspace; Life mode changes only derived on-screen views.',
+    'Stores the active mode in an account-and-device UI key without changing application records.',
+    'Stores the command-center note additively in an account-scoped browser-local key outside application state.',
+    'Keeps the existing Weekly table as the By week view and reveals an additional Subject Track section only after explicit setup.',
+    'Requires a recovery backup before the first Subject Track setting or stage write and keeps user-defined stage values in an additive weeklyV20 overlay; hosted mode syncs that overlay per account.',
     'Stores reviewed category labels additively under _studyquestV19Settings only after explicit confirmation.',
     'Keeps shared XP, level, streak, achievements, recovery, sync, notes, files, checklist, and Travel data unchanged.',
-    'Reports the exact v19 hosted release separately while preserving all older release artifacts.',
+    'Keeps local v20 browser-local while hosted v20 is separately authenticated, access-gated, and revision-protected; older release artifacts remain intact.',
   ],
 };
-const V19_READ_ONLY_STARTUP = true;
+const V20_READ_ONLY_STARTUP = true;
+const V19_READ_ONLY_STARTUP = V20_READ_ONLY_STARTUP;
 const V18_READ_ONLY_STARTUP = V19_READ_ONLY_STARTUP;
 const V17_READ_ONLY_STARTUP = V18_READ_ONLY_STARTUP;
 const V16_READ_ONLY_STARTUP = V17_READ_ONLY_STARTUP;
@@ -6870,11 +7017,12 @@ const CLOUD_STATE_ENDPOINT = '/api/v2/state';
 const LOCAL_LIVE_STATE_ENDPOINT = '/api/live-state';
 const LOCAL_LIVE_STATUS_ENDPOINT = '/api/live-sync/status';
 const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
-const LIVE_VERSION_ENDPOINT = '/api/version?version=19';
+const LIVE_VERSION_ENDPOINT = '/api/version?version=20';
 const PAGE_HEARTBEAT_ENDPOINT = '/api/heartbeat';
 const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
 const DEVICE_RECOVERY_DB_VERSION = 2;
 const DEVICE_RECOVERY_COPY_LIMIT = 20;
+const V20_LOCAL_ONLY_TRACKER_KEY = 'weeklyV20';
 const CLOUD_SAVE_QUIET_MS = 500;
 const LIVE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 const STUDYQUEST_MAX_STATE_BYTES = 10 * 1024 * 1024;
@@ -6992,13 +7140,9 @@ function v13DurableUsername() {
 function openV13DeviceRecoveryDb() {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) return reject(new Error('IndexedDB is unavailable'));
-    const request = indexedDB.open(DEVICE_RECOVERY_DB);
+    const request = indexedDB.open(DEVICE_RECOVERY_DB, DEVICE_RECOVERY_DB_VERSION);
     request.onerror = () => reject(request.error || new Error('IndexedDB could not be opened'));
-    request.onsuccess = () => {
-      const db = request.result;
-      db.onversionchange = () => db.close();
-      resolve(db);
-    };
+    request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains('accountStates')) db.createObjectStore('accountStates', { keyPath:'username' });
@@ -7070,7 +7214,7 @@ async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-de
     const transaction = db.transaction(['accountStates','outbox','recovery'], 'readwrite');
     transaction.objectStore('accountStates').put({
       username, state:copy, updatedAt, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
-      source:durableAuthoritative ? 'v19-durable-device-save' : 'v19-device-save',
+      source:durableAuthoritative ? 'v20-durable-device-save' : 'v20-device-save',
       authoritative:durableAuthoritative,
       storageMode,
       deviceId,
@@ -7090,7 +7234,7 @@ async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-de
   }
 }
 
-async function markV13DeviceStateAuthoritative(snapshot, { source = 'v19-durable-device-save', cloudRevision = null, cloudStateHash = null } = {}) {
+async function markV13DeviceStateAuthoritative(snapshot, { source = 'v20-durable-device-save', cloudRevision = null, cloudStateHash = null } = {}) {
   if (isV16StartupReadOnly()) return false;
   if (!snapshot || typeof snapshot !== 'object') return false;
   const username = v13DurableUsername();
@@ -7412,7 +7556,9 @@ function syncNowStamp(meta) {
 
 function isSyncUiOnlyPath(path) {
   const [root] = syncPathSegments(path);
-  return !root || SYNC_UI_ONLY_ROOTS.has(root) || root === '_syncMeta' || root === '_exportedAt' || root === '_exportVersion';
+  const segments = syncPathSegments(path);
+  const v20LocalOnly = !isHostedV20CloudMode() && segments[0] === 'tracker' && segments[1] === V20_LOCAL_ONLY_TRACKER_KEY;
+  return !root || SYNC_UI_ONLY_ROOTS.has(root) || v20LocalOnly || root === '_syncMeta' || root === '_exportedAt' || root === '_exportVersion';
 }
 
 function syncArrayUsesRecords(left, right) {
@@ -7566,6 +7712,24 @@ function trimSafetyList(items, limit) {
 
 function cloneStateForSafety(source = state) {
   return JSON.parse(JSON.stringify(source || defaultState()));
+}
+
+function cloneV20CloudState(source = state) {
+  const snapshot = cloneStateForSafety(source);
+  if (!isHostedV20CloudMode() && snapshot?.tracker && typeof snapshot.tracker === 'object') {
+    delete snapshot.tracker[V20_LOCAL_ONLY_TRACKER_KEY];
+  }
+  return snapshot;
+}
+
+function preserveV20LocalOverlay(target, source = state) {
+  if (!target || typeof target !== 'object') return target;
+  if (isHostedV20CloudMode()) return target;
+  const overlay = source?.tracker?.[V20_LOCAL_ONLY_TRACKER_KEY];
+  if (overlay === undefined) return target;
+  if (!target.tracker || typeof target.tracker !== 'object') target.tracker = {};
+  target.tracker[V20_LOCAL_ONLY_TRACKER_KEY] = cloneStateForSafety(overlay);
+  return target;
 }
 
 function safetyRecordIdentity(record, kind, index = 0) {
@@ -7725,6 +7889,10 @@ function isHostedAppHost() {
   return canUseServerStorage() && /\.onrender\.com$/i.test(window.location.hostname);
 }
 
+function isHostedV20CloudMode() {
+  return isHostedAppHost() && window.__STUDYQUEST_V20_HOSTED__ === true;
+}
+
 function getLiveSyncMeta() {
   return safeReadJson(LIVE_SYNC_META_STORAGE_KEY, {});
 }
@@ -7740,11 +7908,11 @@ function renderV13ModeUI() {
   const label = document.getElementById('v13ModeLabel');
   const title = document.getElementById('v13ModeTitle');
   const copy = document.getElementById('v13ModeCopy');
-  if (label) label.textContent = hosted ? 'Hosted v19' : 'Local v19';
-  if (title) title.textContent = hosted ? 'Hosted v19 pilot' : 'Local v19 workspace lab';
+  if (label) label.textContent = hosted ? 'Hosted v20' : 'Local v20';
+  if (title) title.textContent = hosted ? 'Hosted v20 pilot' : 'Local v20 workspace lab';
   if (copy) copy.textContent = hosted
-    ? 'Protected v19 pilot. Account data is revision-protected and the stable app remains available.'
-      : 'Local v19 adds display-only Study and Life workspaces over the existing state. It is not deployed; export before major experiments.';
+    ? 'Protected v20 pilot. Account data is revision-protected and the stable app remains available.'
+      : 'Local v20 adds a browser-local command-center note over the existing Study and Life workspace. It is not deployed; export before major experiments.';
 }
 
 async function sendPageHeartbeat() {
@@ -8198,9 +8366,9 @@ function saveState() {
   syncSQStateReference();
   const snapshot = cloneStateForSafety(state);
   const shouldQueueCloud = trackedChanges.length > 0 || v13DurableOutboxPending;
-  if (trackedChanges.length && (isHostedAppHost() || liveSync.paired)) {
-    pendingCloudMutation = newCloudMutation(snapshot);
-  }
+  const cloudMutation = trackedChanges.length && (isHostedAppHost() || liveSync.paired)
+    ? newCloudMutation(snapshot)
+    : null;
   const browserSaved = writeV13BrowserState(snapshot);
   const savedAt = new Date().toISOString();
   setSaveMeta({
@@ -8211,24 +8379,63 @@ function saveState() {
     localStorageAvailable:browserSaved,
   });
   setSaveStatus('saving', 'Saving on this device...');
-  if (trackedChanges.length && (isHostedAppHost() || liveSync.paired)) {
-    liveSync.pending = true;
-    setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
-  }
   queueV13DeviceStatePersistence(snapshot, {
     pending:shouldQueueCloud
       && (isHostedAppHost() || liveSync.paired),
     label:'v13-edit',
-    lineage:pendingCloudMutation,
+    lineage:cloudMutation || pendingCloudMutation,
     browserSaved,
   }).then(() => {
+    // Treat the durable device write as the commit point. If a later edit
+    // replaced this snapshot while the queued write was draining, that later
+    // edit owns the cloud lineage and will schedule its own sync.
+    const stillCurrent = statesEquivalent(cloneV20CloudState(state), cloneV20CloudState(snapshot));
+    if (cloudMutation && stillCurrent) {
+      pendingCloudMutation = cloudMutation;
+      liveSync.pending = true;
+      setLiveSyncMeta({ pending: true, localUpdatedAt: state.updatedAt });
+    }
     setSaveStatus('local', browserSaved ? 'Saved on this device' : 'Saved in device recovery · browser mirror unavailable');
+    if (stillCurrent && canUseServerStorage() && shouldQueueCloud) queueServerStateSave();
   }).catch(error => {
     recordAppError('indexeddb-save', error);
     setSaveStatus('error', browserSaved ? 'Saved in browser · recovery copy failed' : 'Device save needs attention');
-  }).finally(() => {
-    if (canUseServerStorage() && shouldQueueCloud) queueServerStateSave();
   });
+}
+
+function saveV20LocalState(options = {}) {
+  if (isHostedV20CloudMode() && options.rollback !== true) return saveState();
+  v16UserInteracted = true;
+  // The v20 overlay is deliberately ignored by smart-sync change tracking.
+  // Keep the complete state in this laptop's browser/device recovery stores,
+  // but never create a cloud outbox entry for a Subject Track edit.
+  const trackedChanges = trackCurrentStateChanges();
+  state.updatedAt = Date.now();
+  syncSQStateReference();
+  const snapshot = cloneStateForSafety(state);
+  const browserSaved = writeV13BrowserState(snapshot);
+  const savedAt = new Date().toISOString();
+  setSaveMeta({
+    latestLocalSaveAt:savedAt,
+    latestLocalUpdatedAt:state.updatedAt,
+    latestStateBytes:liveSync.stateBytes,
+    latestDataChangeAt:trackedChanges.length ? savedAt : getSaveMeta().latestDataChangeAt,
+    localStorageAvailable:browserSaved,
+  });
+  setSaveStatus('saving', 'Saving this local v20 change...');
+  const durable = queueV13DeviceStatePersistence(snapshot, {
+    pending:false,
+    label:options.label || 'v20-local-edit',
+    browserSaved,
+  });
+  durable.then(() => {
+    if (isLocalLabHost()) saveStateToLocalServerOnly();
+    setSaveStatus('local', browserSaved ? 'Saved on this device' : 'Saved in device recovery');
+  }).catch(error => {
+    recordAppError('v20-local-save', error);
+    setSaveStatus('error', browserSaved ? 'Saved in browser · recovery copy failed' : 'Device save needs attention');
+  });
+  return durable;
 }
 
 function queueServerStateSave() {
@@ -8353,7 +8560,9 @@ async function saveStateToCloud() {
   if (isV16StartupReadOnly()) return { ok: false, skipped: true };
   if ((!liveSync.paired && !isHostedAppHost()) || (liveSync.conflict && !options.allowDuringConflict) || corruptSaveInfo) return { ok: false };
   const meta = getLiveSyncMeta();
-  const snapshot = cloneStateForSafety(state);
+  // Local v20 keeps Subject Track in the browser/device recovery copy. Hosted
+  // v20 includes the same account-scoped overlay in its guarded cloud payload.
+  const snapshot = cloneV20CloudState(state);
   const uploadedStateUpdatedAt = Number(snapshot.updatedAt || 0);
   const baseRevision = Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
   const lineage = options.lineageOverride || pendingCloudMutation || newCloudMutation(snapshot);
@@ -8401,10 +8610,10 @@ async function saveStateToCloud() {
     if (res.status === 409 && ['STATE_CONFLICT','BASE_HASH_MISMATCH','DESTRUCTIVE_CHANGE_REVIEW_REQUIRED'].includes(result.error)) {
       liveSync.revision = Number(result.revision || 0);
       liveSync.stateHash = result.stateHash || null;
-      confirmedCloudState = cloneStateForSafety(result.state || {});
+      confirmedCloudState = cloneV20CloudState(result.state || {});
       openLiveSyncConflict({
-        localState: cloneStateForSafety(state),
-        cloudState: normalizeState(result.state || {}),
+        localState: cloneV20CloudState(state),
+        cloudState: cloneV20CloudState(normalizeState(result.state || {})),
         revision: Number(result.revision || 0),
         cloudStateHash:result.stateHash || null,
         cloudUpdatedAt: result.updatedAt || null,
@@ -9271,7 +9480,7 @@ function renderSmartMergeGroups(items, otherLabel) {
 function renderSmartMergeReport(preview) {
   if (!preview?.smartMerge) return '<div class="recovery-empty">Smart merge preview unavailable.</div>';
   const smart = preview.smartMerge;
-  const otherLabel = preview.cloudLabel || (isHostedAppHost() ? 'Account backup' : 'Live admin');
+  const otherLabel = preview.cloudLabel || 'Live admin';
   const browserLabel = smartMergeBrowserLabel();
   const indexed = smart.decisions.map((decision, index) => ({ decision, index }));
   const unresolved = indexed.filter(item => !item.decision.selected);
@@ -9283,44 +9492,31 @@ function renderSmartMergeReport(preview) {
   return `
     <div class="sync-compare-summary${smart.different ? '' : ' is-equal'}">
       <strong>${smart.different ? 'Suggested merge is ready to review' : 'Both versions match'}</strong><br>
-      ${smart.different ? 'Review the suggested changes below. Approving saves the reviewed result; closing keeps both copies for later.' : 'No cross-copy changes are needed.'}
+      ${smart.different ? 'Latest trustworthy update times are already selected. Review the summary, resolve any uncertain values, then approve.' : 'No cross-copy changes are needed.'}<br>
+      <span class="recovery-row-meta" style="white-space:normal;">Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</span>
     </div>
-    <details class="smart-merge-details"><summary>Show copy counts, dates, and selection totals</summary><div class="smart-merge-details-body">
     <div class="smart-merge-overview">
       <div class="smart-merge-stat"><strong>${localCount}</strong><span>Use ${escapeHtml(browserLabel)}</span></div>
       <div class="smart-merge-stat"><strong>${cloudCount}${combinedCount ? ` + ${combinedCount}` : ''}</strong><span>Use ${escapeHtml(otherLabel)}${combinedCount ? ' / combined' : ''}</span></div>
       <div class="smart-merge-stat${unresolved.length ? ' is-warning' : ''}"><strong>${unresolved.length}</strong><span>Need your choice</span></div>
     </div>
+    <div class="smart-merge-notice${unresolved.length || size.overLimit ? ' is-warning' : ''}">
+      ${size.overLimit ? 'This proposed merge is over the 10 MiB limit and cannot be approved.'
+        : unresolved.length ? `${unresolved.length} uncertain change${unresolved.length === 1 ? '' : 's'} must be selected below. Nothing will be changed before approval.`
+          : 'Every change has a reliable suggested winner. Nothing will be changed until you click Approve Merge.'}
+    </div>
     <div class="sync-conflict-grid">
       <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.localState))}</div>${renderActivitySummary(preview.localState, browserLabel)}</div>
       <div class="sync-conflict-card"><strong>${escapeHtml(otherLabel)}</strong><div class="recovery-empty">${escapeHtml(stateSummary(preview.cloudState))}</div>${renderActivitySummary(preview.cloudState, otherLabel)}</div>
     </div>
-    ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;"><strong>Account backup</strong> is protected online and follows your sign-in. <strong>This computer\'s saved copy</strong> is stored only in this browser and may contain unsent edits. Loading the account backup changes only this computer and does not create an online save.</div>' : ''}
-    <p>Merged size ${escapeHtml(formatStateBytes(size.totalBytes))} / ${escapeHtml(formatStateBytes(size.maxBytes))}</p>
-    </div></details>
-    <div class="smart-merge-notice${unresolved.length || size.overLimit ? ' is-warning' : ''}">
-      ${size.overLimit ? 'This proposed merge is over the 10 MiB limit and cannot be approved.'
-        : unresolved.length ? `${unresolved.length} changes need your choice below before you can approve.`
-          : 'No choices are missing. You can expand the suggested changes before approving.'}
-    </div>
+    ${isHostedAppHost() ? '<div class="recovery-empty" style="margin-top:10px;">This live-site browser is separate from 127.0.0.1. Localhost reaches this page through the admin cloud copy.</div>' : ''}
     ${unresolved.length ? `<div class="recovery-actions" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('local')">Choose ${escapeHtml(browserLabel)} for all manual</button><button class="btn btn-ghost btn-sm" onclick="chooseAllManualMergeFields('cloud')">Choose ${escapeHtml(otherLabel)} for all manual</button></div>` : ''}
     ${unresolved.length ? renderSmartMergeGroups(unresolved, otherLabel) : ''}
     ${resolved.length ? `<details class="smart-merge-details"><summary><span>Review selected details</span><span>${resolved.length} suggested change${resolved.length === 1 ? '' : 's'}</span></summary><div class="smart-merge-details-body">${renderSmartMergeGroups(resolved, otherLabel)}</div></details>` : ''}`;
 }
 
 function smartMergeBrowserLabel() {
-  return isHostedAppHost() ? "This computer's saved copy" : 'Local Chrome';
-}
-
-function selectedSmartMergeChoice(preview, decision) {
-  return preview?.selections?.[decision.path] || decision.selected || decision.recommended || '';
-}
-
-function smartMergeUsesOnly(preview, choice) {
-  const decisions = Array.isArray(preview?.smartMerge?.decisions) ? preview.smartMerge.decisions : [];
-  return decisions.length > 0
-    && Number(preview.smartMerge.unresolved || 0) === 0
-    && decisions.every(decision => selectedSmartMergeChoice(preview, decision) === choice);
+  return isHostedAppHost() ? 'This live-site browser' : 'Local Chrome';
 }
 
 function updateSmartMergeApplyButton(preview) {
@@ -9328,19 +9524,10 @@ function updateSmartMergeApplyButton(preview) {
   if (!button || !preview?.smartMerge) return;
   const unresolved = Number(preview.smartMerge.unresolved || 0);
   button.disabled = preview.smartMerge.size.overLimit;
-  button.textContent = unresolved
-    ? `Choose ${unresolved} field${unresolved === 1 ? '' : 's'} first`
-    : smartMergeUsesOnly(preview, 'cloud') && isHostedAppHost()
-      ? 'Load account backup on this computer'
-      : smartMergeUsesOnly(preview, 'local') && isHostedAppHost()
-        ? 'Replace account backup with reviewed computer copy'
-        : 'Approve reviewed merge';
+  button.textContent = unresolved ? `Choose ${unresolved} field${unresolved === 1 ? '' : 's'} first` : 'Approve Merge';
   button.title = preview.smartMerge.size.overLimit
     ? 'The merged save exceeds the 10 MiB cloud limit.'
-    : unresolved ? 'Click to jump to the first unresolved field.'
-      : smartMergeUsesOnly(preview, 'cloud') && isHostedAppHost()
-        ? 'Archives this computer copy, verifies the archive, and loads the account backup without an online save.'
-        : 'Approve the reviewed field merge.';
+    : unresolved ? 'Click to jump to the first unresolved field.' : 'Approve the reviewed field merge.';
 }
 
 function explainUnresolvedSmartMerge(preview) {
@@ -9359,17 +9546,15 @@ function renderComparisonNameList(title, values) {
 
 function renderStateComparisonReport(comparison, chromeState, liveState) {
   if (!comparison) return '<div class="recovery-empty">Comparison unavailable.</div>';
-  const browserLabel = isHostedAppHost() ? "This computer's saved copy" : 'Chrome on this PC';
-  const accountLabel = isHostedAppHost() ? 'Account backup' : 'Live admin account';
   const changedSections = comparison.sections.filter(item => item.differenceCount);
   const summary = comparison.different
     ? `${comparison.differenceCount} saved item${comparison.differenceCount === 1 ? '' : 's'} differ across ${comparison.changedSectionCount} area${comparison.changedSectionCount === 1 ? '' : 's'}. Review the names and fields below before choosing a copy.`
-    : `${browserLabel} and ${accountLabel} contain the same user data. Save timestamps and navigation-only settings are ignored.`;
+    : 'Chrome and the live admin account contain the same user data. Save timestamps and navigation-only settings are ignored.';
   return `
     <div class="sync-compare-summary${comparison.different ? '' : ' is-equal'}"><strong>${comparison.different ? 'Differences found' : 'Both versions match'}</strong><br>${escapeHtml(summary)}<br><span class="recovery-row-meta" style="white-space:normal;">Compared ${escapeHtml(formatRecoveryDate(comparison.comparedAt))}</span></div>
     <div class="sync-conflict-grid">
-      <div class="sync-conflict-card"><strong>${escapeHtml(browserLabel)}</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.chromeUpdatedAt))}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(chromeState || {}))}</div>${renderActivitySummary(chromeState || {}, browserLabel)}</div>
-      <div class="sync-conflict-card"><strong>${escapeHtml(accountLabel)}</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div>${renderActivitySummary(liveState || {}, accountLabel)}</div>
+      <div class="sync-conflict-card"><strong>Chrome on this PC</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.chromeUpdatedAt))}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(chromeState || {}))}</div>${renderActivitySummary(chromeState || {}, 'Chrome on this PC')}</div>
+      <div class="sync-conflict-card"><strong>Live admin account</strong><div class="recovery-row-meta" style="white-space:normal;">Updated ${escapeHtml(formatRecoveryDate(comparison.liveUpdatedAt))}${comparison.liveRevision == null ? '' : ` · revision ${escapeHtml(String(comparison.liveRevision))}`}</div><div class="recovery-empty" style="margin-top:9px;">${escapeHtml(stateSummary(liveState || {}))}</div>${renderActivitySummary(liveState || {}, 'Live admin account')}</div>
     </div>
     ${changedSections.length ? `<div class="sync-diff-list">${changedSections.map(section => `
       <details class="sync-diff-section" open>
@@ -9446,7 +9631,7 @@ function handleHostedAuthExpired() {
   liveSync.status = 'login-needed';
   setSaveStatus('error', 'Login needed');
   showToast('Please log in again on the stable app.', '#f76a6a');
-  setTimeout(() => { window.location.href = '/app.html?next=v19'; }, 1200);
+  setTimeout(() => { window.location.href = '/app.html?next=v20'; }, 1200);
 }
 
 function downloadJsonFile(filename, value) {
@@ -9461,6 +9646,10 @@ function downloadJsonFile(filename, value) {
 
 function openLiveSyncConflict(conflict) {
   if (!conflict?.localState || !conflict?.cloudState) return;
+  if (!['import', 'local-server'].includes(conflict.sourceType)) {
+    conflict.localState = cloneV20CloudState(conflict.localState);
+    conflict.cloudState = cloneV20CloudState(conflict.cloudState);
+  }
   conflict.comparison = conflict.comparison || buildStateComparison(conflict.localState, conflict.cloudState, {
     cloudUpdatedAt: conflict.cloudUpdatedAt,
     liveUpdatedAt: conflict.cloudUpdatedAt,
@@ -9501,7 +9690,6 @@ function openLiveSyncConflict(conflict) {
   liveSync.lastComparedAt = conflict.comparison.comparedAt;
   liveSync.pending = false;
   liveSync.status = 'conflict';
-  if (isHostedAppHost() && !conflict.cloudLabel && conflict.sourceType !== 'local-server') conflict.cloudLabel = 'Account backup';
   const otherLabel = conflict.cloudLabel || 'Live';
   const browserLabel = smartMergeBrowserLabel();
   if (!conflict.snapshotsPrepared) {
@@ -9511,16 +9699,14 @@ function openLiveSyncConflict(conflict) {
   setLiveSyncMeta({ pending: false, conflictAt: new Date().toISOString() });
   const title = document.getElementById('liveSyncConflictTitle');
   const copy = document.getElementById('liveSyncConflictCopy');
-  if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Two saved copies need review';
+  if (title) title.textContent = conflict.sourceType === 'local-server' ? 'Review Chrome and Local Server' : 'Review Smart Merge';
   if (copy) copy.textContent = conflict.reason === 'initial-pair'
     ? 'First pairing preserves every copy. Review the proposed field winners before anything is written.'
-    : `${browserLabel} and ${otherLabel} are both preserved. Loading the account backup changes only this computer; a reviewed merge is required before any online change.`;
+    : `${browserLabel} and ${otherLabel} are both preserved. Review field times and choices, then approve once.`;
   const exportButton = document.getElementById('exportSmartMergeBtn');
   const otherButton = document.getElementById('useOtherMergeBtn');
-  if (exportButton) exportButton.textContent = `Download both copies + reviewed merge`;
-  if (otherButton) otherButton.textContent = isHostedAppHost() && otherLabel === 'Account backup'
-    ? 'Load account backup on this computer'
-    : `Use ${otherLabel}`;
+  if (exportButton) exportButton.textContent = `Export Browser + ${otherLabel} + Merged`;
+  if (otherButton) otherButton.textContent = `Use ${otherLabel}`;
   const body = document.getElementById('liveSyncConflictBody');
   if (body) body.innerHTML = renderSmartMergeReport(conflict);
   updateSmartMergeApplyButton(conflict);
@@ -9619,7 +9805,7 @@ async function compareChromeAndLive() {
   try {
     liveSync.status = 'comparing';
     liveSync.message = 'Reading both saves without changing either one...';
-    setSaveStatus('saving', isHostedAppHost() ? 'Comparing saved copies...' : 'Comparing Chrome and live...');
+    setSaveStatus('saving', 'Comparing Chrome and live...');
     renderRecoveryCenter();
     const res = await fetch(cloudStateEndpoint(), { credentials:'same-origin', cache:'no-store', signal:controller.signal });
     const result = await res.json().catch(() => ({}));
@@ -9635,8 +9821,8 @@ async function compareChromeAndLive() {
     if (!res.ok) throw new Error(result.error || 'Could not read the live save.');
     calibrateSyncClock(result.serverTime);
     if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
-    const chromeState = cloneStateForSafety(state);
-    const cloudState = normalizeState(result.state || defaultState());
+    const chromeState = cloneV20CloudState(state);
+    const cloudState = cloneV20CloudState(normalizeState(result.state || defaultState()));
     const comparison = buildStateComparison(chromeState, cloudState, {
       comparedAt:new Date().toISOString(),
       chromeUpdatedAt:chromeState.updatedAt,
@@ -9658,7 +9844,7 @@ async function compareChromeAndLive() {
     liveSync.status = comparison.different ? 'comparison-ready' : 'synced';
     liveSync.message = comparison.different
       ? `${comparison.differenceCount} saved item(s) differ. Nothing was changed.`
-      : isHostedAppHost() ? 'This computer and the account backup contain the same user data.' : 'Chrome and live user data match.';
+      : 'Chrome and live user data match.';
     const body = document.getElementById('liveSyncComparisonBody');
     if (body) body.innerHTML = renderStateComparisonReport(comparison, chromeState, cloudState);
     const reviewButton = document.getElementById('reviewLiveSyncChoicesBtn');
@@ -9726,15 +9912,6 @@ async function resolveLiveSyncConflict(choice) {
   await applySmartMerge();
 }
 
-function prepareLiveSyncConflictChoice(choice) {
-  if (!['local','cloud'].includes(choice)) return;
-  v16UserInteracted = true;
-  chooseEveryMergeField(choice);
-  showToast(choice === 'local'
-    ? "This computer's copy is selected for review. No account data changed; read the replacement button before continuing."
-    : 'The account backup is selected. Nothing changes until you confirm the load.', '#f7c06a');
-}
-
 function finalizeSmartMergeState(preview) {
   const merged = syncClone(preview.smartMerge.mergedState);
   const meta = normalizeSyncMeta(merged._syncMeta);
@@ -9769,51 +9946,6 @@ function finalizeSmartMergeState(preview) {
   return normalizeState(merged);
 }
 
-async function loadReviewedAccountBackupOnThisComputer(preview, latest) {
-  if (!isHostedAppHost() || !smartMergeUsesOnly(preview, 'cloud')) {
-    throw new Error('The reviewed choices are not an account-backup-only load.');
-  }
-  const recovery = window.StudyQuestRecoveryV2;
-  if (!recovery?.archiveAndLoadAccountBackup) {
-    throw new Error('Safe device recovery is unavailable. Nothing was changed; reload v19 and try again.');
-  }
-  const username = String(AUTHENTICATED_STORAGE_USERNAME || '').trim().toLowerCase();
-  if (!username) throw new Error('The signed-in account could not be verified. Nothing was changed.');
-  const loaded = await recovery.archiveAndLoadAccountBackup({ username, envelope:latest });
-  setSQState(loaded.state, { resetSyncBaseline:true });
-  liveSync.revision = Number(loaded.revision || 0);
-  liveSync.lastCloudRevision = liveSync.revision;
-  liveSync.stateHash = String(loaded.stateHash || '');
-  liveSync.updatedAt = latest.updatedAt || null;
-  liveSync.pending = false;
-  liveSync.status = 'synced';
-  liveSync.message = 'Account backup loaded on this computer. The online revision was not changed.';
-  confirmedCloudState = cloneStateForSafety(loaded.state);
-  pendingCloudMutation = null;
-  v13DurableOutboxPending = false;
-  setLiveSyncMeta({
-    revision:liveSync.revision,
-    stateHash:liveSync.stateHash,
-    pending:false,
-    lastSyncedStateUpdatedAt:state.updatedAt,
-    lastDeviceAccountLoadAt:new Date().toISOString(),
-  });
-  liveSync.preview = null;
-  liveSync.conflict = null;
-  closeModal('liveSyncConflictModal');
-  closeModal('liveSyncComparisonModal');
-  ensureTrackerSemesters();
-  ensureTravelState();
-  renderAll();
-  scheduleNextLiveSync({ reset:true });
-  const mirrorNotice = loaded.localStorageAvailable === false
-    ? ' Browser localStorage is unavailable (full or blocked); the verified device recovery copy will be used on reload.'
-    : '';
-  setSaveStatus('saved', mirrorNotice ? 'Saved in device recovery · browser mirror unavailable' : scheduledSyncStatusText());
-  showToast(`Account backup loaded on this computer. ${loaded.archivedCount} previous device cop${loaded.archivedCount === 1 ? 'y was' : 'ies were'} archived. Online revision ${liveSync.revision} did not change.${mirrorNotice}`, '#6af7b0');
-  return { ok:true, deviceOnly:true, revision:liveSync.revision, localStorageAvailable:loaded.localStorageAvailable };
-}
-
 async function applySmartMerge() {
   v16UserInteracted = true;
   const preview = liveSync.conflict || liveSync.preview;
@@ -9839,7 +9971,7 @@ async function applySmartMerge() {
       });
       const browserSaved = writeV13BrowserState(state);
       if (!browserSaved) await markV13DeviceStateAuthoritative(state, {
-        source:'v19-durable-smart-merge',
+        source:'v20-durable-smart-merge',
       });
       liveSync.stateBytes = approvedSize.totalBytes;
       liveSync.pending = liveSync.paired || isHostedAppHost();
@@ -9873,12 +10005,13 @@ async function applySmartMerge() {
     if (!response.ok) throw new Error(latest.error || 'Could not recheck the live save.');
     calibrateSyncClock(latest.serverTime);
     const latestRevision = Number(latest.revision || 0);
-    const cloudChanged = latestRevision !== Number(preview.revision || 0) || !statesEquivalent(latest.state || {}, preview.cloudState || {});
-    const chromeChanged = !statesEquivalent(state, preview.localState || {});
+    const latestCloudState = cloneV20CloudState(normalizeState(latest.state || defaultState()));
+    const cloudChanged = latestRevision !== Number(preview.revision || 0) || !statesEquivalent(latestCloudState, cloneV20CloudState(preview.cloudState || {}));
+    const chromeChanged = !statesEquivalent(cloneV20CloudState(state), cloneV20CloudState(preview.localState || {}));
     if (cloudChanged || chromeChanged) {
       openLiveSyncConflict({
-        localState:cloneStateForSafety(state),
-        cloudState:normalizeState(latest.state || defaultState()),
+        localState:cloneV20CloudState(state),
+        cloudState:latestCloudState,
         revision:latestRevision,
         cloudStateHash:latest.stateHash || null,
         cloudUpdatedAt:latest.updatedAt || null,
@@ -9888,15 +10021,10 @@ async function applySmartMerge() {
       return;
     }
 
-    if (isHostedAppHost() && smartMergeUsesOnly(preview, 'cloud')) {
-      await loadReviewedAccountBackupOnThisComputer(preview, latest);
-      return;
-    }
-
     liveSync.stateHash = latest.stateHash || liveSync.stateHash;
-    confirmedCloudState = cloneStateForSafety(latest.state || defaultState());
+    confirmedCloudState = cloneV20CloudState(latestCloudState);
 
-    const approvedState = finalizeSmartMergeState(preview);
+    const approvedState = preserveV20LocalOverlay(finalizeSmartMergeState(preview), state);
     const approvedSize = stateSizeBreakdown(approvedState);
     if (approvedSize.overLimit) {
       preview.smartMerge.size = approvedSize;
@@ -9913,7 +10041,7 @@ async function applySmartMerge() {
     await queueV13DeviceStatePersistence(state, { pending:true, label:'approved-smart-merge', lineage:pendingCloudMutation });
     const browserSaved = writeV13BrowserState(state);
     if (!browserSaved) await markV13DeviceStateAuthoritative(state, {
-      source:'v19-durable-smart-merge',
+      source:'v20-durable-smart-merge',
       cloudRevision:latestRevision,
       cloudStateHash:liveSync.stateHash,
     });
@@ -9956,11 +10084,7 @@ async function applySmartMerge() {
     showToast(error?.name === 'AbortError' ? 'Live recheck timed out. Nothing was overwritten.' : String(error?.message || error), '#f76a6a');
   } finally {
     clearTimeout(timeout);
-    if (button) {
-      button.disabled = false;
-      const activePreview = liveSync.conflict || liveSync.preview;
-      if (activePreview?.smartMerge) updateSmartMergeApplyButton(activePreview);
-    }
+    if (button) button.disabled = false;
     renderRecoveryCenter();
   }
 }
@@ -10018,7 +10142,7 @@ async function generateLivePairingCode() {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceName: 'Local v19' }),
+      body: JSON.stringify({ deviceName: 'Local v20' }),
     });
     const result = await res.json().catch(() => ({}));
     if (res.status === 401) return handleHostedAuthExpired();
@@ -10026,7 +10150,7 @@ async function generateLivePairingCode() {
     liveSync.pairingCode = result.code;
     liveSync.pairingExpiresAt = result.expiresAt;
     renderRecoveryCenter();
-    showToast('Pairing code ready for your local v19.', '#6af7b0');
+    showToast('Pairing code ready for your local v20.', '#6af7b0');
   } catch (e) {
     showToast(String(e?.message || e), '#f76a6a');
   }
@@ -10035,24 +10159,24 @@ async function generateLivePairingCode() {
 async function pairLocalLiveAccount() {
   const input = document.getElementById('livePairCodeInput');
   const code = String(input?.value || '').trim().toUpperCase();
-  if (!code) return showToast('Enter the code for this local v19 device.', '#f7c06a');
+  if (!code) return showToast('Enter the code for this local v20 device.', '#f7c06a');
   try {
     setSaveStatus('saving', 'Pairing live account...');
     const res = await fetch('/api/live-pair', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, deviceName: 'Local v19 on ASUS PC' }),
+    body: JSON.stringify({ code, deviceName: 'Local v20 on ASUS PC' }),
     });
     const result = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(result.error || 'Pairing failed');
     liveSync.paired = true;
     liveSync.username = result.username || 'admin';
-    liveSync.deviceName = result.deviceName || 'Local v19';
+    liveSync.deviceName = result.deviceName || 'Local v20';
     liveSync.status = 'paired';
     if (input) input.value = '';
     await syncLiveState({ initialPair: true });
     if (!liveSync.conflict) scheduleNextLiveSync({ reset: true });
-    showToast(liveSync.conflict ? 'Paired safely. Compare both saves before syncing.' : 'Local v19 paired with the live admin account.', '#6af7b0');
+    showToast(liveSync.conflict ? 'Paired safely. Compare both saves before syncing.' : 'Local v20 paired with the live admin account.', '#6af7b0');
   } catch (e) {
     setSaveStatus('offline', 'Pairing failed');
     showToast(String(e?.message || e), '#f76a6a');
@@ -10574,8 +10698,8 @@ function renderRecoveryCenter() {
       <div class="recovery-card"><div class="recovery-label">Live Sync</div><div class="recovery-value">${escapeHtml(liveStatus)}</div></div>
       <div class="recovery-card"><div class="recovery-label">Chrome vs Live</div><div class="recovery-value">${escapeHtml(comparisonStatus)}</div></div>
       <div class="recovery-card"><div class="recovery-label">Last Compared</div><div class="recovery-value">${escapeHtml(formatRecoveryDate(liveSync.lastComparedAt || comparison?.comparedAt))}</div></div>
-       <div class="recovery-card"><div class="recovery-label">v19 page</div><div class="recovery-value">${isHostedAppHost() ? 'Hosted · authenticated account' : 'Local · paired account'}</div></div>
-       <div class="recovery-card"><div class="recovery-label">Hosted v19 status</div><div class="recovery-value">${escapeHtml(shortReleaseHash(publishedHash))}${hashesMatch ? ' · Current' : localHash && publishedHash ? ' · Available' : ' · Not deployed'}</div></div>
+      <div class="recovery-card"><div class="recovery-label">Local v20 page</div><div class="recovery-value">Local-only · metadata below</div></div>
+      <div class="recovery-card"><div class="recovery-label">Hosted v20 status</div><div class="recovery-value">${escapeHtml(shortReleaseHash(publishedHash))}${hashesMatch ? ' · Current' : localHash && publishedHash ? ' · Available' : ' · Not deployed'}</div></div>
       <div class="recovery-card"><div class="recovery-label">Live Server</div><div class="recovery-value">${liveSync.liveHealthy === true ? 'Healthy' : liveSync.liveHealthy === false ? 'Waking / unavailable' : 'Not checked'}</div></div>
       <div class="recovery-card"><div class="recovery-label">Cloud Revision</div><div class="recovery-value">${liveSync.lastCloudRevision == null ? 'Not synced' : escapeHtml(String(liveSync.lastCloudRevision))}</div></div>
       <div class="recovery-card"><div class="recovery-label">Sync Schedule</div><div class="recovery-value">Two-way · every 30 minutes</div></div>
@@ -10626,8 +10750,8 @@ function renderRecoveryCenter() {
       ${liveSync.message ? `<div class="recovery-row-meta" style="white-space:normal;margin-top:8px;">${escapeHtml(liveSync.message)}</div>` : ''}
     </div>
     <div class="recovery-section">
-        <div class="recovery-section-title">v19 Release</div>
-        <div class="recovery-empty">${isHostedAppHost() ? 'This authenticated v19 route uses the existing revision-protected sync service. The root app, v15, and stable recovery routes remain unchanged.' : 'This local v19 page uses the paired revision-protected sync service. Hosted release status is shown separately.'}</div>
+        <div class="recovery-section-title">v20 Local Build</div>
+        <div class="recovery-empty">This v20 page is local-only and reuses the existing revision-protected sync service. It is not deployed to Render; hosted v13, v14, v15, v16, v17, v18, v19, and stable release files remain unchanged.</div>
       ${isLocalLabHost() ? `<div class="recovery-actions" style="margin-top:9px;">
          <button class="btn btn-ghost btn-sm" onclick="refreshLiveSyncStatus()">Check Hosted Baseline</button>
       </div>` : ''}
@@ -10741,8 +10865,8 @@ async function refreshLiveSyncStatus() {
       liveSync.username = result.username || null;
       liveSync.deviceName = result.deviceName || null;
       liveSync.release = result.release || null;
-        liveSync.localHash = result.v19LocalSource?.hash || result.v18LocalSource?.hash || result.v17LocalSource?.hash || result.v16LocalSource?.hash || result.v15LocalSource?.hash || result.v14LocalSource?.hash || result.localSource?.hash || result.release?.local?.hash || null;
-        liveSync.publishedHash = result.v19PublishedHash || null;
+        liveSync.localHash = result.v20LocalSource?.hash || result.v19LocalSource?.hash || result.v18LocalSource?.hash || result.v17LocalSource?.hash || result.v16LocalSource?.hash || result.v15LocalSource?.hash || result.v14LocalSource?.hash || result.localSource?.hash || result.release?.local?.hash || null;
+        liveSync.publishedHash = result.v20PublishedHash || result.v19PublishedHash || null;
       liveSync.publishedAt = result.publishedAt || null;
       liveSync.liveHealthy = result.liveHealthy === true;
       liveSync.lastCloudRevision = Number.isInteger(result.lastCloudRevision) ? result.lastCloudRevision : liveSync.lastCloudRevision;
@@ -10782,12 +10906,16 @@ async function applyCloudState(cloudState, revision, updatedAt, label = 'Before 
     pushUndoSnapshot(label);
     pushAutoBackup(label, state);
   }
-  setSQState(cloudState, { resetSyncBaseline:true });
-  await queueV13DeviceStatePersistence(state, { pending:false, label:'cloud-load' });
+  // Local-only v20 keeps its overlay across cloud loads; hosted v20 receives
+  // the account-scoped overlay from the revision-protected cloud copy.
+  const localOnlyCloudState = preserveV20LocalOverlay(cloneV20CloudState(cloudState), state);
+  setSQState(localOnlyCloudState, { resetSyncBaseline:true });
   const browserSaved = writeV13BrowserState(state);
+  await queueV13DeviceStatePersistence(state, { pending:false, label:'cloud-load', browserSaved });
   if (!browserSaved) await markV13DeviceStateAuthoritative(state, {
-    source:'v19-durable-cloud-load',
+    source:'v20-durable-cloud-load',
     cloudRevision:revision,
+    cloudStateHash:liveSync.stateHash,
   });
   await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
   liveSync.revision = Number(revision || 0);
@@ -10834,10 +10962,10 @@ async function syncLiveState(options = {}) {
     if (!res.ok) throw new Error(result.error || 'Could not load live state');
     calibrateSyncClock(result.serverTime);
     if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
-    const cloudState = normalizeState(result.state || defaultState());
+    const cloudState = cloneV20CloudState(normalizeState(result.state || defaultState()));
     const cloudRevision = Number(result.revision || 0);
     const cloudStateHash = result.stateHash || null;
-    const statesDiffer = !statesEquivalent(state, cloudState);
+    const statesDiffer = !statesEquivalent(cloneV20CloudState(state), cloudState);
     const meta = getLiveSyncMeta();
     const knownRevision = Number.isInteger(liveSync.revision)
       ? liveSync.revision
@@ -10861,15 +10989,15 @@ async function syncLiveState(options = {}) {
       liveSync.revision = knownRevision;
       if (!statesDiffer) {
         liveSync.pending = false;
-        confirmedCloudState = cloneStateForSafety(cloudState);
+        confirmedCloudState = cloneV20CloudState(cloudState);
         pendingCloudMutation = null;
         await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
       } else if (lineageMatches) {
-        confirmedCloudState = cloneStateForSafety(cloudState);
+        confirmedCloudState = cloneV20CloudState(cloudState);
         return await saveStateToCloud({ lineageOverride:lineage });
       } else {
         openLiveSyncConflict({
-          localState:cloneStateForSafety(state), cloudState, revision:cloudRevision,
+          localState:cloneV20CloudState(state), cloudState, revision:cloudRevision,
           cloudStateHash, cloudUpdatedAt:result.updatedAt || null, reason:'outbox-lineage-review',
         });
         return { ok:false, conflict:true, previewReady:true };
@@ -10878,7 +11006,7 @@ async function syncLiveState(options = {}) {
 
     if (!options.initialPair && v13DurableOutboxPending && knownRevision === null) {
       openLiveSyncConflict({
-        localState:cloneStateForSafety(state),
+        localState:cloneV20CloudState(state),
         cloudState,
         revision:cloudRevision,
         cloudStateHash,
@@ -10889,11 +11017,11 @@ async function syncLiveState(options = {}) {
     }
 
     liveSync.revision = cloudRevision;
-    confirmedCloudState = cloneStateForSafety(cloudState);
+    confirmedCloudState = cloneV20CloudState(cloudState);
 
     if (statesDiffer) {
       const reviewOpened = openLiveSyncConflict({
-        localState:cloneStateForSafety(state),
+        localState:cloneV20CloudState(state),
         cloudState,
         revision:cloudRevision,
         cloudStateHash,
@@ -11492,6 +11620,7 @@ function switchTab(name, el) {
     if (!wasTravel) startTravelIntro();
   }
   window.studyQuestV19DidSwitchTab?.(name);
+  window.studyQuestV20DidSwitchTab?.(name);
 }
 
 function handleV18TabKeydown(event) {
@@ -25080,6 +25209,7 @@ function renderAll() {
   if(document.getElementById('tab-weekly').classList.contains('active'))renderWeekly();
   if(document.getElementById('tab-travel').classList.contains('active'))renderTravel();
   window.studyQuestV19AfterRender?.();
+  window.studyQuestV20AfterRender?.();
 }
 
 function finishV13AccountBootstrap() {
@@ -25872,8 +26002,23 @@ removeSemSubj = v14RemoveSubject;
 addSemSubj = v14AddSubject;
 switchTrackerSem = v14SwitchTrackerSemester;
 
+window.studyQuestV20Core = {
+  cloneStateForSafety,
+  makeSafetySnapshot,
+  persistRecoveryOnly: persistV13RecoveryOnly,
+  persistDeviceState: persistV13DeviceState,
+  pushAutoBackup,
+  saveState: saveV20LocalState,
+  setSQState,
+  syncSQStateReference,
+  getSaveMeta,
+  markUserInteracted: () => { v16UserInteracted = true; },
+  durableSaveDrain: () => v13DurableSaveDrainPromise,
+};
+
 window.studyQuestV18Install?.();
 window.studyQuestV19Install?.();
+window.studyQuestV20Install?.();
 installV18Accessibility();
 renderV13ModeUI();
 renderAll();
@@ -26699,6 +26844,5 @@ handleSpotifyCallback().catch(err => {
 });
 spotifyInitSelection();
 </script>
-<script src="/recovery-ux-v2-core.js"></script>
 </body>
 </html>

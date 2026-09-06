@@ -201,13 +201,13 @@
       loadedLocally = true;
       cloudEnvelope = verifiedCloud;
       deviceBundle.browserState = loaded.state;
-      deviceBundle.durable = { state:loaded.state };
+      deviceBundle.durable = { state:loaded.state, storageMode:loaded.activeStorage, localStorageAvailable:loaded.localStorageAvailable };
       deviceBundle.outbox = null;
       nodes.browserSummary.textContent = summaryWithTime(loaded.state);
       nodes.durableSummary.textContent = summaryWithTime(loaded.state);
       nodes.outboxSummary.textContent = "No pending upload. Loading the Account backup did not create one.";
       renderCopyComparison();
-      nodes.status.textContent = `Account backup loaded on this computer. ${loaded.archivedCount} previous device cop${loaded.archivedCount === 1 ? "y remains" : "ies remain"} in recovery. Online revision ${loaded.revision} was not changed.`;
+      nodes.status.textContent = `Account backup loaded on this computer. ${loaded.archivedCount} previous device cop${loaded.archivedCount === 1 ? "y remains" : "ies remain"} in recovery. Online revision ${loaded.revision} was not changed.${loaded.localStorageAvailable === false ? " Browser localStorage is unavailable (full or blocked); the verified IndexedDB recovery copy will be used on reload." : ""}`;
     } catch (error) {
       nodes.status.textContent = loadedLocally
         ? `The Account backup was safely loaded on this computer, but this page could not refresh: ${String(error.message || error)} Reload the page. The online Account backup was not changed.`

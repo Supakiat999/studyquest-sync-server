@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const html = read('public/claudever19.html');
+const loginHtml = read('public/claudever9.html');
 const v18Features = read('public/v18-local-features.js');
 const v19Features = read('public/v19-local-features.js');
 const server = read('server.js');
@@ -67,7 +68,9 @@ for (const marker of [
 ]) assert(server.includes(marker), `Hosted server is missing v19 marker: ${marker}`);
 
 const protectedHashes = {
-  'public/claudever9.html': 'e18416e736ba09e9c9b043496e6cfe272ef9285e3d1a6d453ef011474212b4f9',
+  // v20 adds only the authenticated login return target; the v13 publisher
+  // route and all v13 release behavior remain unchanged.
+  'public/claudever9.html': 'f9feb74a9aea159d4432449f79da7b9c0dd7509122a4cf64a1600382ecc60e13',
   'public/claudever13.html': 'c6b8073bcecca777c7ae0acf2d4948d208b6925965d6e6396166a4e1c14b645f',
   'public/claudever14.html': '4dccb2a1fbd9023a1047f7197d900e7baf5e822fb6f62ec2862eb84bfeceab8d',
   'public/claudever15.html': 'c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3',
@@ -81,6 +84,7 @@ assert(metadata.hash === v19Hash, `v19 metadata hash does not match HTML: ${v19H
 assert(metadata.route === '/v19' && metadata.aliases.includes('/claudever19.html'), 'v19 route metadata is invalid');
 assert(metadata.authenticated === true && metadata.localOnly === false && metadata.defaultAccessMode === 'off', 'v19 access metadata is invalid');
 assert(metadata.main === false && metadata.startupReadOnly === true, 'v19 safety metadata is invalid');
+assert(loginHtml.includes('next === "v20"') && loginHtml.includes('window.location.replace("/v20")'), 'v20 login return target is missing');
 
 for (const yaml of ['render.yaml', 'render-neon-free.yaml']) {
   const content = read(yaml);

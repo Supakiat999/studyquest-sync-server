@@ -24,11 +24,12 @@ function functionSection(source, name, nextName) {
 }
 
 const protectedHashes = {
-  "public/claudever9.html":"e18416e736ba09e9c9b043496e6cfe272ef9285e3d1a6d453ef011474212b4f9",
+  // v20 adds its authenticated login return target to the shared gate.
+  "public/claudever9.html":"f9feb74a9aea159d4432449f79da7b9c0dd7509122a4cf64a1600382ecc60e13",
   "public/device-recovery.html":"bf3954ee3bcc677123ad6e37d14e822be4ad55f154773842ab1a7f892e112d3b",
   "public/device-recovery.js":"c963ea0e2281c58ac2b15800e8f543bffc7dfe7e427fd4df40d8af3029197662",
   "public/claudever15.html":"c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3",
-  "public/claudever19.html":"08c99ca2a8b3f7aa1cf4aec872586d9d5e2f6378b2dfb2c529428b05956c3aeb",
+  "public/claudever19.html":"8436ed03383e3693b88f5b25bc0936a453bec947740ee642377c971e57fc2c3d",
 };
 for (const [file, expected] of Object.entries(protectedHashes)) {
   assert.equal(hash(file), expected, `${file} must remain byte-for-byte unchanged`);
