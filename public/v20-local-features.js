@@ -1016,6 +1016,30 @@
     element.dataset.state = error ? 'error' : '';
   }
 
+  function setActivationBusy(busy) {
+    const modal = root.document?.getElementById('v20WeeklyStageManagerModal');
+    if (!modal) return;
+    modal.setAttribute('aria-busy', String(busy));
+    modal.querySelectorAll('button, input, select').forEach(control => {
+      if (busy) {
+        control.dataset.v20WasDisabled = String(control.disabled);
+        control.disabled = true;
+      } else if (control.dataset.v20WasDisabled !== undefined) {
+        control.disabled = control.dataset.v20WasDisabled === 'true';
+        delete control.dataset.v20WasDisabled;
+      }
+    });
+    const button = modal.querySelector('[data-v20-weekly-action="activate"]');
+    if (button) button.textContent = busy ? 'Creating backup...' : 'Create backup and enable';
+  }
+
+  function activationErrorMessage(error) {
+    if (error?.name === 'QuotaExceededError') return 'There is not enough browser storage to create a recovery backup. Free some device space and try again. Keep your StudyQuest website data.';
+    if (error?.name === 'SecurityError' || error?.name === 'InvalidStateError') return 'This browser is blocking recovery storage. Open StudyQuest in Safari or Chrome with website storage allowed, then try again.';
+    if (error?.name === 'VersionError') return 'Recovery storage changed in another tab. Close other StudyQuest tabs and try again.';
+    return error?.message || 'The backup could not be saved. Try again.';
+  }
+
   function openSubjectTrackingPrompt(view = 'subject') {
     requestedActivationView = normalizeWeeklyViewMode(view);
     stageManagerSetup = !subjectTrackingEnabled();
@@ -1086,7 +1110,9 @@
       let core = getCore();
       let stateChanged = false;
       try {
+        setActivationBusy(true);
         const source = getState();
+        const accountKey = activeStorageKey();
         core = getCore();
         if (!source || typeof core.setSQState !== 'function' || typeof core.persistRecoveryOnly !== 'function') {
           throw new Error('The local StudyQuest save bridge is not ready.');
@@ -1112,6 +1138,9 @@
         const backupState = snapshot?.state || previous;
         const backupResult = await core.persistRecoveryOnly(backupState, label);
         if (backupResult !== true) throw new Error('The recovery backup could not be saved. v20 stayed read-only.');
+        if (activeStorageKey() !== accountKey || JSON.stringify(getState()) !== JSON.stringify(previous)) {
+          throw new Error('Your data changed while the backup was being created. Try again to include your latest changes.');
+        }
         core.pushAutoBackup?.(label, previous);
         setActivationStatus('Saving your Subject Track settings...');
         const next = cloneJson(previous, {});
@@ -1142,13 +1171,15 @@
         if (stateChanged && previous) await rollbackState(core, previous, 'v20-weekly-enable-rollback');
         callRoot('recordAppError', 'v20-weekly-enable', error);
         renderStageManager();
-        setActivationStatus(`Subject Track stayed off: ${error.message || 'backup or save failed'}`, true);
-        setWeeklyStatus(`v20 stayed read-only: ${error.message || 'backup or save failed'}`, 'error');
-        callRoot('showToast', `v20 stayed read-only: ${error.message || 'backup or save failed'}`, '#f76a6a');
+        const message = activationErrorMessage(error);
+        setActivationStatus(`Subject Track is still off. ${message}`, true);
+        setWeeklyStatus(`Subject Track is still off. ${message}`, 'error');
+        callRoot('showToast', `Subject Track is still off. ${message}`, '#f76a6a');
         return { ok:false, error:error.message || 'backup or save failed' };
       }
     })().finally(() => {
       activationPromise = null;
+      setActivationBusy(false);
     });
     return activationPromise;
   }
@@ -1457,8 +1488,7 @@
     } else if (action === 'open-subject-setup') {
       openSubjectTrackingPrompt('subject');
     } else if (action === 'activate') {
-      target.disabled = true;
-      void enableSubjectTracking('week', pendingStageLayouts).finally(() => { if (target.isConnected) target.disabled = false; });
+      void enableSubjectTracking('week', pendingStageLayouts);
     } else if (action === 'cancel-enable' || action === 'cancel-setup') {
       stageManagerSetup = false;
       pendingStageLayouts = null;

@@ -9,3 +9,6 @@ npm-debug.log*
 *.pfx
 .git-safeconfig
 .chrome-*/
+.test-artifacts/
+.test-browsers/
+.release-private/
