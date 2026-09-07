@@ -7178,25 +7178,31 @@ function openV13DeviceRecoveryDb() {
         const db = request.result;
         if (settled) { db.close(); return; }
         db.onversionchange = () => db.close();
+        function repair() {
+          const nextVersion = db.version + 1;
+          db.close();
+          open(nextVersion);
+        }
         try {
-          const storesPresent = ['accountStates', 'outbox', 'recovery', 'diagnostics'].every(name => db.objectStoreNames.contains(name));
-          const indexesPresent = storesPresent && ['recovery', 'diagnostics'].every(name =>
-            db.transaction(name, 'readonly').objectStore(name).indexNames.contains('username'));
-          if (!indexesPresent) {
-            const nextVersion = db.version + 1;
-            db.close();
-            open(nextVersion);
+          if (!['accountStates', 'outbox', 'recovery', 'diagnostics'].every(name => db.objectStoreNames.contains(name))) { repair(); return; }
+          const inspection = db.transaction(['recovery', 'diagnostics'], 'readonly');
+          if (['recovery', 'diagnostics'].every(name => inspection.objectStore(name).indexNames.contains('username'))) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(db);
             return;
           }
-          settled = true;
-          clearTimeout(timer);
-          resolve(db);
+          // Wait for this read to finish before closing: a live transaction
+          // would block the repair upgrade this same connection then asks for.
+          inspection.oncomplete = () => repair();
+          inspection.onabort = () => fail(inspection.error || new Error('Recovery storage could not be read. Try again.'));
         } catch (error) { db.close(); fail(error); }
       };
     }
     open();
   });
 }
+
 
 function v13IdbRequest(request) {
   return new Promise((resolve, reject) => {

@@ -64,7 +64,7 @@ assert(v14.includes('function isAdminAccount'), 'v14 is missing its admin-only c
 assert(v14.includes('Only the admin laptop can create pairing codes.'), 'v14 pairing controls are not protected for ordinary users');
 assert(v14.includes("if (!isHostedAppHost() || !isAdminAccount()) return ''"), 'v14 admin recovery controls are not hidden for ordinary users');
 
-assert(sha256(v13Path) === 'c6b8073bcecca777c7ae0acf2d4948d208b6925965d6e6396166a4e1c14b645f', 'Hosted v13 changed');
+assert(sha256(v13Path) === 'c4135e474acf0bf605dfd527a27db08711bfef286e1909e94527018f9cbe0746', 'Hosted v13 changed');
 const v14Hash = sha256(v14Path);
 assert(version.version === 14 && version.source === 'claudever14.html', 'v14 version metadata is invalid');
 assert(version.hash === v14Hash, `v14 version hash does not match HTML: ${v14Hash}`);

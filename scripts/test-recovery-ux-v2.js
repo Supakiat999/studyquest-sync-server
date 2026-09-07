@@ -25,11 +25,11 @@ function functionSection(source, name, nextName) {
 
 const protectedHashes = {
   // v20 adds its authenticated login return target to the shared gate.
-  "public/claudever9.html":"f9feb74a9aea159d4432449f79da7b9c0dd7509122a4cf64a1600382ecc60e13",
+  "public/claudever9.html":"608edff6db0962c0028014553236482bdd1fcfbc09f45b5994bb750dafd53f5b",
   "public/device-recovery.html":"bf3954ee3bcc677123ad6e37d14e822be4ad55f154773842ab1a7f892e112d3b",
   "public/device-recovery.js":"c963ea0e2281c58ac2b15800e8f543bffc7dfe7e427fd4df40d8af3029197662",
-  "public/claudever15.html":"c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3",
-  "public/claudever19.html":"8436ed03383e3693b88f5b25bc0936a453bec947740ee642377c971e57fc2c3d",
+  "public/claudever15.html":"ef73bd01892bdbf0c8047637ad2aee54dec1cf0004bbb678619021f332dcc577",
+  "public/claudever19.html":"924bee3331cf3704232b523722bffb0c5c8bf8cc00201e444943bc6e9364d215",
 };
 for (const [file, expected] of Object.entries(protectedHashes)) {
   assert.equal(hash(file), expected, `${file} must remain byte-for-byte unchanged`);

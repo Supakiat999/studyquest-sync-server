@@ -81,8 +81,25 @@ check(v13Html.includes("button.disabled = preview.smartMerge.size.overLimit;"),
 check(server.includes("authenticatedV13Html(user)"),
   "The v13 route must inject the authenticated account before browser storage loads.");
 check(!v13Html.includes("localStorage.removeItem(STORAGE_KEY)"), "The main StudyQuest save must never be automatically deleted.");
-check(v13Html.includes("const DEVICE_RECOVERY_DB_VERSION = 2;"),
+check(v13Html.includes("objectStore('diagnostics')"),
   "v13 must move large diagnostics and safety history into IndexedDB.");
+
+// Every generation shares studyquest_device_recovery_v1. A page that asks for a
+// fixed version cannot open a database a newer generation already upgraded, so
+// each opener must accept the version already on the device.
+for (const file of ["claudever9.html", "claudever13.html", "claudever14.html",
+  "claudever15.html", "claudever16.html", "claudever19.html", "claudever20.html"]) {
+  const html = fs.readFileSync(path.join(root, "public", file), "utf8");
+  check(html.includes("indexedDB.open(DEVICE_RECOVERY_DB)"),
+    `${file} must open the shared recovery database at its existing version.`);
+  // A repair may raise the schema through the version the opener read from the
+  // database itself; any other second argument is a fixed version.
+  const fixedVersions = [...html.matchAll(/indexedDB\.open\(\s*DEVICE_RECOVERY_DB\s*,\s*([^)]*)\)/g)]
+    .filter(match => match[1].trim() !== 'version');
+  check(!fixedVersions.length, `${file} must not request a fixed recovery database version.`);
+  check(html.includes('const nextVersion = db.version + 1;'),
+    `${file} must derive any schema repair from the version already on the device.`);
+}
 
 for (const marker of ["/api/recovery/versions", "recover-missing", "Recover Missing Items", "Legacy browser copy"]) {
   check(recoveryJs.includes(marker) || recoveryHtml.includes(marker),

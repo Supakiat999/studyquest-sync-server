@@ -230,11 +230,11 @@ const v19Hash = sha256('public/claudever19.html');
 const v19Metadata = JSON.parse(read('public/v19-version.json'));
 assert.equal(v19Metadata.hash, v19Hash, `v19 metadata hash does not match HTML: ${v19Hash}`);
 for (const [file, expected] of Object.entries({
-  'public/claudever9.html': 'f9feb74a9aea159d4432449f79da7b9c0dd7509122a4cf64a1600382ecc60e13',
-  'public/claudever13.html': 'c6b8073bcecca777c7ae0acf2d4948d208b6925965d6e6396166a4e1c14b645f',
-  'public/claudever14.html': '4dccb2a1fbd9023a1047f7197d900e7baf5e822fb6f62ec2862eb84bfeceab8d',
-  'public/claudever15.html': 'c99b6c9ed4f47d01e7d5fe1d74dc7a76b39a926a3901a13cf7081836385031e3',
-  'public/claudever16.html': '7354ebba898364bd457472927029c77ae69081257d9a48ba6f1ec0e118cf5011',
+  'public/claudever9.html': '608edff6db0962c0028014553236482bdd1fcfbc09f45b5994bb750dafd53f5b',
+  'public/claudever13.html': 'c4135e474acf0bf605dfd527a27db08711bfef286e1909e94527018f9cbe0746',
+  'public/claudever14.html': '6e780a482c05e41202d769408937c805eeafb408b6166c77b0a9c6e5b7558241',
+  'public/claudever15.html': 'ef73bd01892bdbf0c8047637ad2aee54dec1cf0004bbb678619021f332dcc577',
+  'public/claudever16.html': '411e0efc5058f4f6ec89fbf89871cc22f5930124b6f3483bb07a18c437b85e74',
 })) assert.equal(sha256(file), expected, `${file} changed during v20 rollout`);
 
 console.log(JSON.stringify({

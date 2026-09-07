@@ -6581,7 +6581,6 @@ const LOCAL_LIVE_STATUS_ENDPOINT = '/api/live-sync/status';
 const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
 const LIVE_VERSION_ENDPOINT = '/api/version?version=16';
 const DEVICE_RECOVERY_DB = 'studyquest_device_recovery_v1';
-const DEVICE_RECOVERY_DB_VERSION = 3;
 const DEVICE_RECOVERY_COPY_LIMIT = 20;
 const CLOUD_SAVE_QUIET_MS = 500;
 const SAFE_MULTI_DEVICE_SYNC_ENABLED = window.__STUDYQUEST_SAFE_SYNC_V2__ !== false;
@@ -6700,25 +6699,72 @@ function v13DurableUsername() {
 
 function openV13DeviceRecoveryDb() {
   return new Promise((resolve, reject) => {
-    if (!window.indexedDB) return reject(new Error('IndexedDB is unavailable'));
-    const request = indexedDB.open(DEVICE_RECOVERY_DB, DEVICE_RECOVERY_DB_VERSION);
-    request.onerror = () => reject(request.error || new Error('IndexedDB could not be opened'));
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains('accountStates')) db.createObjectStore('accountStates', { keyPath:'username' });
-      if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath:'username' });
-      if (!db.objectStoreNames.contains('recovery')) {
-        const store = db.createObjectStore('recovery', { keyPath:'id' });
-        store.createIndex('username', 'username', { unique:false });
-      }
-      if (!db.objectStoreNames.contains('diagnostics')) {
-        const store = db.createObjectStore('diagnostics', { keyPath:'id' });
-        store.createIndex('username', 'username', { unique:false });
-      }
-    };
+    let settled = false;
+    let attempts = 0;
+    const timer = setTimeout(() => fail(new Error('Recovery storage is taking too long to respond. Close other StudyQuest tabs and try again.')), 10000);
+    function fail(error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    }
+    function open(version) {
+      if (settled) return;
+      if (++attempts > 4) return fail(new Error('Recovery storage changed in another tab. Close other StudyQuest tabs and try again.'));
+      let request;
+      try {
+        if (!window.indexedDB) throw new Error('Recovery storage is unavailable in this browser. Open StudyQuest in Safari or Chrome with website storage allowed, then try again.');
+        // Other StudyQuest versions share this database. Accept its current version;
+        // only request a higher version when a required store or index is missing.
+        request = version === undefined ? indexedDB.open(DEVICE_RECOVERY_DB) : indexedDB.open(DEVICE_RECOVERY_DB, version);
+      } catch (error) { fail(error); return; }
+      request.onerror = () => {
+        if (version !== undefined && request.error?.name === 'VersionError') open();
+        else fail(request.error || new Error('Recovery storage could not be opened. Try again.'));
+      };
+      request.onblocked = () => fail(new Error('Another StudyQuest tab is using recovery storage. Close other StudyQuest tabs and try again.'));
+      request.onupgradeneeded = () => {
+        // An open request cannot be cancelled. Abort any late upgrade after failure.
+        if (settled) { request.transaction.abort(); return; }
+        const db = request.result;
+        if (!db.objectStoreNames.contains('accountStates')) db.createObjectStore('accountStates', { keyPath:'username' });
+        if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath:'username' });
+        for (const name of ['recovery', 'diagnostics']) {
+          const store = db.objectStoreNames.contains(name)
+            ? request.transaction.objectStore(name) : db.createObjectStore(name, { keyPath:'id' });
+          if (!store.indexNames.contains('username')) store.createIndex('username', 'username', { unique:false });
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        if (settled) { db.close(); return; }
+        db.onversionchange = () => db.close();
+        function repair() {
+          const nextVersion = db.version + 1;
+          db.close();
+          open(nextVersion);
+        }
+        try {
+          if (!['accountStates', 'outbox', 'recovery', 'diagnostics'].every(name => db.objectStoreNames.contains(name))) { repair(); return; }
+          const inspection = db.transaction(['recovery', 'diagnostics'], 'readonly');
+          if (['recovery', 'diagnostics'].every(name => inspection.objectStore(name).indexNames.contains('username'))) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(db);
+            return;
+          }
+          // Wait for this read to finish before closing: a live transaction
+          // would block the repair upgrade this same connection then asks for.
+          inspection.oncomplete = () => repair();
+          inspection.onabort = () => fail(inspection.error || new Error('Recovery storage could not be read. Try again.'));
+        } catch (error) { db.close(); fail(error); }
+      };
+    }
+    open();
   });
 }
+
+
 
 function v13IdbRequest(request) {
   return new Promise((resolve, reject) => {
