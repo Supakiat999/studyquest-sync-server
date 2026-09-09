@@ -3580,6 +3580,16 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if ([
+      "/v21-local-features.js", "/v21-account-sync.js", "/v21-manual-courses.js",
+      "/v21-v18-features.js", "/v21-v19-features.js", "/v21-v20-features.js",
+    ].includes(url.pathname)) {
+      send(req, res, 200, fs.readFileSync(path.join(ROOT, "public", url.pathname.slice(1))), {
+        "content-type": "text/javascript; charset=utf-8",
+      });
+      return;
+    }
+
     if (url.pathname === "/safe-sync.js") {
       send(req, res, 200, fs.readFileSync(SAFE_SYNC_JS_PATH), {
         "content-type": "text/javascript; charset=utf-8",

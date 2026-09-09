@@ -74,6 +74,25 @@ assert.doesNotMatch(html, /location\.(?:replace|assign|href\s*=)[^\n]*127\.0\.0\
 // The account-sync layer has to load and install before the manual-course
 // layer, otherwise that layer opens device storage instead of the account.
 const scriptOrder = [...html.matchAll(/<script src="(\/v21-[^"]+)"/g)].map(match => match[1]);
+// Exercise the actual static route block, not only files or mocked browser assets.
+const assetRouteStart = server.indexOf('    if ([\n      "/v21-local-features.js"');
+assert.ok(assetRouteStart >= 0, 'v21 needs explicit static asset routes');
+const assetRouteEnd = server.indexOf('    if (url.pathname === "/safe-sync.js")', assetRouteStart);
+const assetRouteSource = server.slice(assetRouteStart, assetRouteEnd);
+for (const pathname of [...scriptOrder, '/server.js', '/v21-unknown.js']) {
+  let served = null;
+  vm.runInNewContext(`(function () { ${assetRouteSource} })()`, {
+    url: { pathname }, req: {}, res: {}, fs, path, ROOT: root,
+    send: (_req, _res, status, body, headers) => { served = { status, body, headers }; },
+  });
+  if (!scriptOrder.includes(pathname)) {
+    assert.equal(served, null, 'the static route must not expose unlisted files');
+    continue;
+  }
+  assert.equal(served?.status, 200, `${pathname} must be served`);
+  assert.match(served.headers['content-type'], /javascript/);
+  assert.equal(sha256(served.body), sha256(read(`public${pathname}`)), `${pathname} must serve the exact file`);
+}
 assert.ok(scriptOrder.indexOf('/v21-account-sync.js') < scriptOrder.indexOf('/v21-manual-courses.js'), 'account sync must load before manual courses');
 assert.match(html, /StudyQuestV21AccountSync\?\.install\(window\.studyQuestV21Core\);\s*\n\s*window\.StudyQuestV21Manual\?\.install/, 'account sync must install before manual courses');
 assert.match(html, /studyQuestV21Core\.hostedSync/, 'the hosted bridge must expose sync state');
