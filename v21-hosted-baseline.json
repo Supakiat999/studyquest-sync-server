@@ -1,0 +1,22 @@
+{
+  "base": {
+    "public/claudever20.html": "24423c25a699cde32b7b640dd97c23944826b85c9ca9435a406e0823edbd9df4"
+  },
+  "sources": {
+    "v21-core-bridge.js": "315c761d2c8d775bbd3bbd2085c519795eb5c7d168a8672f3f9bbab649eacb2a",
+    "v21-hosted-bridge.js": "884e589e8bccf7d555df1e1760d2040d21f54f5a6bc73ecf0cfd562d0c0c6b72",
+    "v21-local-features.js": "ecece6867a2b9c92adaed0a56646f242c2d67ff0fe2b4526cca6a84376611ad1",
+    "v21-manual-courses.js": "a1251e07327541aff2f628c98fba259f41dcfca21662a69d1b1e1326f4ad489b",
+    "v21-account-sync.js": "395d47b49e43142ef19f94a2386c5c9526673a9d903a28393257544248bd8a17"
+  },
+  "outputs": {
+    "claudever21.html": "a1118eb73db6d76d7b24aa0cce736ff4c6c0796d7e31066effa923d1ebcb9db4",
+    "v21-version.json": "b5fd9473f857cb3ef285c0ae830549d464d9438ba2b1697956d79015c12ce1df",
+    "v21-v18-features.js": "16b1aa82ce42c7f853150159ffd144fa1d75c6633e88819594b5f366e2fdf563",
+    "v21-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
+    "v21-v20-features.js": "c60f445deef01fa45efa090ad2b7cd12c62347f6b02099695c81c3172f1035e5",
+    "v21-local-features.js": "77f2bac6aa2c474279677b6368d2033bc291b332312775f16a591fddc623c740",
+    "v21-manual-courses.js": "a1251e07327541aff2f628c98fba259f41dcfca21662a69d1b1e1326f4ad489b",
+    "v21-account-sync.js": "395d47b49e43142ef19f94a2386c5c9526673a9d903a28393257544248bd8a17"
+  }
+}

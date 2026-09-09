@@ -31,6 +31,10 @@ services:
         value: "off"
       - key: STUDYQUEST_V20_ACCESS
         value: "off"
+      - key: STUDYQUEST_V21_ACCESS
+        value: "off"
+      - key: STUDYQUEST_V21_CANARY_USERS
+        sync: false
       - key: STUDYQUEST_RECOVERY_UX
         value: "off"
       - key: STUDYQUEST_MAIN_VERSION

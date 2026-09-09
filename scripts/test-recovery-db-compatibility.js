@@ -30,6 +30,7 @@ const generations = [
   { id:'v16', file:'claudever16.html', opener:'openV13DeviceRecoveryDb', stores:['accountStates', 'outbox', 'recovery', 'diagnostics'], indexed:['recovery', 'diagnostics'] },
   { id:'v19', file:'claudever19.html', opener:'openV13DeviceRecoveryDb', stores:['accountStates', 'outbox', 'recovery', 'diagnostics'], indexed:['recovery', 'diagnostics'] },
   { id:'v20', file:'claudever20.html', opener:'openV13DeviceRecoveryDb', stores:['accountStates', 'outbox', 'recovery', 'diagnostics'], indexed:['recovery', 'diagnostics'] },
+  { id:'v21', file:'claudever21.html', opener:'openV13DeviceRecoveryDb', stores:['accountStates', 'outbox', 'recovery', 'diagnostics'], indexed:['recovery', 'diagnostics'] },
 ];
 
 function extract(html, name, label) {

@@ -56,7 +56,7 @@ assert.ok(server.includes('v19AccessMode: V19_ACCESS_MODE'));
 assert.ok(server.includes('mainVersion: MAIN_APP_VERSION'));
 assert.ok(server.includes('MAIN_APP_VERSION === "19" && canAccessV19(user)'));
 assert.ok(server.includes('route: MAIN_APP_VERSION === "19" ? "/" : "/v19"'));
-assert.ok(server.includes('return ["15", "19"].includes(configured) ? configured : "15"'));
+assert.ok(server.includes('return ["15", "19", "21"].includes(configured) ? configured : "15"'));
 
 assert.equal(criteria.entries.length, 7);
 assert.equal(criteria.entries.some(entry => /advanced math/i.test(entry.courseName)), false);

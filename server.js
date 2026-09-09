@@ -42,6 +42,8 @@ const V19_VERSION_PATH = path.join(ROOT, "public", "v19-version.json");
 const V20_HTML_PATH = path.join(ROOT, "public", "claudever20.html");
 const V20_FEATURES_PATH = path.join(ROOT, "public", "v20-local-features.js");
 const V20_VERSION_PATH = path.join(ROOT, "public", "v20-version.json");
+const V21_HTML_PATH = path.join(ROOT, "public", "claudever21.html");
+const V21_VERSION_PATH = path.join(ROOT, "public", "v21-version.json");
 const V18_ADMIN_COURSE_CRITERIA = require("./lib/v18-admin-course-criteria");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
@@ -74,13 +76,21 @@ const V20_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V20_ACCESS || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
+// v21 uses off|canary|all. "canary" is admin plus an explicit allowlist, so a
+// limited live rollout never depends on guessing who is included.
+const V21_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V21_ACCESS || "off").trim().toLowerCase();
+  return ["off", "canary", "all"].includes(configured) ? configured : "off";
+})();
+const V21_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V21_CANARY_USERS || "")
+  .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const RECOVERY_UX_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_RECOVERY_UX || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
 const MAIN_APP_VERSION = (() => {
   const configured = String(process.env.STUDYQUEST_MAIN_VERSION || "15").trim();
-  return ["15", "19"].includes(configured) ? configured : "15";
+  return ["15", "19", "21"].includes(configured) ? configured : "15";
 })();
 const SAFE_SYNC_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_SAFE_SYNC_MODE || "off").trim().toLowerCase();
@@ -102,6 +112,9 @@ const CONFLICT_COPY_BUDGET_BYTES = Number(process.env.STUDYQUEST_CONFLICT_COPY_B
 const TEMP_PASSWORD_MAX_AGE_SECONDS = 24 * 60 * 60;
 const IS_HOSTED = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.NODE_ENV === "production");
 const V20_OVERLAY_KEY = "weeklyV20";
+// Additive account namespace for v21 manual courses, the quick note, and the
+// functional Subject Track setting. No SQL schema change is involved.
+const V21_NAMESPACE_KEY = "_studyquestV21";
 
 const ADMIN_PASSWORD = process.env.STUDYQUEST_ADMIN_PASSWORD;
 const INVITE_CODE = process.env.STUDYQUEST_INVITE_CODE;
@@ -316,6 +329,20 @@ function canAccessV20(user) {
   return V20_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME;
 }
 
+function authenticatedV21Html(user) {
+  const html = htmlTemplate(V21_HTML_PATH);
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({ username: user.username })};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};window.__STUDYQUEST_V20_HOSTED__=true;window.__STUDYQUEST_V21_HOSTED__=true;</script>`;
+  return html.replace("</head>", `${bootstrap}\n</head>`);
+}
+
+// "canary" is admin plus the explicit allowlist. A device-bound sync credential
+// is never a v21 user session.
+function canAccessV21(user) {
+  if (!user || user.sync_device_id || V21_ACCESS_MODE === "off") return false;
+  if (V21_ACCESS_MODE === "all") return true;
+  return user.username === ADMIN_USERNAME || V21_CANARY_USERS.has(String(user.username || "").toLowerCase());
+}
+
 function canUseRecoveryUxV2(user) {
   if (!user || user.sync_device_id || RECOVERY_UX_MODE === "off") return false;
   return RECOVERY_UX_MODE === "all" || user.username === ADMIN_USERNAME;
@@ -326,6 +353,15 @@ function stableHtmlWithRecoveryUxV2() {
   const bootstrap = `<script>window.__STUDYQUEST_RECOVERY_UX_MODE__=${JSON.stringify(RECOVERY_UX_MODE)};</script>`;
   const scripts = `${bootstrap}<script src="/recovery-ux-v2-core.js"></script><script src="/recovery-ux-v2.js"></script>`;
   return html.replace("</body>", `${scripts}\n</body>`);
+}
+
+// Only the /app.html?next=v21 login response gains this return route. Keep
+// the stored legacy page and every other version's login response unchanged.
+function v21LoginHtml(value) {
+  const html = String(value);
+  const anchor = '      const wantsStable = search.get("stable") === "1";';
+  if (!html.includes(anchor)) throw new Error('Missing v21 login return anchor');
+  return html.replace(anchor, anchor + '\n      if (!user.legacy && next === "v21") { window.location.replace("/v21"); return; }');
 }
 
 function readBody(req, maxBytes = MAX_AUTH_BODY_BYTES) {
@@ -2060,6 +2096,24 @@ function preserveV20Overlay(currentState, incomingState) {
   };
 }
 
+// An older client that has never seen v21 omits the namespace entirely. Absence
+// must never be read as deletion: only a client that sends the key may change
+// it. A client that sends it explicitly (including null) is respected.
+function preserveV21Namespace(currentState, incomingState) {
+  const currentNamespace = currentState?.[V21_NAMESPACE_KEY];
+  const incomingHasNamespace = incomingState
+    && typeof incomingState === "object"
+    && !Array.isArray(incomingState)
+    && Object.prototype.hasOwnProperty.call(incomingState, V21_NAMESPACE_KEY);
+  if (currentNamespace === undefined || incomingHasNamespace) {
+    return { state: incomingState, preserved: false };
+  }
+  return {
+    state: { ...incomingState, [V21_NAMESPACE_KEY]: JSON.parse(JSON.stringify(currentNamespace)) },
+    preserved: true,
+  };
+}
+
 async function preserveAndSendStateConflict(req, res, client, details) {
   const current = await client.query(
     `select username, state, state_bytes, state_hash, state_revision, state_updated_at, updated_at
@@ -2249,8 +2303,9 @@ async function handleVersionedState(req, res) {
       return;
     }
     const protectedV20Overlay = preserveV20Overlay(row.state, incomingState);
-    if (protectedV20Overlay.preserved) {
-      incomingState = protectedV20Overlay.state;
+    const protectedV21Namespace = preserveV21Namespace(row.state, protectedV20Overlay.state);
+    if (protectedV20Overlay.preserved || protectedV21Namespace.preserved) {
+      incomingState = protectedV21Namespace.state;
       incomingVersion = serializeStateVersion(incomingState);
       incomingManifest = stateManifest(incomingState);
       stateBytes = incomingVersion.stateBytes;
@@ -2266,7 +2321,9 @@ async function handleVersionedState(req, res) {
           baseHash,
           mutationId,
           changeManifest:changeSet,
-          detail:"STATE_TOO_LARGE_AFTER_V20_OVERLAY_PRESERVATION",
+          detail:protectedV21Namespace.preserved && !protectedV20Overlay.preserved
+            ? "STATE_TOO_LARGE_AFTER_V21_NAMESPACE_PRESERVATION"
+            : "STATE_TOO_LARGE_AFTER_V20_OVERLAY_PRESERVATION",
         });
         await client.query("commit");
         sendJson(req, res, 413, stateTooLargePayload(stateBytes));
@@ -3415,10 +3472,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/v21" || url.pathname === "/claudever21.html") {
+      const user = await currentUser(req, { includeState:false });
+      if (!user || user.sync_device_id) {
+        send(req, res, 302, "Login required", { location: "/app.html?next=v21" });
+        return;
+      }
+      if (!canAccessV21(user)) {
+        send(req, res, 302, V21_ACCESS_MODE === "off" ? "v21 is temporarily unavailable" : "v21 is not enabled for this account", { location: "/app.html?stable=1" });
+        return;
+      }
+      send(req, res, 200, authenticatedV21Html(user), { "content-type": "text/html; charset=utf-8" });
+      return;
+    }
+
     if (url.pathname === "/") {
       const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
         send(req, res, 302, "Login required", { location: "/app.html?next=v15-main" });
+        return;
+      }
+      // Falls through to the previous default whenever v21 is not reachable for
+      // this account, so a paused rollout never leaves anyone without an app.
+      if (MAIN_APP_VERSION === "21" && canAccessV21(user)) {
+        send(req, res, 200, authenticatedV21Html(user), { "content-type": "text/html; charset=utf-8" });
         return;
       }
       if (MAIN_APP_VERSION === "19" && canAccessV19(user)) {
@@ -3522,7 +3599,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/app.html" || url.pathname === "/claudever9.html") {
-      const stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
+      let stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
+      if (url.searchParams.get("next") === "v21") stableHtml = v21LoginHtml(stableHtml);
       send(req, res, 200, stableHtml, { "content-type": "text/html; charset=utf-8" });
       return;
     }
@@ -3718,13 +3796,13 @@ const server = http.createServer(async (req, res) => {
 
       if (url.pathname === "/api/version") {
         const requestedVersion = url.searchParams.get("version");
-        const versionNumber = requestedVersion === "20" ? 20 : requestedVersion === "19" ? 19 : requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
-        const versionPath = versionNumber === 20 ? V20_VERSION_PATH : versionNumber === 19 ? V19_VERSION_PATH : versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
+        const versionNumber = requestedVersion === "21" ? 21 : requestedVersion === "20" ? 20 : requestedVersion === "19" ? 19 : requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
+        const versionPath = versionNumber === 21 ? V21_VERSION_PATH : versionNumber === 20 ? V20_VERSION_PATH : versionNumber === 19 ? V19_VERSION_PATH : versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
         let version = {
           version: versionNumber,
           hash: null,
           releasedAt: null,
-          source: versionNumber === 20 ? "claudever20.html" : versionNumber === 19 ? "claudever19.html" : versionNumber === 16 ? "claudever16.html" : versionNumber === 15 ? "claudever15.html" : versionNumber === 14 ? "claudever14.html" : "claudever13.html",
+          source: versionNumber === 21 ? "claudever21.html" : versionNumber === 20 ? "claudever20.html" : versionNumber === 19 ? "claudever19.html" : versionNumber === 16 ? "claudever16.html" : versionNumber === 15 ? "claudever15.html" : versionNumber === 14 ? "claudever14.html" : "claudever13.html",
         };
         try { version = JSON.parse(fs.readFileSync(versionPath, "utf8")); } catch {}
         sendJson(req, res, 200, {
@@ -3747,9 +3825,21 @@ const server = http.createServer(async (req, res) => {
           ...(versionNumber === 20 ? {
             accessMode: V20_ACCESS_MODE,
             adminOnly: V20_ACCESS_MODE !== "all",
-            main: false,
+            main: MAIN_APP_VERSION === "20",
             route: "/v20",
             aliases: ["/claudever20.html"],
+          } : {}),
+          ...(versionNumber === 21 ? {
+            accessMode: V21_ACCESS_MODE,
+            adminOnly: V21_ACCESS_MODE === "canary",
+            canaryUsers: V21_ACCESS_MODE === "canary" ? V21_CANARY_USERS.size : 0,
+            main: MAIN_APP_VERSION === "21",
+            deployed: true,
+            hosted: true,
+            authenticated: true,
+            route: MAIN_APP_VERSION === "21" ? "/" : "/v21",
+            aliases: MAIN_APP_VERSION === "21" ? ["/v21", "/claudever21.html"] : ["/claudever21.html"],
+            accountNamespace: V21_NAMESPACE_KEY,
           } : {}),
         });
         return;
@@ -3766,6 +3856,9 @@ const server = http.createServer(async (req, res) => {
         v16AccessMode: V16_ACCESS_MODE,
         v19AccessMode: V19_ACCESS_MODE,
         v20AccessMode: V20_ACCESS_MODE,
+        v21AccessMode: V21_ACCESS_MODE,
+        v21CanaryUsers: V21_ACCESS_MODE === "canary" ? V21_CANARY_USERS.size : 0,
+        v21AccountNamespace: V21_NAMESPACE_KEY,
         mainVersion: MAIN_APP_VERSION,
         saveSafetyMode: "mass-deletion-quarantine-v1",
         recoveryUxMode: RECOVERY_UX_MODE,

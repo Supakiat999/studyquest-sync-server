@@ -1,0 +1,29 @@
+{
+  "version": 21,
+  "name": "StudyQuest v21 - Simpler interactions with account sync",
+  "source": "claudever21.html",
+  "route": "/v21",
+  "aliases": [
+    "/claudever21.html"
+  ],
+  "featureLayers": [
+    "v21-account-sync.js",
+    "v21-local-features.js",
+    "v21-manual-courses.js",
+    "v21-v18-features.js",
+    "v21-v19-features.js",
+    "v21-v20-features.js"
+  ],
+  "hash": "a1118eb73db6d76d7b24aa0cce736ff4c6c0796d7e31066effa923d1ebcb9db4",
+  "releasedAt": "2026-09-09T09:53:07.492Z",
+  "localOnly": false,
+  "hosted": true,
+  "deployed": false,
+  "main": false,
+  "authenticated": true,
+  "accessMode": "server-controlled",
+  "baseHash": "24423c25a699cde32b7b640dd97c23944826b85c9ca9435a406e0823edbd9df4",
+  "baseSource": "live-v21-hosted-release/public/claudever20.html",
+  "dataModel": "account-synced-_studyquestV21-namespace-with-existing-revision-protected-sync",
+  "subjectTrack": "account-synced-functional-setting-over-existing-weeklyV20-overlay"
+}
