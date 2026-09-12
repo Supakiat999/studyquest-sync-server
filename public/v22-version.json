@@ -1,0 +1,27 @@
+{
+  "version": 22,
+  "name": "StudyQuest v22 — Hosted Study and Life Workspace",
+  "source": "claudever22.html",
+  "route": "/v22",
+  "aliases": ["/claudever22.html"],
+  "hash": "d78679244708d32950f444cc5b22765e3c6ed3412015fea175684ce11ce32a17",
+  "assets": {
+    "v22-v18-features.js": "b87a678f52bb66ccf37c75cf0e038b73df6dac47fa15d1cd0d00f14e26880e40",
+    "v22-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
+    "v22-v20-features.js": "a2faeffec903ce133a333fab81cd1ae0450cd0636b3f26aa8eade89c54954bad",
+    "v22-local-features.js": "ecece6867a2b9c92adaed0a56646f242c2d67ff0fe2b4526cca6a84376611ad1",
+    "v22-account-sync.js": "1890e7b2d06ab5a7d9d0c26c9f94edeb896adba1d9c5a9ed29dde0761e06c13d",
+    "v22-manual-courses.js": "a1251e07327541aff2f628c98fba259f41dcfca21662a69d1b1e1326f4ad489b",
+    "v22-subtasks.js": "6637f039616d8df30fafc598403b05a350fb783bcadc83304475e8b1013f9caa"
+  },
+  "hosted": true,
+  "localOnly": false,
+  "deployed": true,
+  "authenticated": true,
+  "accessMode": "server-controlled",
+  "main": false,
+  "mainVersionUnchanged": true,
+  "dataModel": "account-synced-_studyquestV21-shared-and-_studyquestV22-subtasks",
+  "stateEndpoint": "/api/v2/state",
+  "createdAt": "2026-09-12T00:00:00.000Z"
+}

@@ -19,7 +19,9 @@
     "import:admin-state": "node scripts/import-admin-state.js",
     "test:recovery:db": "node scripts/test-recovery-db-compatibility.js",
     "test:v21": "node scripts/test-v21-hosted-release.js && node scripts/test-v21-account-store.js",
-    "test:v21:flows": "node scripts/test-v21-hosted-flows.js"
+    "test:v21:flows": "node scripts/test-v21-hosted-flows.js",
+    "test:v22": "node scripts/test-v22-hosted-release.js && node scripts/test-v22-account-store.js",
+    "test:v22:browser": "node scripts/test-v22-browser.js"
   },
   "dependencies": {
     "pg": "^8.13.1"
