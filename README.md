@@ -40,6 +40,43 @@ Current Render service:
 studyquest-sync-server
 ```
 
+### Hosted v22
+
+StudyQuest v22 is a separate authenticated route at `/v22`, with
+`/claudever22.html` retained as its explicit alias. Anonymous requests are
+sent to the normal login flow; device-bound sync credentials cannot open the
+route. The homepage and `/v21` remain unchanged, and `STUDYQUEST_MAIN_VERSION`
+continues to select the existing main app.
+
+The committed rollout switch is fail-closed:
+
+```text
+STUDYQUEST_V22_ACCESS=off|canary|all
+STUDYQUEST_V22_CANARY_USERS=<comma-separated usernames>
+```
+
+`canary` allows `admin` plus the explicit allowlist. `all` allows every
+signed-in account. Rollback is configuration-only: set
+`STUDYQUEST_V22_ACCESS=off`; do not clear browser data or restore the database
+as a routine response.
+
+V22 keeps shared v21 manual courses, quick note, and Subject Track data in
+`_studyquestV21`. Its one-level subtasks are additive in
+`_studyquestV22.subtasks` and use the existing revision-protected
+`/api/v2/state` endpoint. The server preserves `_studyquestV22` when an older
+client omits it, and the state manifest/recovery comparison includes subtask
+occurrences, checklists, and recoverable trash. Device recovery/outbox data is
+written before upload; “Saved to your account” is shown only after the server
+acknowledges the revision.
+
+The admin-only **Review laptop v22 additions** panel accepts a laptop recovery
+export for a read-only preview. Applying it requires explicit confirmation and
+an additional verified backup; it adds only non-conflicting courses/subtask
+trees, keeps the account copy on conflicts, and never deletes the laptop file.
+
+The hosted metadata is available at `/v22-version.json` and
+`/api/version?version=22`.
+
 Deployment behavior:
 
 - Render shows this web service as `Node Free`.
