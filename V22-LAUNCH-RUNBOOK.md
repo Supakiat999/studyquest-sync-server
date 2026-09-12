@@ -13,7 +13,7 @@ the homepage or `/v21`. Stop at the first failed gate.
 | Main selector | `STUDYQUEST_MAIN_VERSION=15` remains unchanged |
 | Release hash | `d78679244708d32950f444cc5b22765e3c6ed3412015fea175684ce11ce32a17` |
 | Local release backup | `backups/public-v22-rollout-20260912144936` in the parent workspace |
-| Database backups | Record both verified encrypted backup identifiers here before canary |
+| Database backups | `studyquest-2026-09-12T02-38-18-735Z.sqbackup` and `studyquest-2026-09-12T09-27-13-632Z.sqbackup`; both validated with 3 accounts and checksum/decryption readback |
 
 ## Data model and save behavior
 

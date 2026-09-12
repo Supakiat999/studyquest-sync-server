@@ -16,7 +16,7 @@
   },
   "hosted": true,
   "localOnly": false,
-  "deployed": false,
+  "deployed": true,
   "authenticated": true,
   "accessMode": "server-controlled",
   "main": false,
