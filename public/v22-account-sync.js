@@ -21,6 +21,16 @@
   const TEXT_DEBOUNCE_MS = 500;
   const VIEWS = ['week', 'subject', 'manual'];
 
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[character]));
+  }
+
   const clone = value => JSON.parse(JSON.stringify(value));
   const text = value => (typeof value === 'string' ? value : '');
   const stamp = value => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0);
