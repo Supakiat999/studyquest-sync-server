@@ -21,6 +21,10 @@ let html = base.replaceAll('/v21-', '/v24-').replaceAll('claudever21.html','clau
 html = html.replaceAll('/app.html?next=v20', '/app.html?next=v24').replaceAll('/app.html?next=v21', '/app.html?next=v24').replaceAll('/api/version?version=20', '/api/version?version=24').replaceAll('/api/version?version=21', '/api/version?version=24').replaceAll('/api/version?version=22', '/api/version?version=24');
 html = once(html, 'if (liveSync.pending || getLiveSyncMeta().pending) queueLiveCloudSave();', 'if (liveSync.pending || getLiveSyncMeta().pending || v13DurableOutboxPending || pendingCloudMutation) queueLiveCloudSave();');
 const localPage = read(path.join(laptop, 'claudever24.html'));
+const initialSubtaskHelperStart = localPage.indexOf('function resetTaskInitialSubtaskField(');
+const initialSubtaskHelper = localPage.slice(initialSubtaskHelperStart,localPage.indexOf('\n}',initialSubtaskHelperStart)+2);
+if (!initialSubtaskHelper.startsWith('function resetTaskInitialSubtaskField(')) throw new Error('Missing task editor helper');
+html = once(html,'function openCreateTask(dateStr) {',initialSubtaskHelper+'\n\nfunction openCreateTask(dateStr) {');
 const inlineTitles = localPage.slice(localPage.indexOf('let v23InlineTaskTitleSession'), localPage.indexOf('function renderTaskInlineControls'));
 if (!inlineTitles.startsWith('let v23InlineTaskTitleSession')) throw new Error('Missing reviewed inline task-title controls');
 html = once(html, 'function renderTaskInlineControls', inlineTitles.replaceAll('v23','v24').replaceAll('V23','V24') + 'function renderTaskInlineControls');
@@ -74,6 +78,26 @@ for (const file of ['v18-features.js', 'v19-features.js', 'v20-features.js', 'lo
   layers['v24-' + suffix] = read(path.join(pub, 'v22-' + suffix));
 }
 layers['v24-local-features.js'] = layers['v24-local-features.js'].replaceAll('Laptop v21','StudyQuest v24').replaceAll('Your existing admin connection','Your signed-in account').replaceAll('Reviewed copy saved on this laptop.','Reviewed copy saved on this device.').replaceAll('Export laptop copies','Export device copies');
+let taskLayer = layers['v24-v18-features.js'];
+const taskSaveStart = taskLayer.indexOf('  function saveTask() {');
+const taskSaveEnd = taskLayer.indexOf('\n  function openCreateTask(',taskSaveStart);
+let taskSave = taskLayer.slice(taskSaveStart,taskSaveEnd).replace('function saveTask()', 'async function saveTask()').replaceAll('StudyQuestV22Subtasks','StudyQuestV24Subtasks');
+taskSave = once(taskSave, "    const duration = readDuration();", `    const subtaskMinutesRaw = String(document.getElementById('taskInitialSubtaskMinutes')?.value || '').trim();
+    const subtaskMinutes = subtaskMinutesRaw === '' ? null : Number(subtaskMinutesRaw);
+    if (subtaskMinutes !== null && (!initialSubtaskTitle || !Number.isSafeInteger(subtaskMinutes) || subtaskMinutes < 1 || subtaskMinutes > 1440)) {
+      call('showToast','Add a subtask title and a whole duration from 1 to 1440 minutes.','#f76a6a'); return;
+    }
+    const duration = readDuration();`);
+taskSave = once(taskSave, "    call('saveState');", `    setEditingTaskId(subtaskParentTask?.id || existingId);
+    try { await root.studyQuestV21Core.save(); }
+    catch(error) { call('showToast','Task save needs attention. Your entered values are kept.','#f76a6a'); return; }
+    if (initialSubtaskTitle && subtaskParentTask) {
+      const added = await root.StudyQuestV24Subtasks.addFromTaskEditor(subtaskParentTask,initialSubtaskTitle,subtaskMinutes);
+      if (!added) { call('showToast','Task is kept. The first subtask needs attention; its entered values are kept.','#f76a6a'); return; }
+    }`);
+// The new awaited commit above replaces the inherited v22 fire-and-forget hook.
+taskSave = taskSave.slice(0,taskSave.indexOf("    if (initialSubtaskTitle && subtaskParentTask) {",taskSave.indexOf("    restoreAgendaContext(context);"))) + '  }\n';
+layers['v24-v18-features.js'] = taskLayer.slice(0,taskSaveStart)+taskSave+taskLayer.slice(taskSaveEnd);
 for (const file of ['interface.js', 'interface.css', 'subtasks.js']) {
   layers['v24-' + file] = read(path.join(laptop, 'v23-' + file)).replaceAll('v23', 'v24').replaceAll('V23', 'V24');
 }

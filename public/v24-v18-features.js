@@ -910,12 +910,17 @@
     return document.getElementById('v16EditScope')?.value || 'occurrence';
   }
 
-  function saveTask() {
+  async function saveTask() {
     setUserInteracted();
     const current = getState();
     const title = document.getElementById('taskName')?.value?.trim() || '';
     if (!title) { call('showToast', '❗ Please enter a task name!', '#f76a6a'); return; }
     const initialSubtaskTitle = String(document.getElementById('taskInitialSubtask')?.value || '').trim().slice(0, 240);
+    const subtaskMinutesRaw = String(document.getElementById('taskInitialSubtaskMinutes')?.value || '').trim();
+    const subtaskMinutes = subtaskMinutesRaw === '' ? null : Number(subtaskMinutesRaw);
+    if (subtaskMinutes !== null && (!initialSubtaskTitle || !Number.isSafeInteger(subtaskMinutes) || subtaskMinutes < 1 || subtaskMinutes > 1440)) {
+      call('showToast','Add a subtask title and a whole duration from 1 to 1440 minutes.','#f76a6a'); return;
+    }
     const duration = readDuration();
     if (duration.error) { call('showToast', `❗ ${duration.error}`, '#f76a6a'); return; }
     const existingId = getEditingTaskId();
@@ -988,19 +993,17 @@
     if (existing) subtaskParentTask = existing;
 
     current.updatedAt = Date.now();
-    call('saveState');
+    setEditingTaskId(subtaskParentTask?.id || existingId);
+    try { await root.studyQuestV21Core.save(); }
+    catch(error) { call('showToast','Task save needs attention. Your entered values are kept.','#f76a6a'); return; }
+    if (initialSubtaskTitle && subtaskParentTask) {
+      const added = await root.StudyQuestV24Subtasks.addFromTaskEditor(subtaskParentTask,initialSubtaskTitle,subtaskMinutes);
+      if (!added) { call('showToast','Task is kept. The first subtask needs attention; its entered values are kept.','#f76a6a'); return; }
+    }
     call('closeModal', 'taskModal');
     setEditingTaskId(null);
     call('renderAll');
     restoreAgendaContext(context);
-    if (initialSubtaskTitle && subtaskParentTask) {
-      const addFromTaskEditor = root.StudyQuestV22Subtasks?.addFromTaskEditor;
-      if (typeof addFromTaskEditor === 'function') {
-        void addFromTaskEditor(subtaskParentTask, initialSubtaskTitle);
-      } else {
-        call('showToast', '⚠️ Task saved, but laptop subtask storage is still opening. Edit the task again after it finishes loading.', '#f76a6a');
-      }
-    }
   }
 
   function openCreateTask(dateStr) {

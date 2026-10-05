@@ -75,6 +75,16 @@ async function main() {
   assert.equal(dates.find(t=>t.id==='recurring-a').date,'2026-10-02');
   assert.equal(dates.find(t=>t.id==='recurring-b').date,'2026-10-08');
   assert.equal(dates.find(t=>t.id==='recurring-a').recurrenceId,'series');
+  await page.getByRole('button',{name:'+ New Task',exact:true}).click();
+  await page.locator('#taskModal.open').waitFor();
+  await page.locator('#taskName').fill('QA editor-created task');
+  await page.locator('#taskInitialSubtask').fill('QA first subtask');
+  await page.locator('#taskInitialSubtaskMinutes').fill('15');
+  await page.locator('#taskModal button[onclick="saveTask()"] ').click();
+  await page.waitForTimeout(2500);
+  const editorSaved=(await request('/api/v2/state',{},cookie)).body;
+  assert.ok(editorSaved.state.tasks.some(t=>t.title==='QA editor-created task'));
+  assert.ok(JSON.stringify(editorSaved.state._studyquestSubtasks || {}).includes('QA first subtask'),JSON.stringify(await page.evaluate(()=>({record:window.StudyQuestV24Subtasks.getRecord(),status:window.StudyQuestV24SubtaskStore.getStatus(),sync:window.studyQuestV21Core.hostedSync(),toasts:document.querySelector('#toastContainer').textContent}))));
   assert.equal(await page.evaluate(()=>window.StudyQuestDeviceDateShifts.moveByDay('seed-a',1).then(r=>r.ok)),true);
   await page.waitForTimeout(1800);
   let account=(await request('/api/v2/state',{},cookie)).body;

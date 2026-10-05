@@ -12676,6 +12676,19 @@ function movePriority(dateStr, taskId, dir) {
 // ════════════════════════════════════════════════════════
 // TASKS CRUD
 // ════════════════════════════════════════════════════════
+function resetTaskInitialSubtaskField(isEditing = false) {
+  const input = document.getElementById('taskInitialSubtask');
+  const durationInput = document.getElementById('taskInitialSubtaskMinutes');
+  const label = document.getElementById('taskInitialSubtaskLabel');
+  const hint = document.getElementById('taskInitialSubtaskHint');
+  if (input) input.value = '';
+  if (durationInput) durationInput.value = '';
+  if (label) label.textContent = isEditing ? 'Add subtask (optional)' : 'First subtask (optional)';
+  if (hint) hint.textContent = isEditing
+    ? 'Add another subtask while saving this task. Existing subtasks and checkmarks stay unchanged.'
+    : 'Save one subtask with this task. The subtask box appears after the first subtask is saved.';
+}
+
 function openCreateTask(dateStr) {
   editingTaskId = null;
   document.getElementById('modalTitle').textContent = 'New Task';

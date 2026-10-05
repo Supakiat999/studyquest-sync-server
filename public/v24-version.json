@@ -6,9 +6,9 @@
   "aliases": [
     "/claudever24.html"
   ],
-  "hash": "fa51f8ed99b07b2c05ba527f88975215476462a4339d79adf2a3e687006535e4",
+  "hash": "c71f68c7fd12a3c9cd6f3b3e637b20cb365751d2cd38e3c4d6021c1ee8928ee5",
   "assets": {
-    "v24-v18-features.js": "b87a678f52bb66ccf37c75cf0e038b73df6dac47fa15d1cd0d00f14e26880e40",
+    "v24-v18-features.js": "c37cefbe493099e2dabdc9b6ff7890d3fda46efdee5abcedcf9d61fb16e5a407",
     "v24-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
     "v24-v20-features.js": "a2faeffec903ce133a333fab81cd1ae0450cd0636b3f26aa8eade89c54954bad",
     "v24-local-features.js": "08b446b3f276ce9bc4b6a88a37ce5b56a37d428fd9a8a3ba7b1e27dce11e9a79",
@@ -29,5 +29,5 @@
   "accessMode": "server-controlled",
   "baseHash": "a1118eb73db6d76d7b24aa0cce736ff4c6c0796d7e31066effa923d1ebcb9db4",
   "dataModel": "existing-account-state-with-preserved-subtask-namespaces",
-  "releasedAt": "2026-10-05T11:25:32.456Z"
+  "releasedAt": "2026-10-05T11:46:52.415Z"
 }
