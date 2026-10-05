@@ -155,7 +155,7 @@ for (const marker of [
   'route: "/v20"',
   'aliases: ["/claudever20.html"]',
   'mainVersion: MAIN_APP_VERSION',
-  'return ["15", "19", "21"].includes(configured) ? configured : "15"',
+  'return ["15", "19", "21", "24"].includes(configured) ? configured : "15"',
   'where username = $1 for update',
   'preserveV20Overlay(row.state, incomingState)',
   'STATE_TOO_LARGE_AFTER_V20_OVERLAY_PRESERVATION',

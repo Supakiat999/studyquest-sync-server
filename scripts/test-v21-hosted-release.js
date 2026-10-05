@@ -128,7 +128,7 @@ for (const marker of [
   'String(process.env.STUDYQUEST_V21_ACCESS || "off")',
   '["off", "canary", "all"].includes(configured) ? configured : "off"',
   'String(process.env.STUDYQUEST_V21_CANARY_USERS || "")',
-  'return ["15", "19", "21"].includes(configured) ? configured : "15"',
+  'return ["15", "19", "21", "24"].includes(configured) ? configured : "15"',
   'url.pathname === "/v21" || url.pathname === "/claudever21.html"',
   'MAIN_APP_VERSION === "21" && canAccessV21(user)',
   'window.__STUDYQUEST_V21_HOSTED__=true',

@@ -1,0 +1,180 @@
+/* v24-only inline date stepper. The route injector loads this file only for
+   claudever24.html; arrows save canonical dates through normal persistence. */
+.task-actions > .v16-skip-occurrence { display: none; }
+
+.task-inline-controls.sq-date-shift-inline-host {
+  align-items: stretch;
+  justify-content: flex-start;
+  flex-direction: column;
+  gap: 3px;
+  flex-basis: auto;
+  min-width: 0;
+  /* Keep the original task-title-row flex sizing. The injected wrapper must
+     not make the task card wider through an explicit intrinsic width. */
+  width: auto;
+  max-width: 100%;
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+
+.sq-date-shift-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: flex-end;
+  gap: 6px;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.sq-date-shift-inline-row {
+  display: grid;
+  /* These slots mirror the frozen main-row controls: the 74px duration
+     cluster and the 24px completion tickmark. */
+  grid-template-columns: 74px minmax(0, 1fr) 24px;
+  align-items: center;
+  align-self: flex-end;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  gap: 3px;
+  margin-top: 0;
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 3;
+  font-family: 'Space Mono', monospace;
+}
+
+.sq-date-shift-inline-row > .sq-date-shift-inline-prev,
+.sq-date-shift-inline-row > .sq-date-shift-inline-next {
+  justify-self: center;
+}
+
+.sq-date-shift-btn {
+  box-sizing: border-box;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid rgba(124, 106, 247, 0.42);
+  border-radius: 50%;
+  background: rgba(124, 106, 247, 0.10);
+  color: var(--text, #e8eaf6);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font: 800 15px/1 'Space Mono', monospace;
+  white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
+  touch-action: manipulation;
+}
+
+.sq-date-shift-btn:hover:not(:disabled) {
+  background: rgba(124, 106, 247, 0.24);
+  border-color: var(--accent, #7c6af7);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.sq-date-shift-btn:focus-visible {
+  outline: 2px solid rgba(106, 247, 224, 0.92);
+  outline-offset: 2px;
+}
+
+.sq-date-shift-btn:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.sq-date-shift-label {
+  display: block;
+  line-height: 1;
+}
+
+.sq-date-shift-summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-dim, #b8bfd6);
+  text-align: center;
+  font: 800 9px/1.1 'Space Mono', monospace;
+  white-space: nowrap;
+  transform: translateX(-12.5px);
+}
+
+.sq-date-shift-summary-adjusted {
+  color: #fff;
+}
+
+.sq-date-shift-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sq-date-shift-reset {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-color: rgba(212, 175, 55, 0.56);
+  background: rgba(212, 175, 55, 0.11);
+  color: var(--gold, #d4af37);
+  font-size: 13px;
+}
+
+.sq-date-shift-reset:hover:not(:disabled) {
+  background: rgba(212, 175, 55, 0.22);
+  border-color: var(--gold, #d4af37);
+  color: #fff4c9;
+}
+
+.sq-device-date-note {
+  border-left: 3px solid rgba(106, 247, 224, 0.56);
+  padding-left: 8px;
+  color: #6af7e0;
+}
+
+@media (max-width: 800px) {
+  .task-inline-controls.sq-date-shift-inline-host {
+    gap: 3px;
+    width: auto;
+    flex-basis: auto;
+  }
+
+  .sq-date-shift-inline-row {
+    /* The original control cluster wraps below the title on narrow cards.
+       Keep the date row in that flow so it cannot cover task metadata. */
+    position: static;
+    align-self: stretch;
+    gap: 2px;
+  }
+
+  .sq-date-shift-summary {
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .sq-date-shift-summary {
+    font-size: 7px;
+  }
+
+  .sq-date-shift-reset {
+    width: 23px;
+    min-width: 23px;
+    height: 23px;
+    min-height: 23px;
+  }
+}

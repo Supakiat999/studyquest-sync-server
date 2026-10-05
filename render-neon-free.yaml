@@ -41,6 +41,10 @@ services:
         sync: false
       - key: STUDYQUEST_RECOVERY_UX
         value: "off"
+      - key: STUDYQUEST_V24_ACCESS
+        value: "off"
+      - key: STUDYQUEST_V24_CANARY_USERS
+        sync: false
       - key: STUDYQUEST_MAIN_VERSION
         value: "15"
       - key: STUDYQUEST_SAFE_SYNC_MODE

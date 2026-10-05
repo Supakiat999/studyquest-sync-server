@@ -21,7 +21,7 @@ assert.match(server, /requestedVersion === "22"/);
 assert.match(server, /v22AccessMode/);
 assert.match(server, /location: "\/app\.html\?next=v22"/);
 assert.match(server, /MAIN_APP_VERSION === "21"/);
-assert.match(server, /return \["15", "19", "21"\]\.includes/);
+assert.match(server, /return \["15", "19", "21", "24"\]\.includes/);
 
 const html = read('public/claudever22.html');
 assert.doesNotMatch(html, /location\.replace\(['"]http:\/\/127\.0\.0\.1:3000/);

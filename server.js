@@ -46,6 +46,10 @@ const V21_HTML_PATH = path.join(ROOT, "public", "claudever21.html");
 const V21_VERSION_PATH = path.join(ROOT, "public", "v21-version.json");
 const V22_HTML_PATH = path.join(ROOT, "public", "claudever22.html");
 const V22_VERSION_PATH = path.join(ROOT, "public", "v22-version.json");
+const V24_HTML_PATH = path.join(ROOT, "public", "claudever24.html");
+const V24_VERSION_PATH = path.join(ROOT, "public", "v24-version.json");
+const V24_MANIFEST = JSON.parse(fs.readFileSync(V24_VERSION_PATH, "utf8"));
+const V24_ASSETS = new Set(Object.keys(V24_MANIFEST.assets).map(name => "/" + name));
 const V18_ADMIN_COURSE_CRITERIA = require("./lib/v18-admin-course-criteria");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
@@ -98,9 +102,15 @@ const RECOVERY_UX_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_RECOVERY_UX || "off").trim().toLowerCase();
   return ["off", "admin", "all"].includes(configured) ? configured : "off";
 })();
+const V24_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V24_ACCESS || "off").trim().toLowerCase();
+  return ["off", "canary", "all"].includes(configured) ? configured : "off";
+})();
+const V24_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V24_CANARY_USERS || "")
+  .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
 const MAIN_APP_VERSION = (() => {
   const configured = String(process.env.STUDYQUEST_MAIN_VERSION || "15").trim();
-  return ["15", "19", "21"].includes(configured) ? configured : "15";
+  return ["15", "19", "21", "24"].includes(configured) ? configured : "15";
 })();
 const SAFE_SYNC_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_SAFE_SYNC_MODE || "off").trim().toLowerCase();
@@ -368,6 +378,24 @@ function canAccessV22(user) {
   if (!user || user.sync_device_id || V22_ACCESS_MODE === "off") return false;
   if (V22_ACCESS_MODE === "all") return true;
   return user.username === ADMIN_USERNAME || V22_CANARY_USERS.has(String(user.username || "").toLowerCase());
+}
+
+function canAccessV24(user) {
+  if (!user || user.sync_device_id || V24_ACCESS_MODE === "off") return false;
+  return V24_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME
+    || V24_CANARY_USERS.has(String(user.username || "").toLowerCase());
+}
+
+function authenticatedV24Html(user) {
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({username:user.username})};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};window.__STUDYQUEST_V20_HOSTED__=true;window.__STUDYQUEST_V21_HOSTED__=true;window.__STUDYQUEST_V24_HOSTED__=true;</script>`;
+  return htmlTemplate(V24_HTML_PATH).replace("</head>", bootstrap + "\n</head>");
+}
+
+function v24LoginHtml(value, returnToDefault = false) {
+  const anchor = '      const wantsStable = search.get("stable") === "1";';
+  if (!String(value).includes(anchor)) throw new Error("Missing v24 login return anchor");
+  return String(value).replace(anchor, anchor + '\n      if (!user.legacy && !wantsStable && next === "v24") { window.location.replace("/v24"); return; }'
+    + (returnToDefault ? '\n      if (!user.legacy && !wantsStable && !next) { window.location.replace("/"); return; }' : ''));
 }
 
 function canUseRecoveryUxV2(user) {
@@ -2357,13 +2385,16 @@ async function handleVersionedState(req, res) {
     const protectedV20Overlay = preserveV20Overlay(row.state, incomingState);
     const protectedV21Namespace = preserveV21Namespace(row.state, protectedV20Overlay.state);
     const protectedV22Namespace = preserveV22Namespace(row.state, protectedV21Namespace.state);
+    // Older clients omit newer namespaces; keep those records byte-for-byte.
+    const protectedV24Namespaces = require("./lib/v24-safety").preserveSubtaskNamespaces(row.state, protectedV22Namespace.state);
     if (protectedV20Overlay.preserved || protectedV21Namespace.preserved) {
       incomingState = protectedV21Namespace.state;
     }
     if (protectedV22Namespace.preserved) {
       incomingState = protectedV22Namespace.state;
     }
-    if (protectedV20Overlay.preserved || protectedV21Namespace.preserved || protectedV22Namespace.preserved) {
+    if (protectedV24Namespaces.preserved) incomingState = protectedV24Namespaces.state;
+    if (protectedV20Overlay.preserved || protectedV21Namespace.preserved || protectedV22Namespace.preserved || protectedV24Namespaces.preserved) {
       incomingVersion = serializeStateVersion(incomingState);
       incomingManifest = stateManifest(incomingState);
       stateBytes = incomingVersion.stateBytes;
@@ -3572,6 +3603,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (["/v24", "/claudever24.html", "/v24-version.json"].includes(url.pathname) || V24_ASSETS.has(url.pathname)) {
+      if (V24_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
+      const user = await currentUser(req, { includeState:false });
+      if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=v24" }); return; }
+      if (!canAccessV24(user)) { send(req, res, 403, "v24 is not enabled for this account"); return; }
+      if (url.pathname === "/v24" || url.pathname === "/claudever24.html") {
+        send(req, res, 200, authenticatedV24Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
+      } else if (url.pathname === "/v24-version.json") {
+        sendJson(req, res, 200, { ...V24_MANIFEST, deployed:true, main:MAIN_APP_VERSION === "24", accessMode:V24_ACCESS_MODE });
+      } else {
+        send(req, res, 200, fs.readFileSync(path.join(ROOT, "public", url.pathname.slice(1))), { "content-type":url.pathname.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8", "cache-control":"no-cache" });
+      }
+      return;
+    }
+
     if (url.pathname === "/") {
       const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
@@ -3580,6 +3626,10 @@ const server = http.createServer(async (req, res) => {
       }
       // Falls through to the previous default whenever v21 is not reachable for
       // this account, so a paused rollout never leaves anyone without an app.
+      if (MAIN_APP_VERSION === "24" && canAccessV24(user)) {
+        send(req, res, 200, authenticatedV24Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
+        return;
+      }
       if (MAIN_APP_VERSION === "21" && canAccessV21(user)) {
         send(req, res, 200, authenticatedV21Html(user), { "content-type": "text/html; charset=utf-8" });
         return;
@@ -3709,6 +3759,7 @@ const server = http.createServer(async (req, res) => {
       let stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
       if (url.searchParams.get("next") === "v21") stableHtml = v21LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v22") stableHtml = v22LoginHtml(stableHtml);
+      if (url.searchParams.get("next") === "v24" || (MAIN_APP_VERSION === "24" && !url.searchParams.get("next"))) stableHtml = v24LoginHtml(stableHtml, MAIN_APP_VERSION === "24");
       send(req, res, 200, stableHtml, { "content-type": "text/html; charset=utf-8" });
       return;
     }
@@ -3904,6 +3955,10 @@ const server = http.createServer(async (req, res) => {
 
       if (url.pathname === "/api/version") {
         const requestedVersion = url.searchParams.get("version");
+        if (requestedVersion === "24") {
+          sendJson(req, res, 200, { ok:true, ...V24_MANIFEST, deployed:true, main:MAIN_APP_VERSION === "24", route:MAIN_APP_VERSION === "24" ? "/" : "/v24", accessMode:V24_ACCESS_MODE });
+          return;
+        }
         const versionNumber = requestedVersion === "22" ? 22 : requestedVersion === "21" ? 21 : requestedVersion === "20" ? 20 : requestedVersion === "19" ? 19 : requestedVersion === "16" ? 16 : requestedVersion === "15" ? 15 : requestedVersion === "14" ? 14 : 13;
         const versionPath = versionNumber === 22 ? V22_VERSION_PATH : versionNumber === 21 ? V21_VERSION_PATH : versionNumber === 20 ? V20_VERSION_PATH : versionNumber === 19 ? V19_VERSION_PATH : versionNumber === 16 ? V16_VERSION_PATH : versionNumber === 15 ? V15_VERSION_PATH : versionNumber === 14 ? V14_VERSION_PATH : V13_VERSION_PATH;
         let version = {
@@ -3983,6 +4038,10 @@ const server = http.createServer(async (req, res) => {
         v22AccessMode: V22_ACCESS_MODE,
         v22CanaryUsers: V22_ACCESS_MODE === "canary" ? V22_CANARY_USERS.size : 0,
         v22AccountNamespace: V22_NAMESPACE_KEY,
+        v24AccessMode: V24_ACCESS_MODE,
+        v24CanaryUsers: V24_ACCESS_MODE === "canary" ? V24_CANARY_USERS.size : 0,
+        v24Hash: V24_MANIFEST.hash,
+        releaseCommit: process.env.RENDER_GIT_COMMIT || null,
         mainVersion: MAIN_APP_VERSION,
         saveSafetyMode: "mass-deletion-quarantine-v1",
         recoveryUxMode: RECOVERY_UX_MODE,
