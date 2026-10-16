@@ -50,7 +50,7 @@ const baseState = () => ({
 // ── synthetic account server ─────────────────────────────────────────────
 function createAccountServer() {
   const account = { state: baseState(), revision: 1, hash: stateHash(baseState()), acknowledged: [] };
-  const control = { offline: false, sessionExpired: false, failNextSave: 0, requests: [] };
+  const control = { offline: false, sessionExpired: false, malformedMeta: false, failNextSave: 0, requests: [] };
 
   const json = (res, body, status = 200) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -100,7 +100,14 @@ function createAccountServer() {
     if (url.pathname === '/api/health') return json(res, { ok: true, db: 'postgres', serverTime: new Date().toISOString() });
     if (url.pathname === '/api/heartbeat') return json(res, { ok: true, serverTime: new Date().toISOString() });
     if (url.pathname === '/api/v2/state/meta') {
-      return json(res, { ok: true, revision: account.revision, stateHash: account.hash, updatedAt: new Date().toISOString() });
+      if (control.delayMetadata) {
+        const snapshot={ok:true,revision:account.revision,stateHash:account.hash,integrity:{status:'ok'}};
+        control.releaseMetadata=()=>{control.delayMetadata=false;control.releaseMetadata=null;json(res,snapshot);};
+        return;
+      }
+      return json(res, control.malformedMeta
+        ? { ok:true, revision:account.revision, stateHash:account.hash }
+        : { ok:true, revision:account.revision, stateHash:account.hash, integrity:{status:'ok'}, updatedAt:new Date().toISOString() });
     }
     // The real hosted server has no laptop-bridge endpoints. Answering them
     // would make the page believe a laptop admin bridge exists and open an
@@ -231,7 +238,11 @@ async function run(browserName) {
   const { server, account, control } = createAccountServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
-  const browser = await playwright[browserName].launch({ headless: true });
+  const browser = await playwright[browserName].launch({
+    headless:true,
+    ...(browserName === 'chromium' && process.env.STUDYQUEST_TEST_CHROME
+      ? { executablePath:process.env.STUDYQUEST_TEST_CHROME } : {}),
+  });
   const results = [];
 
   try {
@@ -245,6 +256,56 @@ async function run(browserName) {
     assert.equal(page.url().startsWith(TEST_ORIGIN), true, 'the page must stay on the hosted origin');
     assert.equal(page.url().includes('127.0.0.1'), false, 'the hosted page must not navigate to the laptop server');
     results.push('hosted bootstrap');
+
+    const unchangedStart = control.requests.length;
+    const unchangedResult = await page.evaluate(() => runLiveSyncCycle({ reason:'scheduled' }));
+    const unchangedRequests = control.requests.slice(unchangedStart);
+    assert.equal(unchangedResult?.metadataOnly,true,'unchanged routine sync should use only metadata');
+    assert.equal(unchangedRequests.filter(entry => entry.path === '/api/v2/state/meta').length,1);
+    assert.equal(unchangedRequests.filter(entry => entry.path === '/api/v2/state' && entry.method === 'GET').length,0);
+    control.malformedMeta = true;
+    const malformedStart = control.requests.length;
+    await page.evaluate(() => runLiveSyncCycle({ reason:'scheduled' }));
+    const malformedRequests = control.requests.slice(malformedStart);
+    assert.ok(malformedRequests.some(entry => entry.path === '/api/v2/state' && entry.method === 'GET'),'malformed metadata must fall back to a full safety check');
+    control.malformedMeta = false;
+    results.push('unchanged metadata-only check and malformed-response fallback');
+
+    await page.evaluate(()=>{
+      window.__originalSyntheticPersist=persistV13DeviceState;
+      window.__syntheticDeviceWriteBlocked=false;window.__metadataRaceDone=false;
+      const gate=new Promise(resolve=>{window.__releaseSyntheticDeviceWrite=resolve;});
+      persistV13DeviceState=async(...args)=>{
+        if(args[1]?.pending){window.__syntheticDeviceWriteBlocked=true;await gate;}
+        return window.__originalSyntheticPersist(...args);
+      };
+    });
+    control.delayMetadata=true;
+    const raceStart=control.requests.length;
+    await page.evaluate(()=>{window.__metadataRaceCycle=runLiveSyncCycle({reason:'scheduled'});});
+    for(let i=0;i<50 && !control.releaseMetadata;i++)await settle(page,20);
+    assert.ok(control.releaseMetadata,'Metadata must be waiting before the edit');
+    // Hosted date shifts await durable storage. Start the edit without awaiting
+    // its result so this test can release its deliberately blocked write.
+    await page.evaluate(()=>{window.__metadataRaceEdit=Promise.resolve(window.StudyQuestDeviceDateShifts.moveByDay('seed-a',1));});
+    const raceDate=await page.evaluate(()=>state.tasks.find(task=>task.id==='seed-a').date);
+    await page.waitForFunction(()=>window.__syntheticDeviceWriteBlocked);
+    control.releaseMetadata();
+    await page.evaluate(()=>{window.__metadataRaceCycle.then(()=>{window.__metadataRaceDone=true;});});
+    for(let i=0;i<100 && !control.requests.slice(raceStart).some(entry=>entry.path==='/api/v2/state'&&entry.method==='GET');i++)await settle(page,20);
+    assert.ok(control.requests.slice(raceStart).some(entry=>entry.path==='/api/v2/state'&&entry.method==='GET'));
+    await settle(page,100);
+    assert.equal(await page.evaluate(()=>window.__metadataRaceDone),false,'Hosted reconciliation must wait for the unfinished durable edit');
+    assert.equal(await page.evaluate(()=>!!liveSync.conflict),false,'An unfinished hosted write must not cause a false conflict');
+    await page.evaluate(()=>{persistV13DeviceState=window.__originalSyntheticPersist;window.__releaseSyntheticDeviceWrite();});
+    const raceEdit=await page.evaluate(()=>window.__metadataRaceEdit);
+    assert.equal(raceEdit.ok,true,'Mid-request edit must be durably saved after releasing the write');
+    const raceResult=await page.evaluate(()=>window.__metadataRaceCycle);
+    assert.notEqual(raceResult?.metadataOnly,true,'Mid-request edit must invalidate the metadata shortcut');
+    await page.waitForFunction(()=>!window.studyQuestV21Core.hostedSync().pending,null,{timeout:20000});
+    assert.equal(account.state.tasks.find(task=>task.id==='seed-a').date,raceDate,'Mid-request edit must reach cloud');
+    assert.ok(control.requests.slice(raceStart).some(entry=>entry.path==='/api/v2/state' && entry.method==='GET'));
+    results.push('edit during metadata request waits for durable outbox, then full sync saves');
 
     // Sync equality must see namespace-only changes, not just legacy tasks.
     const equalityChecks = await page.evaluate(() => {
@@ -396,7 +457,7 @@ async function run(browserName) {
         serverCourses:account.state._studyquestV21?.manual?.courses?.map(c=>c.name),
         device:await page.evaluate(async () => {
           const core=window.studyQuestV21Core, copies=await core.snapshots({allowPartial:true});
-          return {sync:core.hostedSync(),status:core.getStatus(),reason:core.getPreview()?.reason,
+          return {sync:core.hostedSync(),status:core.getStatus(),reason:core.getPreview()?.reason,inFlight:liveSync.inFlight,drain:!!v13DurableSaveDrainPromise,queued:!!v13DurableSaveQueued,matches:v24CloudCopiesMatch(state,copies.device?.outbox?.state),diffKeys:[...new Set([...Object.keys(state),...Object.keys(copies.device?.outbox?.state || {})])].filter(k=>stableCloudStringify(state[k])!==stableCloudStringify(copies.device?.outbox?.state?.[k])),
             courses:core.getState()._studyquestV21?.manual?.courses?.map(c=>c.name),
             outbox:copies.device?.outbox ? {username:copies.device.outbox.username,
               updatedAt:copies.device.outbox.updatedAt,lineage:copies.device.outbox.lineage} : null,
@@ -447,6 +508,56 @@ async function run(browserName) {
     // 13. another account's data must be untouched by any of this.
     assert.equal(control.requests.some(entry => entry.path.includes('/api/v2/state/') && entry.path.includes('other')), false, 'no request may reach another account');
     results.push('account isolation');
+
+    const hiddenStart = control.requests.length;
+    await page.evaluate(() => {
+      Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});
+      document.dispatchEvent(new Event('visibilitychange'));
+      scheduleNextLiveSync({reset:true});
+      retryPendingServerSync();
+    });
+    await settle(page,300);
+    assert.equal(control.requests.slice(hiddenStart).filter(entry => ['/api/v2/state','/api/v2/state/meta'].includes(entry.path)).length,0,'hidden idle tab must not poll Neon');
+    const resumeStart = control.requests.length;
+    await page.evaluate(() => {
+      Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    await settle(page,500);
+    const resumeRequests = control.requests.slice(resumeStart);
+    assert.equal(resumeRequests.filter(entry => entry.path === '/api/v2/state/meta').length,1,'focus and visibility must produce one resume check');
+    assert.equal(resumeRequests.filter(entry => entry.path === '/api/v2/state' && entry.method === 'GET').length,0);
+    results.push('hidden idle pause and single visible resume');
+
+    await page.evaluate(() => {
+      Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const pendingStart = control.requests.length;
+    const pendingRevision = account.revision;
+    const hiddenEdit = await page.evaluate(() => window.StudyQuestDeviceDateShifts.moveByDay('seed-a',1));
+    assert.equal(hiddenEdit.ok,true,'a pending edit must be accepted into durable storage');
+    await settle(page,1800);
+    assert.ok(control.requests.slice(pendingStart).some(entry => entry.path === '/api/v2/state' && entry.method === 'POST'),'hidden pending work must still upload');
+    assert.ok(account.revision > pendingRevision,'hidden pending work must be acknowledged');
+    await page.evaluate(() => {
+      Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await settle(page,400);
+    results.push('hidden pending edit still saves');
+
+    account.state = {...account.state, notes:[...(account.state.notes || []), {id:'remote-note',title:'Remote edit'}]};
+    account.revision += 1;
+    account.hash = stateHash(account.state);
+    const changedStart = control.requests.length;
+    await page.evaluate(() => runLiveSyncCycle({ reason:'scheduled' }));
+    const changedRequests = control.requests.slice(changedStart);
+    assert.ok(changedRequests.some(entry => entry.path === '/api/v2/state/meta'));
+    assert.ok(changedRequests.some(entry => entry.path === '/api/v2/state' && entry.method === 'GET'),'changed revision must fetch full state');
+    assert.equal(account.state.notes.some(note => note.id === 'remote-note'),true,'remote data must remain intact');
+    results.push('changed revision uses full conflict-safe sync');
 
     await page.close();
     await context.close();

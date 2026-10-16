@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -7035,7 +7035,9 @@ const LIVE_SYNC_META_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_live_sync_meta`;
 const DEVICE_ID_STORAGE_KEY = `${ACTIVE_STORAGE_KEY}_device_id`;
 const SERVER_STATE_ENDPOINT = '/api/state';
 const CLOUD_STATE_ENDPOINT = '/api/v2/state';
+const CLOUD_STATE_META_ENDPOINT = '/api/v2/state/meta';
 const LOCAL_LIVE_STATE_ENDPOINT = '/api/live-state';
+const LOCAL_LIVE_META_ENDPOINT = '/api/live-state/meta';
 const LOCAL_LIVE_STATUS_ENDPOINT = '/api/live-sync/status';
 const LOCAL_PAIRING_SNAPSHOT_ENDPOINT = '/api/live-sync/snapshot';
 const LIVE_VERSION_ENDPOINT = '/api/version?version=24';
@@ -7242,7 +7244,7 @@ function v13IdbTransactionDone(transaction) {
 
 async function pruneV13DeviceRecoveryCopies(db, username) {
   await new Promise((resolve, reject) => {
-    const transaction = db.transaction('recovery', 'readwrite');
+    const transaction = v24DurableTransaction(db,'recovery');
     const store = transaction.objectStore('recovery');
     const request = store.index('username').getAll(username);
     request.onerror = () => reject(request.error || new Error('Recovery history could not be read'));
@@ -7278,7 +7280,7 @@ async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-de
   const deviceId = getSyncDeviceId();
   const db = await openV13DeviceRecoveryDb();
   try {
-    const transaction = db.transaction(['accountStates','outbox','recovery'], 'readwrite');
+    const transaction = v24DurableTransaction(db,['accountStates','outbox','recovery']);
     transaction.objectStore('accountStates').put({
       username, state:copy, updatedAt, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
       source:durableAuthoritative ? 'v20-durable-device-save' : 'v20-device-save',
@@ -7287,15 +7289,29 @@ async function persistV13DeviceState(snapshot, { pending = true, label = 'v13-de
       deviceId,
     });
     const outbox = transaction.objectStore('outbox');
-    if (pending) outbox.put({ username, state:copy, updatedAt, queuedAt:new Date(capturedAtMs).toISOString(), fingerprint, lineage, deviceId });
+    if (pending) {
+      const previous = outbox.get(username);
+      previous.onsuccess = () => {
+        const older = previous.result;
+        if (older && older.writerId !== V24_SAVE_WRITER_ID && v24PendingIdentity(older) !== lineage?.mutationId) {
+          transaction.objectStore('recovery').put({id:username+':superseded:'+crypto.randomUUID(),username,
+            state:{v24SupersededOutbox:older},protectedCopy:true,label:'Pending copy from another tab or restart',capturedAtMs});
+        }
+        outbox.put({username,state:copy,updatedAt,queuedAt:new Date(capturedAtMs).toISOString(),fingerprint,lineage,deviceId,writerId:V24_SAVE_WRITER_ID});
+      };
+    }
     transaction.objectStore('recovery').put({
-      id:`${username}:${fingerprint}`, username, state:copy, label,
+      id:`${username}:${fingerprint}:${crypto.randomUUID()}`, username, state:copy, label,
       updatedAt, capturedAtMs, capturedAt:new Date(capturedAtMs).toISOString(), stateBytes:serialized.length,
     });
     await v13IdbTransactionDone(transaction);
     const verified = await v13IdbRequest(db.transaction('accountStates', 'readonly').objectStore('accountStates').get(username));
     if (!verified || JSON.stringify(verified.state) !== serialized) throw new Error('Device save could not be verified. Export your draft and retry.');
-    if (pending) v13DurableOutboxPending = true;
+    if (pending) {
+      const checked=await v13IdbRequest(db.transaction('outbox','readonly').objectStore('outbox').get(username));
+      if (!checked || v24PendingIdentity(checked)!==lineage?.mutationId || JSON.stringify(checked.state)!==serialized) throw new Error('Pending device save could not be verified. Your recovery copies were kept.');
+      v13DurableOutboxPending=true;
+    }
     return true;
   } finally {
     db.close();
@@ -7408,30 +7424,151 @@ async function readV13DeviceStateBundle() {
   }
 }
 
-async function clearV13DeviceOutboxThrough(savedUpdatedAt, force = false) {
-  if (isV16StartupReadOnly()) return false;
+// V24_VERIFIED_SAVE_BEGIN
+function v24DurableTransaction(db, stores) {
+  const transaction=db.transaction(stores,'readwrite',{durability:'strict'});
+  if (transaction.durability!=='strict') {
+    transaction.abort();
+    throw new Error('This browser cannot verify strict device storage. Keep your draft and use the stable fallback.');
+  }
+  return transaction;
+}
+const V24_SAVE_WRITER_ID = crypto.randomUUID();
+function stableCloudStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableCloudStringify).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableCloudStringify(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+async function verifiedCloudStateHash(snapshot) {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') throw new Error('Cloud content verification is unavailable; your pending copy was kept.');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stableCloudStringify(snapshot ?? null)));
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+}
+
+function v24CloudCopiesMatch(left, right) {
+  const content = source => {
+    const copy = cloneV20CloudState(normalizeState(cloneStateForSafety(source || {})));
+    // Rendering materializes these built-in categories without creating an edit.
+    // Compare their defaults symmetrically; retain custom and future fields.
+    const categories=(copy.travelCategories || []).map(raw=>({...raw,...normalizeTravelCategoryObject(raw)}));
+    const byId=new Map(categories.map(item=>[item.id,item]));
+    const defaultIds=new Set(SIMPLE_TRAVEL_DEFAULT_CATEGORIES.map(item=>item.id));
+    copy.travelCategories=[...SIMPLE_TRAVEL_DEFAULT_CATEGORIES.map(item=>({...item,...(byId.get(item.id)||{}),id:item.id,isDefault:true})),
+      ...categories.filter(item=>!defaultIds.has(item.id)).map(item=>({...item,isDefault:false}))];
+    for (const key of [...SYNC_UI_ONLY_ROOTS, 'travelSearch', '_syncMeta', '_exportedAt', '_exportVersion']) delete copy[key];
+    return copy;
+  };
+  return stableCloudStringify(content(left)) === stableCloudStringify(content(right));
+}
+
+function v24PendingIdentity(entry) {
+  return entry?.mutationId || entry?.lineage?.mutationId || null;
+}
+
+async function clearV24DeviceOutboxMatching(cloudState, expectedMutationId) {
   const username = v13DurableUsername();
   const db = await openV13DeviceRecoveryDb();
   try {
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction('outbox', 'readwrite');
-      const store = transaction.objectStore('outbox');
-      const request = store.get(username);
-      request.onerror = () => reject(request.error || new Error('Cloud outbox could not be read'));
-      request.onsuccess = () => {
-        const pending = request.result;
-        if (force || !pending || Number(pending.updatedAt || 0) <= Number(savedUpdatedAt || 0)) store.delete(username);
-      };
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error || new Error('Cloud outbox cleanup failed'));
-      transaction.onabort = () => reject(transaction.error || new Error('Cloud outbox cleanup was aborted'));
-    });
+    let matched = false;
+    const transaction = v24DurableTransaction(db,'outbox');
+    const done = v13IdbTransactionDone(transaction);
+    const store = transaction.objectStore('outbox');
+    const request = store.get(username);
+    request.onsuccess = () => {
+      const pending = request.result;
+      // Compare the current entry inside the same transaction as its deletion.
+      // Timestamps never authorize deletion, including equal/backward clocks.
+      matched = !pending || (v24PendingIdentity(pending) === expectedMutationId
+        && !!expectedMutationId && v24CloudCopiesMatch(pending.state || pending.localState, cloudState));
+      if (pending && matched) store.delete(username);
+    };
+    await done;
     const remaining = await v13IdbRequest(db.transaction('outbox', 'readonly').objectStore('outbox').get(username));
     v13DurableOutboxPending = !!remaining;
-  } finally {
-    db.close();
-  }
+    return matched && !remaining;
+  } finally { db.close(); }
 }
+
+async function settleV24CloudCopy(cloudState, expectedMutationId = pendingCloudMutation?.mutationId || null) {
+  const before = stableCloudStringify(cloneV20CloudState(state));
+  const pendingBefore = pendingCloudMutation;
+  if (v13DurableSaveDrainPromise) await v13DurableSaveDrainPromise;
+  if (before !== stableCloudStringify(cloneV20CloudState(state)) || pendingCloudMutation !== pendingBefore
+      || !v24CloudCopiesMatch(state, cloudState)) {
+    liveSync.pending = true;
+    setLiveSyncMeta({pending:true});
+    return false;
+  }
+  const cleared = await clearV24DeviceOutboxMatching(cloudState, expectedMutationId);
+  const unchanged = before === stableCloudStringify(cloneV20CloudState(state)) && pendingCloudMutation === pendingBefore;
+  const clean = cleared && unchanged && !v13DurableSaveDrainPromise;
+  if (clean) pendingCloudMutation = null;
+  liveSync.pending = !clean;
+  setLiveSyncMeta({pending:!clean});
+  return clean;
+}
+
+async function rebaseV24NewerPending(snapshot, sentLineage, result) {
+  const username=v13DurableUsername(), db=await openV13DeviceRecoveryDb();
+  try {
+    let rebased=null;
+    const tx=v24DurableTransaction(db,'outbox'), done=v13IdbTransactionDone(tx), store=tx.objectStore('outbox');
+    const get=store.get(username);
+    get.onsuccess=()=>{
+      const entry=get.result, base=entry?.lineage;
+      if (entry?.writerId===V24_SAVE_WRITER_ID && base?.mutationId!==sentLineage.mutationId
+          && base?.baseRevision===sentLineage.baseRevision && base?.baseHash===sentLineage.baseHash) {
+        rebased={...base,baseRevision:result.revision,baseHash:result.stateHash,baseState:cloneStateForSafety(snapshot)};
+        store.put({...entry,lineage:rebased});
+      }
+    };
+    await done;
+    if (rebased && pendingCloudMutation?.mutationId===rebased.mutationId) pendingCloudMutation=rebased;
+  } finally {db.close();}
+}
+
+async function validateV24CloudResponse(result) {
+  if (result?.ok !== true || !Number.isSafeInteger(result.revision) || result.revision < 0
+      || !/^[a-f0-9]{64}$/.test(result.stateHash || '') || !Object.hasOwn(result, 'state')) {
+    throw new Error('Cloud state could not be verified; your device copy was kept.');
+  }
+  if (await verifiedCloudStateHash(result.state) !== result.stateHash) throw new Error('Cloud state hash did not verify; your device copy was kept.');
+}
+async function persistV24CloudLoad(selected, bundle, runtimeBefore) {
+  const username=v13DurableUsername(), db=await openV13DeviceRecoveryDb();
+  try {
+    const tx=v24DurableTransaction(db,['accountStates','outbox']), done=v13IdbTransactionDone(tx);
+    const accounts=tx.objectStore('accountStates'), outbox=tx.objectStore('outbox');
+    let account,pending,arrived=0;
+    const check=()=>{
+      if(++arrived!==2)return;
+      if(stableCloudStringify(account || null)!==stableCloudStringify(bundle.accountState || null)
+          || stableCloudStringify(pending || null)!==stableCloudStringify(bundle.outbox || null)
+          || stableCloudStringify(state)!==runtimeBefore
+          || (pending && (!v24PendingIdentity(pending) || !v24CloudCopiesMatch(pending.state,selected)))) {
+        tx.abort();return;
+      }
+      accounts.put({username,state:selected,updatedAt:Number(selected.updatedAt || 0),
+        capturedAt:new Date().toISOString(),authoritative:true,storageMode:'indexeddb-authoritative'});
+      if(pending)outbox.delete(username);
+    };
+    const a=accounts.get(username);a.onsuccess=()=>{account=a.result;check();};
+    const b=outbox.get(username);b.onsuccess=()=>{pending=b.result;check();};
+    await done;
+    const verified=await v13IdbRequest(db.transaction('accountStates','readonly').objectStore('accountStates').get(username));
+    const remaining=await v13IdbRequest(db.transaction('outbox','readonly').objectStore('outbox').get(username));
+    if(remaining || stableCloudStringify(verified?.state)!==stableCloudStringify(selected)
+        || stableCloudStringify(state)!==runtimeBefore || v13DurableSaveDrainPromise) {
+      liveSync.pending=true;setLiveSyncMeta({pending:true});
+      throw new Error('A device edit arrived during cloud load; pending work kept.');
+    }
+    return true;
+  } finally {db.close();}
+}
+
+// V24_VERIFIED_SAVE_END
+
 
 function writeV13BrowserState(snapshot) {
   const serialized = JSON.stringify(snapshot);
@@ -8561,7 +8698,7 @@ function saveState() {
     // Treat the durable device write as the commit point. If a later edit
     // replaced this snapshot while the queued write was draining, that later
     // edit owns the cloud lineage and will schedule its own sync.
-    const stillCurrent = statesEquivalent(cloneV20CloudState(state), cloneV20CloudState(snapshot));
+    const stillCurrent = v24CloudCopiesMatch(state, snapshot);
     if (cloudMutation && stillCurrent) {
       pendingCloudMutation = cloudMutation;
       liveSync.pending = true;
@@ -8689,6 +8826,9 @@ function scheduleNextLiveSync({ reset = false } = {}) {
     liveSync.nextSyncAt = null;
     return;
   }
+  // Keep pending edits retryable, but do not wake an idle hidden tab for a
+  // routine comparison. Its saved due time is checked when the tab returns.
+  if (document.visibilityState === 'hidden' && !hasPendingLiveSyncWork()) return;
   const now = Date.now();
   const meta = getLiveSyncMeta();
   let target = reset ? now + LIVE_SYNC_INTERVAL_MS : Date.parse(meta.nextScheduledSyncAt || liveSync.nextSyncAt || '');
@@ -8696,6 +8836,10 @@ function scheduleNextLiveSync({ reset = false } = {}) {
   liveSync.nextSyncAt = new Date(target).toISOString();
   setLiveSyncMeta({ nextScheduledSyncAt: liveSync.nextSyncAt });
   liveSyncScheduleTimer = setTimeout(() => runLiveSyncCycle({ reason: 'scheduled' }), Math.max(250, target - now));
+}
+
+function hasPendingLiveSyncWork() {
+  return !!(liveSync.pending || getLiveSyncMeta().pending || pendingServerSync || v13DurableOutboxPending || pendingCloudMutation || v13DurableSaveDrainPromise);
 }
 
 function queueLiveCloudSave() {
@@ -8731,13 +8875,30 @@ async function saveStateToCloud() {
   const options = arguments[0] || {};
   if (isV16StartupReadOnly()) return { ok: false, skipped: true };
   if ((!liveSync.paired && !isHostedAppHost()) || (liveSync.conflict && !options.allowDuringConflict) || corruptSaveInfo) return { ok: false };
+  let durableBundle;
+  try {
+    if (v13DurableSaveDrainPromise) await v13DurableSaveDrainPromise;
+    durableBundle = await readV13DeviceStateBundle();
+  } catch (error) {
+    liveSync.pending=true;
+    setLiveSyncMeta({pending:true});
+    setSaveStatus('error','Device recovery needs attention; pending work kept');
+    return {ok:false,verificationRequired:true,error:String(error.message || error)};
+  }
   const meta = getLiveSyncMeta();
   // StudyQuest v24 keeps Subject Track in the browser/device recovery copy. Hosted
   // v20 includes the same account-scoped overlay in its guarded cloud payload.
   const snapshot = cloneV20CloudState(state);
   const uploadedStateUpdatedAt = Number(snapshot.updatedAt || 0);
   const baseRevision = Number.isInteger(liveSync.revision) ? liveSync.revision : Number.isInteger(meta.revision) ? meta.revision : null;
-  const lineage = options.lineageOverride || pendingCloudMutation || newCloudMutation(snapshot);
+  const lineage = durableBundle.outbox?.lineage;
+  if (!lineage?.mutationId || (options.lineageOverride && options.lineageOverride.mutationId !== lineage.mutationId)
+      || !v24CloudCopiesMatch(durableBundle.outbox.state, snapshot)) {
+    liveSync.pending = true;
+    setLiveSyncMeta({pending:true});
+    setSaveStatus('error', 'Device save needs verification; pending work kept');
+    return {ok:false, verificationRequired:true};
+  }
   const size = stateSizeBreakdown(snapshot);
   liveSync.stateBytes = size.totalBytes;
   if (size.overLimit) {
@@ -8780,6 +8941,7 @@ async function saveStateToCloud() {
       throw new Error(result.error || 'Live account authorization is required.');
     }
     if (res.status === 409 && ['STATE_CONFLICT','BASE_HASH_MISMATCH','DESTRUCTIVE_CHANGE_REVIEW_REQUIRED'].includes(result.error)) {
+      await validateV24CloudResponse({...result,ok:true});
       liveSync.revision = Number(result.revision || 0);
       liveSync.stateHash = result.stateHash || null;
       confirmedCloudState = cloneV20CloudState(result.state || {});
@@ -8801,29 +8963,40 @@ async function saveStateToCloud() {
       throw error;
     }
     if (!res.ok) throw new Error(result.error || 'Live save failed');
-    liveSync.revision = Number(result.revision || baseRevision || 0);
-    liveSync.stateHash = result.stateHash || liveSync.stateHash;
+    if (result.ok !== true || result.acknowledgedMutationId !== lineage.mutationId
+        || !Number.isSafeInteger(result.revision) || result.revision < baseRevision
+        || !/^[a-f0-9]{64}$/.test(result.stateHash || '')) {
+      throw new Error('Cloud acknowledgement did not verify; pending work kept.');
+    }
+    if (['requiresRefresh','idempotent','unchanged','ignoredVolatileOnly'].some(key => result[key] !== undefined && typeof result[key] !== 'boolean')
+        || (!result.idempotent && !result.unchanged && !result.requiresRefresh && result.revision !== baseRevision + 1)) {
+      throw new Error('Cloud acknowledgement revision or flags did not verify; pending work kept.');
+    }
+    const expectedHash = await verifiedCloudStateHash(snapshot);
+    if (result.stateHash !== expectedHash || result.requiresRefresh === true) {
+      confirmedCloudState = null;
+      liveSync.pending = true;
+      setLiveSyncMeta({pending:true});
+      setSaveStatus('local', 'Saved on this device · verifying cloud copy');
+      setTimeout(() => runLiveSyncCycle({reason:'ack-refresh'}), 250);
+      return {ok:false, verificationRequired:true, requiresRefresh:true};
+    }
+    liveSync.revision = result.revision;
+    liveSync.stateHash = result.stateHash;
     confirmedCloudState = cloneStateForSafety(snapshot);
-    pendingCloudMutation = null;
-    liveSync.lastCloudRevision = liveSync.revision;
+    liveSync.lastCloudRevision = result.revision;
     liveSync.updatedAt = result.savedAt || new Date().toISOString();
-    const newerLocalChanges = Number(state.updatedAt || 0) > uploadedStateUpdatedAt;
-    liveSync.pending = newerLocalChanges;
-    liveSync.status = 'synced';
-    await clearV13DeviceOutboxThrough(uploadedStateUpdatedAt).catch(error => recordAppError('outbox-clear', error));
-    setLiveSyncMeta({
-      revision: liveSync.revision,
-      stateHash:liveSync.stateHash,
-      pending:newerLocalChanges,
-      lastSyncedStateUpdatedAt:uploadedStateUpdatedAt,
-      latestCloudSaveAt: liveSync.updatedAt,
-    });
+    await rebaseV24NewerPending(snapshot, lineage, result);
+    const clean = await settleV24CloudCopy(snapshot, lineage.mutationId);
+    liveSync.status = clean ? 'synced' : 'pending';
+    setLiveSyncMeta({revision:result.revision, stateHash:result.stateHash, pending:!clean,
+      lastSyncedStateUpdatedAt:uploadedStateUpdatedAt, latestCloudSaveAt:liveSync.updatedAt});
     recordSuccessfulLiveSync('browser-to-cloud', liveSync.updatedAt);
-    setSaveMeta({ latestCloudSaveAt: liveSync.updatedAt });
-    setSaveStatus(newerLocalChanges ? 'local' : 'saved', scheduledSyncStatusText());
+    setSaveMeta({latestCloudSaveAt:liveSync.updatedAt});
+    setSaveStatus(clean ? 'saved' : 'local', clean ? scheduledSyncStatusText() : 'Saved on this device · newer work pending');
     renderRecoveryCenter();
-    if (newerLocalChanges) queueLiveCloudSave();
-    return { ok:true, direction:'browser-to-cloud', at:liveSync.updatedAt, newerLocalChanges };
+    if (!clean) queueLiveCloudSave();
+    return {ok:true, direction:'browser-to-cloud', at:liveSync.updatedAt, newerLocalChanges:!clean, hashVerified:true};
   } catch (e) {
     if (!liveSync.conflict) {
       liveSync.pending = true;
@@ -8865,6 +9038,13 @@ async function hydrateV13StateFromDeviceRecovery() {
     const bundle = await readV13DeviceStateBundle();
     v13DurableOutboxPending = !!bundle.outbox;
     pendingCloudMutation = bundle.outbox?.lineage || null;
+    // A full/quota-blocked browser mirror may lose the small metadata key.
+    // Recover only the durable base, then validate it against a full cloud read.
+    if (!Number.isSafeInteger(liveSync.revision) && Number.isSafeInteger(pendingCloudMutation?.baseRevision)
+        && pendingCloudMutation.baseRevision >= 0 && /^[a-f0-9]{64}$/.test(pendingCloudMutation.baseHash || '')) {
+      liveSync.revision=pendingCloudMutation.baseRevision;
+      liveSync.stateHash=pendingCloudMutation.baseHash;
+    }
     if (/^sq_[a-z0-9_-]{10,}$/i.test(String(bundle.accountState?.deviceId || ''))) {
       durableSyncDeviceId = String(bundle.accountState.deviceId);
     }
@@ -8879,7 +9059,7 @@ async function hydrateV13StateFromDeviceRecovery() {
     });
     const durableAuthoritative = !bundle.outbox?.state && bundle.accountState?.authoritative === true;
     const latest = bundle.outbox?.state || (durableAuthoritative ? bundle.accountState.state : candidates[0]?.state);
-    if (latest && (durableAuthoritative || Number(latest.updatedAt || 0) >= Number(state.updatedAt || 0))) {
+    if (latest && (bundle.outbox?.state || durableAuthoritative || Number(latest.updatedAt || 0) >= Number(state.updatedAt || 0))) {
       setSQState(latest, { resetSyncBaseline:true });
       if (!V16_READ_ONLY_STARTUP) writeV13BrowserState(state);
       ensureTrackerSemesters();
@@ -9833,7 +10013,7 @@ function openLiveSyncConflict(conflict) {
   clearTimeout(liveSyncScheduleTimer);
   conflict.smartMerge = buildSmartMerge(conflict.localState, conflict.cloudState, conflict.selections || {});
   conflict.selections = conflict.smartMerge.selections;
-  if (!conflict.smartMerge.different) {
+  if (!conflict.smartMerge.different && v24CloudCopiesMatch(conflict.localState,conflict.cloudState)) {
     liveSync.conflict = null;
     liveSync.preview = null;
     liveSync.comparison = conflict.comparison;
@@ -9843,9 +10023,9 @@ function openLiveSyncConflict(conflict) {
       setSaveStatus(liveSync.pending ? 'local' : 'saved', liveSync.pending ? 'Saved locally · admin sync pending' : 'Chrome and local server match');
       return false;
     }
-    liveSync.pending = false;
-    liveSync.status = 'synced';
-    const metaPatch = { pending:false };
+    liveSync.pending = hasPendingLiveSyncWork();
+    liveSync.status = liveSync.pending ? 'pending' : 'synced';
+    const metaPatch = { pending:liveSync.pending };
     if (conflict.revision !== undefined && conflict.revision !== null && Number.isFinite(Number(conflict.revision))) {
       metaPatch.revision = Number(conflict.revision);
     }
@@ -9856,7 +10036,7 @@ function openLiveSyncConflict(conflict) {
     }
     setLiveSyncMeta(metaPatch);
     closeModal('liveSyncConflictModal');
-    setSaveStatus('saved', scheduledSyncStatusText());
+    setSaveStatus(liveSync.pending ? 'local' : 'saved', scheduledSyncStatusText());
     return false;
   }
   liveSync.conflict = conflict;
@@ -10179,11 +10359,12 @@ async function applySmartMerge() {
     const response = await fetch(cloudStateEndpoint(), { credentials:'same-origin', cache:'no-store', signal:controller.signal });
     const latest = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(latest.error || 'Could not recheck the live save.');
+    await validateV24CloudResponse(latest);
     calibrateSyncClock(latest.serverTime);
     const latestRevision = Number(latest.revision || 0);
     const latestCloudState = cloneV20CloudState(normalizeState(latest.state || defaultState()));
-    const cloudChanged = latestRevision !== Number(preview.revision || 0) || !statesEquivalent(latestCloudState, cloneV20CloudState(preview.cloudState || {}));
-    const chromeChanged = !statesEquivalent(cloneV20CloudState(state), cloneV20CloudState(preview.localState || {}));
+    const cloudChanged = latestRevision !== Number(preview.revision || 0) || !v24CloudCopiesMatch(latestCloudState, cloneV20CloudState(preview.cloudState || {}));
+    const chromeChanged = !v24CloudCopiesMatch(cloneV20CloudState(state), cloneV20CloudState(preview.localState || {}));
     if (cloudChanged || chromeChanged) {
       openLiveSyncConflict({
         localState:cloneV20CloudState(state),
@@ -11076,7 +11257,54 @@ function statesEquivalent(a, b) {
   try { return !buildStateComparison(a || {}, b || {}).different; } catch { return false; }
 }
 
+function routineMetadataMatchesBaseline(metadata) {
+  const stored = getLiveSyncMeta();
+  const revision = Number.isSafeInteger(liveSync.revision) ? liveSync.revision
+    : Number.isSafeInteger(stored.revision) ? stored.revision : null;
+  const hash = liveSync.stateHash || stored.stateHash;
+  return !hasPendingLiveSyncWork() && !liveSync.conflict && !corruptSaveInfo
+    && !window.__v21StorageError && !!confirmedCloudState
+    && revision !== null && revision >= 0 && /^[a-f0-9]{64}$/i.test(hash || '')
+    && (!metadata || (metadata.ok === true && metadata.integrity?.status === 'ok'
+      && Number.isSafeInteger(metadata.revision) && metadata.revision === revision
+      && metadata.stateHash === hash))
+    && v24CloudCopiesMatch(state, confirmedCloudState);
+}
+
+async function unchangedHostedStateMetadata(signal, options = {}) {
+  const routine = ['scheduled', 'missed-schedule', 'visible-resume'].includes(options.reason);
+  if (!routine || options.manual || options.initialPair || !routineMetadataMatchesBaseline()) return null;
+  const revision = liveSync.revision;
+  const hash = liveSync.stateHash || getLiveSyncMeta().stateHash;
+  const baseline = confirmedCloudState;
+  let response;
+  try {
+    response = await fetch(isHostedAppHost() ? CLOUD_STATE_META_ENDPOINT : LOCAL_LIVE_META_ENDPOINT, {
+      credentials:'same-origin', cache:'no-store', signal,
+    });
+  } catch { return null; }
+  if (response.status === 401) {
+    if (isHostedAppHost()) handleHostedAuthExpired();
+    else { liveSync.paired = false; liveSync.status = 'unpaired'; }
+    return { authorizationRequired:true };
+  }
+  if (!response.ok) return null;
+  const metadata = await response.json().catch(() => null);
+  // Edits and recovery can arrive during either await. Never acknowledge or
+  // clear pending work from metadata; fall through to the full safe sync.
+  if (!metadata || confirmedCloudState !== baseline || liveSync.revision !== revision
+      || (liveSync.stateHash || getLiveSyncMeta().stateHash) !== hash
+      || !routineMetadataMatchesBaseline(metadata)) return null;
+  return metadata;
+}
+
 async function applyCloudState(cloudState, revision, updatedAt, label = 'Before live cloud load', { recordCloudSync = true } = {}) {
+  const before = stableCloudStringify(state);
+  if (v13DurableSaveDrainPromise) await v13DurableSaveDrainPromise;
+  const bundle = await readV13DeviceStateBundle();
+  if (before !== stableCloudStringify(state) || (bundle.outbox && !v24CloudCopiesMatch(bundle.outbox.state, cloudState))) {
+    throw new Error('Pending work must be reviewed before replacing this device copy.');
+  }
   v16UserInteracted = true;
   if (hasUserData(state)) {
     pushUndoSnapshot(label);
@@ -11085,15 +11313,13 @@ async function applyCloudState(cloudState, revision, updatedAt, label = 'Before 
   // Local-only v20 keeps its overlay across cloud loads; hosted v20 receives
   // the account-scoped overlay from the revision-protected cloud copy.
   const localOnlyCloudState = preserveV20LocalOverlay(cloneV20CloudState(cloudState), state);
-  setSQState(localOnlyCloudState, { resetSyncBaseline:true });
-  const browserSaved = writeV13BrowserState(state);
-  await queueV13DeviceStatePersistence(state, { pending:false, label:'cloud-load', browserSaved });
-  if (!browserSaved) await markV13DeviceStateAuthoritative(state, {
-    source:'v20-durable-cloud-load',
-    cloudRevision:revision,
-    cloudStateHash:liveSync.stateHash,
-  });
-  await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
+  const selected=normalizeState(localOnlyCloudState);
+  await persistV24CloudLoad(selected,bundle,before);
+  // No await between the final check and installing the verified device copy.
+  setSQState(selected,{resetSyncBaseline:true});
+  writeV13BrowserState(state);
+  v13DurableOutboxPending=false;
+  pendingCloudMutation=null;
   liveSync.revision = Number(revision || 0);
   liveSync.lastCloudRevision = liveSync.revision;
   liveSync.updatedAt = updatedAt || null;
@@ -11124,6 +11350,16 @@ async function syncLiveState(options = {}) {
   try {
     liveSync.status = 'syncing';
     setSaveStatus('saving', 'Checking connection…');
+    const unchanged = await unchangedHostedStateMetadata(controller.signal, options);
+    if (unchanged?.authorizationRequired) return { ok:false, authorizationRequired:true };
+    if (unchanged && routineMetadataMatchesBaseline(unchanged)) {
+      liveSync.status = 'synced';
+      liveSync.updatedAt = unchanged.updatedAt || liveSync.updatedAt;
+      const checkedAt = new Date().toISOString();
+      recordSuccessfulLiveSync('no-change', checkedAt);
+      setSaveStatus('saved', scheduledSyncStatusText());
+      return { ok:true, direction:'no-change', at:checkedAt, metadataOnly:true };
+    }
     const res = await fetch(cloudStateEndpoint(), { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
     const result = await res.json().catch(() => ({}));
     if (res.status === 401) {
@@ -11136,12 +11372,17 @@ async function syncLiveState(options = {}) {
       return { ok: false, authorizationRequired: true };
     }
     if (!res.ok) throw new Error(result.error || 'Could not load live state');
+    await validateV24CloudResponse(result);
     calibrateSyncClock(result.serverTime);
     if (Number(result.maxStateBytes) > 0) liveSync.maxStateBytes = Number(result.maxStateBytes);
+    // An edit may arrive while metadata or the full read is pending. Let its
+    // durable outbox finish before selecting upload, conflict or cloud loading.
+    // A failed device write rejects reconciliation and keeps pending work.
+    if (v13DurableSaveDrainPromise) await v13DurableSaveDrainPromise;
     const cloudState = cloneV20CloudState(normalizeState(result.state || defaultState()));
     const cloudRevision = Number(result.revision || 0);
     const cloudStateHash = result.stateHash || null;
-    const statesDiffer = !statesEquivalent(cloneV20CloudState(state), cloudState);
+    const statesDiffer = !v24CloudCopiesMatch(state, cloudState);
     const meta = getLiveSyncMeta();
     const knownRevision = Number.isInteger(liveSync.revision)
       ? liveSync.revision
@@ -11164,10 +11405,8 @@ async function syncLiveState(options = {}) {
         && (!lineage.baseHash || !cloudStateHash || lineage.baseHash === cloudStateHash);
       liveSync.revision = knownRevision;
       if (!statesDiffer) {
-        liveSync.pending = false;
         confirmedCloudState = cloneV20CloudState(cloudState);
-        pendingCloudMutation = null;
-        await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
+        await settleV24CloudCopy(cloudState, lineage?.mutationId || null);
       } else if (lineageMatches) {
         confirmedCloudState = cloneV20CloudState(cloudState);
         v16UserInteracted = true; // Resume the verified, previously committed edit.
@@ -11208,18 +11447,16 @@ async function syncLiveState(options = {}) {
       });
       if (reviewOpened) return { ok:false, conflict:true, previewReady:true };
     }
-    liveSync.pending = false;
-    liveSync.status = 'synced';
-    await clearV13DeviceOutboxThrough(Number(state.updatedAt || 0), true).catch(error => recordAppError('outbox-clear', error));
+    const clean = await settleV24CloudCopy(cloudState);
+    liveSync.status = clean ? 'synced' : 'pending';
     const syncedAt = new Date().toISOString();
-    pendingCloudMutation = null;
-    setLiveSyncMeta({ revision:cloudRevision, stateHash:cloudStateHash, pending:false, lastSyncedStateUpdatedAt:state.updatedAt });
-    recordSuccessfulLiveSync('no-change', syncedAt);
-    setSaveStatus('saved', scheduledSyncStatusText());
-    return { ok:true, direction:'no-change', at:syncedAt };
+    setLiveSyncMeta({ revision:cloudRevision, stateHash:cloudStateHash, pending:!clean, lastSyncedStateUpdatedAt:state.updatedAt });
+    if (clean) recordSuccessfulLiveSync('no-change', syncedAt);
+    setSaveStatus(clean ? 'saved' : 'local', clean ? scheduledSyncStatusText() : 'Saved on this device · pending work kept');
+    return { ok:clean, direction:'no-change', at:syncedAt, pending:!clean };
   } catch (e) {
     liveSync.status = 'offline';
-    liveSync.pending = !!getLiveSyncMeta().pending;
+    liveSync.pending = hasPendingLiveSyncWork();
     const waking = e?.name === 'AbortError';
     liveSync.message = waking ? 'Live server timed out while waking.' : String(e?.message || e);
     setSaveStatus('offline', liveSync.pending
@@ -11234,6 +11471,8 @@ async function syncLiveState(options = {}) {
 }
 
 async function runLiveSyncCycle(options = {}) {
+  if (document.visibilityState === 'hidden' && ['scheduled', 'missed-schedule'].includes(options.reason)
+      && !hasPendingLiveSyncWork()) return { ok:false, skipped:true };
   if (liveSync.inFlight || liveSync.conflict || corruptSaveInfo || (!liveSync.paired && !isHostedAppHost())) {
     return { ok: false, skipped: true };
   }
@@ -11258,7 +11497,7 @@ async function runLiveSyncCycle(options = {}) {
   } finally {
     liveSync.inFlight = false;
     scheduleNextLiveSync({ reset: true });
-    if (outcome?.ok && !liveSync.conflict) setSaveStatus('saved', scheduledSyncStatusText());
+    if (outcome?.ok && !liveSync.conflict) setSaveStatus(hasPendingLiveSyncWork() ? 'local' : 'saved', scheduledSyncStatusText());
     renderRecoveryCenter();
   }
 }
@@ -11320,6 +11559,7 @@ async function syncStateFromServer() {
 function retryPendingServerSync() {
   if (isV16StartupReadOnly()) return;
   if (!canUseServerStorage() || liveSync.conflict) return;
+  if (document.visibilityState === 'hidden' && !hasPendingLiveSyncWork()) return;
   if (isLocalLabHost() && pendingServerSync) queueServerStateSave();
   if (liveSync.paired || isHostedAppHost()) {
     const dueAt = Date.parse(getLiveSyncMeta().nextScheduledSyncAt || liveSync.nextSyncAt || '');
@@ -11328,12 +11568,28 @@ function retryPendingServerSync() {
   }
 }
 
+let lastVisibleResumeAt = 0;
+function resumeLiveSyncWhenVisible() {
+  if (document.visibilityState !== 'visible') return;
+  const now = Date.now();
+  if (now - lastVisibleResumeAt < 2000) return;
+  lastVisibleResumeAt = now;
+  if (isV16StartupReadOnly() || !canUseServerStorage() || liveSync.conflict) return;
+  if (isLocalLabHost() && pendingServerSync) queueServerStateSave();
+  if (liveSync.paired || isHostedAppHost()) {
+    runLiveSyncCycle({ reason:'visible-resume' });
+  }
+}
+
 window.addEventListener('online', retryPendingServerSync);
-window.addEventListener('focus', retryPendingServerSync);
+window.addEventListener('focus', resumeLiveSyncWhenVisible);
 window.addEventListener('pagehide', preserveV13StateBeforeExit);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') retryPendingServerSync();
-  else preserveV13StateBeforeExit();
+  if (document.visibilityState === 'visible') resumeLiveSyncWhenVisible();
+  else {
+    if (!hasPendingLiveSyncWork()) clearTimeout(liveSyncScheduleTimer);
+    preserveV13StateBeforeExit();
+  }
 });
 setInterval(retryPendingServerSync, 60 * 1000);
 
@@ -26283,7 +26539,7 @@ window.studyQuestV21Core = {
     if (!preview?.smartMerge || preview.smartMerge.unresolved || preview.smartMerge.size.overLimit) throw new Error('Resolve the highlighted differences before continuing.');
     const before = cloneStateForSafety(state);
     await this.archive(await this.snapshots());
-    if (!statesEquivalent(state,before)) throw new Error('Your data changed while backing up. Review the latest copies again.');
+    if (!v24CloudCopiesMatch(state,before)) throw new Error('Your data changed while backing up. Review the latest copies again.');
     await applySmartMerge(); // Retains the existing revision/hash and server conflict protections.
     if (liveSync.conflict || liveSync.preview) throw new Error('The merge still needs review or could not be saved. Both copies are preserved.');
   },
@@ -26299,10 +26555,11 @@ window.studyQuestV21Core = {
       const response = await fetch(url,{cache:'no-store',credentials:'same-origin',signal:AbortSignal.timeout(75000)});
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'The saved copy could not be checked.');
+      if (preview.sourceType !== 'local-server') await validateV24CloudResponse(body);
       const value = preview.sourceType === 'local-server' ? body : body.state;
       if (!value || typeof value !== 'object') throw new Error('The source did not return a valid save.');
       const latest = normalizeState(value);
-      if (!statesEquivalent(cloneV20CloudState(latest),cloneV20CloudState(expected)) ||
+      if (!v24CloudCopiesMatch(latest,expected) ||
           (preview.sourceType !== 'local-server' && (Number(body.revision) !== Number(preview.revision) || (preview.cloudStateHash && body.stateHash !== preview.cloudStateHash)))) {
         throw new Error('The saved copy changed. Read the copies again before choosing.');
       }
@@ -26312,14 +26569,14 @@ window.studyQuestV21Core = {
     const backups = await this.snapshots();
     await this.archive(backups);
     const {body,latest} = await readLatest();
-    if (!statesEquivalent(localBefore,state)) throw new Error('This tab changed during review. Nothing was replaced.');
+    if (stableCloudStringify(localBefore)!==stableCloudStringify(state)) throw new Error('This tab changed during review. Nothing was replaced.');
     if (localStorage.getItem(ACTIVE_STORAGE_KEY)!==backups.browserRaw) throw new Error('Another tab changed the browser copy. Close other StudyQuest tabs and review again.');
     const selected = preserveV20LocalOverlay(cloneStateForSafety(latest),state);
     const username = v13DurableUsername();
     const db = await openV13DeviceRecoveryDb();
     try {
       // Read + check + write active state and superseded outbox in the same transaction.
-      const tx = db.transaction(['accountStates','outbox'],'readwrite');
+      const tx = v24DurableTransaction(db,['accountStates','outbox']);
       const completion = v13IdbTransactionDone(tx);
       const accounts = tx.objectStore('accountStates');
       const outbox = tx.objectStore('outbox');
@@ -26340,6 +26597,18 @@ window.studyQuestV21Core = {
         window.StudyQuestV21?.blockEditing(window.__v21StorageError);
         throw new Error(window.__v21StorageError);
       }
+      if (stableCloudStringify(localBefore)!==stableCloudStringify(state) || v13DurableSaveDrainPromise) {
+        liveSync.pending=true;
+        setLiveSyncMeta({pending:true});
+        throw new Error('An edit arrived during recovery. Your draft and the archived copies were kept.');
+      }
+      const finalBundle=await readV13DeviceStateBundle();
+      if (finalBundle.outbox || stableCloudStringify(finalBundle.accountState?.state)!==stableCloudStringify(selected)) {
+        liveSync.pending=true;
+        v13DurableOutboxPending=!!finalBundle.outbox;
+        throw new Error('Another tab edited during recovery. Review the preserved copies again.');
+      }
+      if (stableCloudStringify(localBefore)!==stableCloudStringify(state) || v13DurableSaveDrainPromise) throw new Error('An edit arrived during recovery; pending work kept.');
       // Do not overwrite a browser-only draft written by another tab after the transaction.
       const mirrorSaved=localStorage.getItem(ACTIVE_STORAGE_KEY)===backups.browserRaw && writeV13BrowserState(selected);
       setSQState(selected,{resetSyncBaseline:true});
@@ -26397,7 +26666,7 @@ window.studyQuestV21Core.hostedSync = () => ({
   // screen right now. `lastSuccessAt` only says some earlier sync succeeded, so
   // it must never on its own be shown as "Saved to your account".
   acknowledged: !!confirmedCloudState
-    && statesEquivalent(cloneV20CloudState(state), cloneV20CloudState(confirmedCloudState)),
+    && !hasPendingLiveSyncWork() && v24CloudCopiesMatch(state, confirmedCloudState),
 });
 
 // Hosted v21 retries retained edits with bounded backoff instead of waiting
@@ -26455,10 +26724,13 @@ window.studyQuestV21Core.retryUpload = async () => {
 };
 // Quota failures can prevent the small localStorage pending marker from being
 // written. The verified IndexedDB outbox remains the authoritative retry signal.
-window.addEventListener('online', () => {
+window.addEventListener('online', async () => {
   if (!v21CanRetryUpload()) return;
   liveSync.pending = true;
-  runLiveSyncCycle({reason:'v24-outbox-reconnect'}).catch(error => recordAppError('v24-reconnect',error));
+  try {
+    await refreshLiveSyncStatus();
+    await runLiveSyncCycle({reason:'v24-outbox-reconnect'});
+  } catch (error) {recordAppError('v24-reconnect',error);}
 });
 
 window.studyQuestV18Install?.();

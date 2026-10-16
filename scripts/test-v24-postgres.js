@@ -10,7 +10,15 @@ const password = crypto.randomBytes(24).toString('hex');
 const invite = crypto.randomBytes(24).toString('hex');
 const origin = 'http://127.0.0.1:32424';
 const hostedOrigin = 'https://studyquest-v24-qa.onrender.com';
-const child = spawn(process.execPath,['--require',path.join(__dirname,'v24-isolated-db.cjs'),'server.js'],{cwd:root,env:{...process.env,PORT:'32424',DATABASE_URL:'postgresql://qa:qa@127.0.0.1/v24_isolated',STUDYQUEST_ADMIN_PASSWORD:password,STUDYQUEST_INVITE_CODE:invite,STUDYQUEST_V24_ACCESS:'all',STUDYQUEST_MAIN_VERSION:'24',STUDYQUEST_V15_ACCESS:'all',STUDYQUEST_SAFE_SYNC_MODE:'all',NODE_ENV:'test'}});
+const child = spawn(process.execPath,['--require',path.join(__dirname,'v24-isolated-db.cjs'),'server.js'],{cwd:root,stdio:['ignore','pipe','pipe','ipc'],env:{...process.env,PORT:'32424',DATABASE_URL:'postgresql://qa:qa@127.0.0.1/v24_isolated',STUDYQUEST_ADMIN_PASSWORD:password,STUDYQUEST_INVITE_CODE:invite,STUDYQUEST_V24_ACCESS:'all',STUDYQUEST_MAIN_VERSION:'24',STUDYQUEST_V15_ACCESS:'all',STUDYQUEST_SAFE_SYNC_MODE:'all',NODE_ENV:'test'}});
+function databaseControl(command,needle) {
+  return new Promise((resolve,reject)=>{
+    const id=crypto.randomUUID();
+    const timer=setTimeout(()=>{child.off('message',receive);reject(new Error('Isolated database control timed out'));},10000);
+    const receive=message=>{if(message?.id!==id)return;clearTimeout(timer);child.off('message',receive);message.error?reject(new Error(message.error)):resolve(message.result);};
+    child.on('message',receive);child.send({testControl:true,id,command,needle});
+  });
+}
 let logs = '';
 child.stdout.on('data', chunk => {logs += chunk;});
 child.stderr.on('data', chunk => {logs += chunk;});
@@ -27,7 +35,7 @@ async function main() {
   const login = await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'admin',password})});
   assert.equal(login.status,200,JSON.stringify(login.body));
   const cookie = login.cookie;
-  const seed = {tasks:[{id:'seed-a',title:'Retain task',date:'2026-10-05',done:false,createdAt:1,catId:'cat'}],categories:[{id:'cat',name:'Study'}],notes:[{id:'note-a',title:'Retain note',content:'Keep'}],tracker:{weeks:[]},trackerSemesters:[],_studyquestV22:{schemaVersion:1,subtasks:{schemaVersion:1,revision:1,records:{'task:seed-a':{parentTaskId:'seed-a',subtasks:[{id:'legacy-s',title:'Legacy subtask',checked:false,order:0,createdAt:1,updatedAt:1}]}},trash:[]}}};
+  const seed = {tasks:[{id:'seed-a',title:'Retain task',date:'2026-10-05',done:false,createdAt:1,catId:'cat',notes:'Private task note'}],categories:[{id:'cat',name:'Study'}],notes:[{id:'note-a',title:'Retain note',content:'Keep'}],tracker:{weeks:[]},trackerSemesters:[],_studyquestV22:{schemaVersion:1,subtasks:{schemaVersion:1,revision:1,records:{'task:seed-a':{parentTaskId:'seed-a',subtasks:[{id:'legacy-s',title:'Legacy subtask',checked:false,order:0,createdAt:1,updatedAt:1}]}},trash:[]}}};
   let baseline = (await request('/api/v2/state',{},cookie)).body;
   seed.tasks.push({id:'multi',title:'Multi-day',date:'2026-09-30',endDate:'2026-10-02'},
     {id:'recurring-a',title:'Occurrence A',date:'2026-10-01',recurrence:'weekly',recurrenceId:'series'},
@@ -35,6 +43,25 @@ async function main() {
   const save = (state,base=baseline) => request('/api/v2/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state,baseRevision:base.revision,baseHash:base.stateHash,mutationId:crypto.randomUUID(),deviceId:'v24-isolated-test'})},cookie);
   const seeded = await save(seed); assert.equal(seeded.status,200,JSON.stringify(seeded.body));
   baseline = (await request('/api/v2/state',{},cookie)).body;
+  assert.equal((await request('/api/v2/tasks/snapshot')).status,401,'anonymous task snapshots must be denied');
+  assert.equal((await request('/api/v2/tasks/snapshot',{},cookie)).status,401,'browser sessions must not use the Worker endpoint');
+  const pairCode=await request('/api/admin/pairing-code',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deviceName:'Synthetic LINE Worker'})},cookie);
+  assert.equal(pairCode.status,200,JSON.stringify(pairCode.body));
+  const paired=await request('/api/sync/pair',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:pairCode.body.code,deviceName:'Synthetic LINE Worker'})});
+  assert.equal(paired.status,200,JSON.stringify(paired.body));
+  const taskSnapshot=await request('/api/v2/tasks/snapshot',{headers:{authorization:`Bearer ${paired.body.token}`}});
+  assert.equal(taskSnapshot.status,200,JSON.stringify(taskSnapshot.body));
+  const digestTaskFields=['id','title','catId','date','time','done','recurrence','recurrenceRootDate','endDate','priorityLevel'];
+  assert.deepEqual(taskSnapshot.body.tasks,seed.tasks.map(task=>Object.fromEntries(digestTaskFields.filter(field=>Object.hasOwn(task,field)).map(field=>[field,task[field]]))));
+  assert.deepEqual(taskSnapshot.body.categories,seed.categories);
+  assert.equal(Object.hasOwn(taskSnapshot.body,'notes'),false,'notes must never leave through the task endpoint');
+  assert.equal(JSON.stringify(taskSnapshot.body).includes('Private task note'),false,'task notes must not leave through the task endpoint');
+  const ordinary=await request('/api/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'ordinary-qa',password:crypto.randomBytes(20).toString('hex'),inviteCode:invite})});
+  assert.equal(ordinary.status,201,JSON.stringify(ordinary.body));
+  assert.equal((await request('/api/v2/tasks/snapshot',{},ordinary.cookie)).status,401,'ordinary users cannot read the admin task endpoint');
+  const ordinaryState=await request('/api/v2/state',{},ordinary.cookie);
+  assert.equal(ordinaryState.status,200);
+  assert.equal(ordinaryState.body.state,null,'ordinary users must not receive admin state');
   const stale = await save({...seed,tasks:[]},{...baseline,stateHash:'a'.repeat(64)});
   assert.notEqual(stale.status,200,'wrong hash must not replace account');
   const destructive = await save({...seed,tasks:[]});
@@ -45,7 +72,7 @@ async function main() {
   assert.ok((await request('/',{},cookie)).body.includes('STUDYQUEST_VERSION = 24'));
   assert.ok((await request('/app.html',{},cookie)).body.includes('!next'));
   assert.ok(!(await request('/app.html?stable=1',{},cookie)).body.includes('if (!user.legacy && !wantsStable && !next)') || (await request('/app.html?stable=1',{},cookie)).body.includes('!wantsStable'));
-  browser = await chromium.launch({headless:true});
+  browser = await chromium.launch({headless:true,...(process.env.STUDYQUEST_TEST_CHROME ? {executablePath:process.env.STUDYQUEST_TEST_CHROME} : {})});
   const context = await browser.newContext({viewport:{width:1280,height:900}});
   let offline=false;
   await context.route('**/*',async route=>{
@@ -122,7 +149,96 @@ async function main() {
   assert.equal(afterFailure.revision,beforeFailure.revision);
   assert.equal(afterFailure.stateHash,beforeFailure.stateHash);
   assert.equal(await page.evaluate(()=>window.SQ_State.tasks[0].date),'2026-10-08');
+  // Reproduce the original 89 -> 78 incident with a newer marker and a full
+  // browser store. This account and database are synthetic and isolated.
+  const incident={updatedAt:1000,tasks:Array.from({length:89},(_,i)=>({id:`incident-task-${i}`,title:`Synthetic ${i}`,date:'2026-10-08',done:false,createdAt:i+1})),
+    notes:[{id:'incident-note',title:'Keep'}],trips:[{id:'incident-trip',name:'Keep'}],tracker:{weeks:Array.from({length:4},(_,i)=>({id:`incident-week-${i}`,label:`Week ${i}`,rows:[]}))},trackerSemesters:[]};
+  const ordinaryBase=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  const incidentSave=await request('/api/v2/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state:incident,baseRevision:ordinaryBase.revision,baseHash:ordinaryBase.stateHash,mutationId:crypto.randomUUID(),deviceId:'incident-seed'})},ordinary.cookie);
+  assert.equal(incidentSave.status,200);
+  const incidentBase=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  const staleIncident={...incident,tasks:incident.tasks.slice(0,78),trips:[],tracker:{weeks:[]}};
+  const staleHash=require('../lib/state-safety').stateHash(staleIncident);
+  const incidentContext=await browser.newContext();
+  const incidentRequests=[];
+  await incidentContext.route('**/*',async route=>{
+    const u=new URL(route.request().url());
+    if(u.origin!==hostedOrigin)return route.abort();
+    incidentRequests.push({path:u.pathname,method:route.request().method()});
+    const response=await fetch(origin+u.pathname+u.search,{method:route.request().method(),headers:{cookie:ordinary.cookie,origin,'content-type':'application/json'},body:route.request().postDataBuffer()||undefined,redirect:'manual'});
+    await route.fulfill({status:response.status,headers:{'content-type':response.headers.get('content-type')||'text/plain'},body:Buffer.from(await response.arrayBuffer())});
+  });
+  await incidentContext.addInitScript(({stale,revision,hash})=>{
+    localStorage.setItem('studyquest_v3_ordinary-qa',JSON.stringify(stale));
+    localStorage.setItem('studyquest_v3_ordinary-qa_live_sync_meta',JSON.stringify({revision,stateHash:hash,pending:true}));
+    const chunk='x'.repeat(65536);let filled=false;
+    try{for(let i=0;i<200;i++)localStorage.setItem(`synthetic-quota-${i}`,chunk);}catch(error){filled=error.name==='QuotaExceededError';}
+    window.__quotaActuallyFilled=filled;
+  },{stale:staleIncident,revision:incidentBase.revision,hash:staleHash});
+  const incidentPage=await incidentContext.newPage();
+  await incidentPage.goto(hostedOrigin+'/v24');await incidentPage.waitForTimeout(1800);
+  assert.equal(await incidentPage.evaluate(()=>window.__quotaActuallyFilled),true,'Browser storage must actually reach quota');
+  await incidentPage.reload();await incidentPage.waitForTimeout(1800);
+  const attempt=await incidentPage.evaluate(async({stale,revision,hash})=>{
+    v16UserInteracted=true;liveSync.conflict=null;liveSync.preview=null;
+    setSQState(normalizeState(stale));liveSync.revision=revision;liveSync.stateHash=hash;
+    return saveStateToCloud({lineageOverride:{baseRevision:revision,baseHash:hash,mutationId:crypto.randomUUID(),deviceId:'incident-restart'}});
+  },{stale:staleIncident,revision:incidentBase.revision,hash:staleHash});
+  assert.notEqual(attempt.ok,true,'Stale state must never receive a save success');
+  const guarded=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  assert.equal(guarded.stateHash,incidentBase.stateHash);
+  assert.deepEqual(guarded.state.tasks.map(task=>task.id),incident.tasks.map(task=>task.id));
+  assert.equal(guarded.state.trips.length,1);assert.equal(guarded.state.tracker.weeks.length,4);
+  const removalAttempt=await request('/api/v2/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state:staleIncident,baseRevision:guarded.revision,baseHash:guarded.stateHash,mutationId:crypto.randomUUID(),deviceId:'incident-correct-hash'})},ordinary.cookie);
+  assert.equal(removalAttempt.status,409,'Deletion protection must also reject stale truncation with a correct hash');
+  const ordinaryMeta=(await request('/api/v2/state/meta',{},ordinary.cookie)).body;
+  assert.equal(ordinaryMeta.stateHash,incidentBase.stateHash);
+  assert.notEqual(ordinaryMeta.stateHash,afterFailure.stateHash,'Metadata must remain account scoped');
+  await incidentContext.close();
+  const deviceSave=(next,base,device,changeSet)=>request('/api/v2/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state:next,baseRevision:base.revision,baseHash:base.stateHash,mutationId:crypto.randomUUID(),deviceId:device,changeSet})},ordinary.cookie);
+  const editedIncident=structuredClone(guarded.state);editedIncident.tasks[0].title='Device A edit';
+  assert.equal((await deviceSave(editedIncident,guarded,'device-a')).status,200);
+  const losingEdit=structuredClone(guarded.state);losingEdit.tasks[1].title='Device B pending edit';
+  const concurrent=await deviceSave(losingEdit,guarded,'device-b');
+  assert.equal(concurrent.status,409,'Stale second-device edits must be refused');
+  assert.equal(concurrent.body.copiesPreserved,true,'The refused device candidate must be escrowed');
+  const deleteBase=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  const deletedIncident=structuredClone(deleteBase.state);deletedIncident.tasks.shift();
+  const removal=require('../lib/state-safety').stateRecordDiff(deleteBase.state,deletedIncident).removed.find(row=>row.collection==='tasks');
+  assert.equal((await deviceSave(deletedIncident,deleteBase,'device-a-delete',{deletes:[{key:removal.key}]})).status,200);
+  const editDeleted=structuredClone(deleteBase.state);editDeleted.tasks[0].title='Edited while other device deleted';
+  const editDeleteConflict=await deviceSave(editDeleted,deleteBase,'device-b-edit');
+  assert.equal(editDeleteConflict.status,409);assert.equal(editDeleteConflict.body.copiesPreserved,true);
+  const finalOrdinary=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  assert.equal(finalOrdinary.state.tasks.length,88);assert.equal(finalOrdinary.state.tasks.some(task=>task.id===incident.tasks[0].id),false);
+  assert.equal((await request('/api/v2/state',{},cookie)).body.stateHash,afterFailure.stateHash,'Ordinary device conflicts must not touch admin');
+  // Prove transaction failures cannot leave a changed account without its
+  // immutable version or acceptance event. Injection lives only in this adapter.
+  for (const needle of ['insert into state_versions','insert into state_save_events']) {
+    const before=await databaseControl('inspect');
+    const base=(await request('/api/v2/state',{},ordinary.cookie)).body;
+    const next=structuredClone(base.state);next.notes[0].title='Must roll back';
+    await databaseControl('fail-next',needle);
+    assert.equal((await deviceSave(next,base,'transaction-failure')).status,500);
+    const after=await databaseControl('inspect');
+    assert.deepEqual(after.accounts,before.accounts,'Every account column must roll back');
+    assert.deepEqual(after.state_versions,before.state_versions,'Immutable versions must roll back');
+    assert.equal(after.state_save_events.filter(row=>row.result==='accepted').length,before.state_save_events.filter(row=>row.result==='accepted').length,'No acceptance event may survive a failed transaction');
+  }
+  const replayBase=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  const replayState=structuredClone(replayBase.state);replayState.notes[0].title='Accepted once despite lost reply';
+  const replayBody={state:replayState,baseRevision:replayBase.revision,baseHash:replayBase.stateHash,mutationId:crypto.randomUUID(),deviceId:'lost-reply'};
+  const replay=()=>request('/api/v2/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(replayBody)},ordinary.cookie);
+  const accepted=await replay();assert.equal(accepted.status,200);
+  const repeat=await replay();assert.equal(repeat.body.idempotent,true);assert.equal(repeat.body.revision,accepted.body.revision);
+  const advanced=(await request('/api/v2/state',{},ordinary.cookie)).body;
+  const other=structuredClone(advanced.state);other.notes[0].title='Newer device edit';assert.equal((await deviceSave(other,advanced,'device-after-lost-reply')).status,200);
+  const late=await replay();assert.equal(late.body.requiresRefresh,true);assert.equal(late.body.revision,accepted.body.revision);assert.equal(late.body.currentRevision,advanced.revision+1);
+  assert.equal((await request('/api/v2/state',{},ordinary.cookie)).body.state.notes[0].title,'Newer device edit');
+  console.log('Transaction atomicity and idempotent lost-reply retry passed, including newer cloud edits before replay.');
   console.log('Actual PostgreSQL/server v24: read-only startup, stale hash and deletion rejection, durable dates/subtasks, old-client preservation, quota fallback, offline retry and responsive layouts passed.');
+  console.log('Original incident replay passed: actual full storage, stale 78-task copy, newer revision marker, restart and attempted upload retain all 89 cloud tasks, trip and four weeks.');
+  console.log('Two-device edit and edit-versus-delete conflicts retain cloud state, escrow pending copies and isolate ordinary/admin accounts.');
 }
 fs.mkdirSync(path.join(root,'.test-artifacts'),{recursive:true});
 main().catch(e=>{console.error(e);if(logs.includes('server_startup_failed'))console.error(logs);process.exitCode=1;}).finally(async()=>{await browser?.close();child.kill();});

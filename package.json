@@ -22,7 +22,10 @@
     "test:v21:flows": "node scripts/test-v21-hosted-flows.js",
     "test:v22": "node scripts/test-v22-hosted-release.js && node scripts/test-v22-account-store.js",
     "test:v22:browser": "node scripts/test-v22-browser.js",
-    "test:v24": "node scripts/test-v24-release.js && node scripts/test-v24-hosted-flows.js && node scripts/test-v24-postgres.js"
+    "test:v24": "node scripts/test-v24-release.js && node scripts/test-v24-hosted-flows.js && node scripts/test-v24-postgres.js",
+    "test:backup:restore": "node scripts/test-backup-restore.js",
+    "test:v24:save-safety": "node scripts/test-v24-save-failures.js --hosted-only",
+    "test:v25": "node scripts/test-v25-access.js && node scripts/test-v25-hosted-flows.js && node scripts/test-v25-postgres.js && node scripts/test-v25-continuity.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

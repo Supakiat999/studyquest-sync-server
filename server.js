@@ -50,6 +50,10 @@ const V24_HTML_PATH = path.join(ROOT, "public", "claudever24.html");
 const V24_VERSION_PATH = path.join(ROOT, "public", "v24-version.json");
 const V24_MANIFEST = JSON.parse(fs.readFileSync(V24_VERSION_PATH, "utf8"));
 const V24_ASSETS = new Set(Object.keys(V24_MANIFEST.assets).map(name => "/" + name));
+const V25_HTML_PATH = path.join(ROOT, "public", "claudever25.html");
+const V25_VERSION_PATH = path.join(ROOT, "public", "v25-version.json");
+const V25_MANIFEST = JSON.parse(fs.readFileSync(V25_VERSION_PATH, "utf8"));
+const V25_ASSETS = new Set(Object.keys(V25_MANIFEST.assets).map(name => "/" + name));
 const V18_ADMIN_COURSE_CRITERIA = require("./lib/v18-admin-course-criteria");
 const DEVICE_RECOVERY_HTML_PATH = path.join(ROOT, "public", "device-recovery.html");
 const DEVICE_RECOVERY_JS_PATH = path.join(ROOT, "public", "device-recovery.js");
@@ -107,6 +111,13 @@ const V24_ACCESS_MODE = (() => {
   return ["off", "canary", "all"].includes(configured) ? configured : "off";
 })();
 const V24_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V24_CANARY_USERS || "")
+  .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
+// Independent opt-in; v25 cannot become the main application in this phase.
+const V25_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V25_ACCESS || "off").trim().toLowerCase();
+  return ["off", "canary", "all"].includes(configured) ? configured : "off";
+})();
+const V25_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V25_CANARY_USERS || "")
   .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
 const MAIN_APP_VERSION = (() => {
   const configured = String(process.env.STUDYQUEST_MAIN_VERSION || "15").trim();
@@ -401,6 +412,24 @@ function v24LoginHtml(value, returnToDefault = false) {
 function canUseRecoveryUxV2(user) {
   if (!user || user.sync_device_id || RECOVERY_UX_MODE === "off") return false;
   return RECOVERY_UX_MODE === "all" || user.username === ADMIN_USERNAME;
+}
+
+function canAccessV25(user) {
+  if (!user || user.sync_device_id || V25_ACCESS_MODE === "off") return false;
+  return V25_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME
+    || V25_CANARY_USERS.has(String(user.username || "").toLowerCase());
+}
+
+function authenticatedV25Html(user) {
+  // Keep inherited feature flags and all persistence namespaces from v24.
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({username:user.username})};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};window.__STUDYQUEST_V20_HOSTED__=true;window.__STUDYQUEST_V21_HOSTED__=true;window.__STUDYQUEST_V24_HOSTED__=true;window.__STUDYQUEST_V25_HOSTED__=true;</script>`;
+  return htmlTemplate(V25_HTML_PATH).replace("</head>", bootstrap + "\n</head>");
+}
+
+function v25LoginHtml(value) {
+  const anchor = '      const wantsStable = search.get("stable") === "1";';
+  if (!String(value).includes(anchor)) throw new Error("Missing v25 login return anchor");
+  return String(value).replace(anchor, anchor + '\n      if (!user.legacy && !wantsStable && next === "v25") { window.location.replace("/v25"); return; }');
 }
 
 function stableHtmlWithRecoveryUxV2() {
@@ -2273,6 +2302,41 @@ async function handleVersionedStateMeta(req, res) {
   }, { etag });
 }
 
+async function handleAdminTaskSnapshot(req, res) {
+  if (req.method !== "GET") return send(req, res, 405, "Method not allowed");
+  // The LINE Worker uses an admin device token. Browser sessions and tokens for
+  // other accounts must not expose an account's task snapshot through this API.
+  if (!String(req.headers.authorization || "").startsWith("Bearer ")) {
+    return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  }
+  const user = await currentUser(req, { includeState:false });
+  if (!user) return sendJson(req, res, 401, { ok:false, error:"AUTH_REQUIRED" });
+  if (user.username !== ADMIN_USERNAME || !user.sync_device_id) {
+    return sendJson(req, res, 403, { ok:false, error:"ADMIN_DEVICE_REQUIRED" });
+  }
+  const result = await pool.query(
+    `select state->'tasks' as tasks, state->'categories' as categories,
+            state->>'updatedAt' as updated_at
+     from accounts where username = $1`,
+    [ADMIN_USERNAME]
+  );
+  const row = result.rows[0];
+  if (!row) return sendJson(req, res, 404, { ok:false, error:"ACCOUNT_NOT_FOUND" });
+  // The LINE digest reads these fields only. Task notes and unrelated account
+  // data must not be copied to the Worker or its KV snapshot.
+  const taskFields = ["id", "title", "catId", "date", "time", "done", "recurrence", "recurrenceRootDate", "endDate", "priorityLevel"];
+  const tasks = Array.isArray(row.tasks) ? row.tasks.map((task) => {
+    if (!task || typeof task !== "object" || Array.isArray(task)) return {};
+    return Object.fromEntries(taskFields.filter((field) => Object.hasOwn(task, field)).map((field) => [field, task[field]]));
+  }) : [];
+  sendJson(req, res, 200, {
+    ok:true,
+    tasks,
+    categories:Array.isArray(row.categories) ? row.categories.map((category) => ({ id:category?.id, name:category?.name })) : [],
+    updatedAt:Number(row.updated_at || 0) || 0,
+  });
+}
+
 async function handleVersionedState(req, res) {
   const user = await currentUser(req, { includeState:req.method === "GET" });
   if (!user) {
@@ -3603,6 +3667,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (["/v25", "/claudever25.html", "/v25-version.json"].includes(url.pathname)) {
+      if (V25_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
+      const user = await currentUser(req, { includeState:false });
+      if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=v25" }); return; }
+      if (!canAccessV25(user)) { send(req, res, 403, "v25 is not enabled for this account"); return; }
+      if (url.pathname === "/v25" || url.pathname === "/claudever25.html") {
+        send(req, res, 200, authenticatedV25Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
+      } else {
+        sendJson(req, res, 200, { ...V25_MANIFEST, deployed:true, main:false, accessMode:V25_ACCESS_MODE });
+      }
+      return;
+    }
+
+    // These files contain code only. Either owning version may authorize them;
+    // disabling v24 must not break an independently eligible v25 session.
+    if (V24_ASSETS.has(url.pathname) || V25_ASSETS.has(url.pathname)) {
+      if (V24_ACCESS_MODE === "off" && V25_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
+      const user = await currentUser(req, { includeState:false });
+      if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=" + (V25_ACCESS_MODE !== "off" ? "v25" : "v24") }); return; }
+      if (!(V24_ASSETS.has(url.pathname) && canAccessV24(user)) && !(V25_ASSETS.has(url.pathname) && canAccessV25(user))) { send(req, res, 403, "This version is not enabled for this account"); return; }
+      send(req, res, 200, fs.readFileSync(path.join(ROOT, "public", url.pathname.slice(1))), { "content-type":url.pathname.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8", "cache-control":"no-cache" });
+      return;
+    }
+
     if (["/v24", "/claudever24.html", "/v24-version.json"].includes(url.pathname) || V24_ASSETS.has(url.pathname)) {
       if (V24_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
       const user = await currentUser(req, { includeState:false });
@@ -3759,6 +3847,7 @@ const server = http.createServer(async (req, res) => {
       let stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
       if (url.searchParams.get("next") === "v21") stableHtml = v21LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v22") stableHtml = v22LoginHtml(stableHtml);
+      if (url.searchParams.get("next") === "v25") stableHtml = v25LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v24" || (MAIN_APP_VERSION === "24" && !url.searchParams.get("next"))) stableHtml = v24LoginHtml(stableHtml, MAIN_APP_VERSION === "24");
       send(req, res, 200, stableHtml, { "content-type": "text/html; charset=utf-8" });
       return;
@@ -3833,6 +3922,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/v2/state/meta") {
       await handleVersionedStateMeta(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/v2/tasks/snapshot") {
+      await handleAdminTaskSnapshot(req, res);
       return;
     }
 
@@ -3955,6 +4049,14 @@ const server = http.createServer(async (req, res) => {
 
       if (url.pathname === "/api/version") {
         const requestedVersion = url.searchParams.get("version");
+        if (requestedVersion === "25") {
+          if (V25_ACCESS_MODE === "off") { sendJson(req, res, 404, { ok:false, error:"NOT_FOUND" }); return; }
+          const user = await currentUser(req, { includeState:false });
+          if (!user) { sendJson(req, res, 401, { ok:false, error:"LOGIN_REQUIRED" }); return; }
+          if (!canAccessV25(user)) { sendJson(req, res, 403, { ok:false, error:"VERSION_NOT_ENABLED" }); return; }
+          sendJson(req, res, 200, { ok:true, ...V25_MANIFEST, deployed:true, main:false, route:"/v25", accessMode:V25_ACCESS_MODE });
+          return;
+        }
         if (requestedVersion === "24") {
           sendJson(req, res, 200, { ok:true, ...V24_MANIFEST, deployed:true, main:MAIN_APP_VERSION === "24", route:MAIN_APP_VERSION === "24" ? "/" : "/v24", accessMode:V24_ACCESS_MODE });
           return;
