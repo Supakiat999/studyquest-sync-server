@@ -1,0 +1,31 @@
+/* Dialog and keyboard access only. Laptop layout remains authoritative. */
+.v24-skip{position:fixed;top:-100px;left:16px;z-index:10050;background:var(--surface);color:var(--text);padding:12px;border:2px solid var(--accent);border-radius:10px}
+.v24-skip:focus{top:12px}
+.v24-inline-close{float:right;min-width:38px;margin:-8px -8px 8px 12px}
+.v24-control-label{display:flex;flex-direction:column;gap:5px;min-width:0;font-size:12px;line-height:1.4}.v24-control-label>span{font-weight:600}.v24-control-label :is(input,select,textarea){width:100%}
+
+/* Hosted editor class names retain the laptop inline-title presentation. */
+  .v24-task-title-inline,
+  .v24-task-title-input {
+    display:block; width:100%; min-width:0; box-sizing:border-box;
+    font:inherit; line-height:inherit; text-align:left; overflow-wrap:anywhere;
+  }
+  .v24-task-title-inline {
+    border:0; padding:0; color:inherit; background:transparent; cursor:text;
+  }
+  .v24-task-title-inline:hover { text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px; }
+  .v24-task-title-inline:focus-visible,
+  .v24-task-title-input:focus-visible {
+    outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;
+  }
+  .v24-task-title-input {
+    border:1px solid var(--accent); border-radius:5px; padding:3px 6px;
+    color:var(--text); background:var(--surface); box-shadow:0 0 0 2px rgba(124,106,247,0.12);
+  }
+  .v24-task-title-input.invalid { border-color:var(--red,#f76a6a); box-shadow:0 0 0 2px rgba(247,106,106,0.14); }
+
+
+    .v24-first-subtask-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 200px); gap: 10px; }
+    .v24-first-subtask-row > div { min-width: 0; }
+    .v24-first-subtask-row label { display: block; margin-bottom: 6px; }
+    @media (max-width: 560px) { .v24-first-subtask-row { grid-template-columns: 1fr; gap: 6px; } }

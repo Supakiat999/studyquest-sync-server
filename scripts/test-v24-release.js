@@ -12,7 +12,8 @@ for (const [file, hash] of Object.entries({ 'claudever24.html':manifest.hash, ..
 const html = read('public/claudever24.html');
 assert.doesNotMatch(html, /location\.(replace|assign)[^\n]*127\.0\.0\.1/);
 assert.match(html, /const STUDYQUEST_VERSION = 24/);
-assert.match(html, /v24-interface.css/);
+assert.match(html, /compact-interface.css/);
+assert.doesNotMatch(html, /body class="sq-v24"|src="\/v24-interface.js"/);
 // Regenerating v24 from an older base must not silently remove the safety patch.
 assert.match(html, /V24_VERIFIED_SAVE_BEGIN/);
 assert.doesNotMatch(html, /clearV13DeviceOutboxThrough\(/);

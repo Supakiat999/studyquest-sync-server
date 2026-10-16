@@ -1074,7 +1074,7 @@
   .v20-quick-note-card {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) minmax(92px, auto);
-    align-items: center;
+    align-items: start;
     gap: 9px;
     width: 100%;
     box-sizing: border-box;
@@ -1093,6 +1093,10 @@
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
+    min-height: 38px;
+    max-height: 82px;
+    resize: none;
+    overflow-y: hidden;
     border: 1px solid var(--border);
     border-radius: 7px;
     background: var(--surface2);
@@ -1100,6 +1104,7 @@
     padding: 8px 10px;
     font-family: 'Syne', sans-serif;
     font-size: 14px;
+    line-height: 1.45;
   }
   .v20-quick-note-input::placeholder { color: var(--text-muted); }
   .v20-quick-note-input:focus {
@@ -1390,6 +1395,24 @@
   .calendar-task-title,
   .today-task-name,
   .focus-modal-title { flex:1 1 160px; min-width:0; }
+  .v23-task-title-inline,
+  .v23-task-title-input {
+    display:block; width:100%; min-width:0; box-sizing:border-box;
+    font:inherit; line-height:inherit; text-align:left; overflow-wrap:anywhere;
+  }
+  .v23-task-title-inline {
+    border:0; padding:0; color:inherit; background:transparent; cursor:text;
+  }
+  .v23-task-title-inline:hover { text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px; }
+  .v23-task-title-inline:focus-visible,
+  .v23-task-title-input:focus-visible {
+    outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;
+  }
+  .v23-task-title-input {
+    border:1px solid var(--accent); border-radius:5px; padding:3px 6px;
+    color:var(--text); background:var(--surface); box-shadow:0 0 0 2px rgba(124,106,247,0.12);
+  }
+  .v23-task-title-input.invalid { border-color:var(--red,#f76a6a); box-shadow:0 0 0 2px rgba(247,106,106,0.14); }
   .task-drag-handle {
     color: var(--text-muted); font-size: 14px; cursor: grab; flex-shrink: 0;
     padding: 0 2px; line-height: 1; user-select: none; opacity: 0.45;
@@ -2005,11 +2028,17 @@
   .note-card-head { display:flex;align-items:flex-start;gap:8px;min-width:0; }
   .note-card-title { font-size:14px;font-weight:800;word-break:break-word;line-height:1.3; }
   .note-card-preview {
-    font-size:12px;color:var(--text-muted);line-height:1.55;overflow:hidden;
-    white-space:pre-wrap;word-break:break-word;max-height:7.2em;
+    font-size:12px;color:var(--text-muted);line-height:1.55;overflow-x:hidden;overflow-y:auto;
+    white-space:pre-wrap;word-break:break-word;max-height:15.5em;
     padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.025);
     border:1px solid rgba(255,255,255,0.04);
+    scrollbar-width:thin;
+    scrollbar-color:var(--accent) transparent;
   }
+  #notesList { align-items:start; }
+  .note-card-preview::-webkit-scrollbar { width:6px; }
+  .note-card-preview::-webkit-scrollbar-thumb { background:rgba(124,106,247,.65);border-radius:999px; }
+  .note-card-preview::-webkit-scrollbar-track { background:transparent; }
   .note-card-footer { display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap; }
   .note-tag { font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(124,106,247,0.15);color:var(--accent);white-space:nowrap; }
   .note-date { font-size:10px;color:var(--text-muted);font-family:'Space Mono',monospace; }
@@ -2017,6 +2046,15 @@
   .note-del:hover { color:var(--red); }
 
   .note-editor-content { white-space:pre-wrap;font-size:13px;line-height:1.7;color:var(--text); }
+  .note-editor-textarea {
+    min-height:96px;
+    max-height:360px;
+    resize:vertical;
+    overflow-y:hidden;
+    font-family:'Space Mono',monospace;
+    font-size:13px;
+    line-height:1.6;
+  }
 
   /* -- CHECKLIST TAB -- */
   .checklist-layout { display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start; }
@@ -5417,10 +5455,16 @@
     .v19-calendar-workload-summary { white-space:normal; }
   }
 </style>
-<link rel="stylesheet" href="/v24-interface.css">
+<style>
+    .v23-first-subtask-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 200px); gap: 10px; }
+    .v23-first-subtask-row > div { min-width: 0; }
+    .v23-first-subtask-row label { display: block; margin-bottom: 6px; }
+    @media (max-width: 560px) { .v23-first-subtask-row { grid-template-columns: 1fr; gap: 6px; } }
+  </style>
+<link rel="stylesheet" href="/compact-interface.css">
 <link rel="stylesheet" href="/v24-date-shifts.css">
 </head>
-<body class="sq-v24">
+<body>
 <div id="app">
   <!-- LEVEL UP FLASH -->
   <div class="levelup-flash" id="lvlFlash"></div>
@@ -6805,7 +6849,7 @@
 <script src="/v24-account-sync.js"></script>
 <script src="/v24-manual-courses.js"></script>
 <script src="/v24-subtasks.js"></script>
-<script src="/v24-interface.js"></script>
+<script src="/compact-interface.js"></script>
 <script>
 // ════════════════════════════════════════════════════════
 // STATE
@@ -8117,10 +8161,10 @@ function renderV13ModeUI() {
   const label = document.getElementById('v13ModeLabel');
   const title = document.getElementById('v13ModeTitle');
   const copy = document.getElementById('v13ModeCopy');
-  if (label) label.textContent = hosted ? 'Hosted v20' : 'StudyQuest v25';
-  if (title) title.textContent = hosted ? 'Hosted v20 pilot' : 'StudyQuest v25 workspace lab';
+  if (label) label.textContent = hosted ? 'Hosted v25' : 'StudyQuest v25';
+  if (title) title.textContent = hosted ? 'Hosted v25 pilot' : 'StudyQuest v25 workspace lab';
   if (copy) copy.textContent = hosted
-    ? 'Protected v20 pilot. Account data is revision-protected and the stable app remains available.'
+    ? 'Protected v25 pilot. Account data is revision-protected and the stable app remains available.'
       : 'StudyQuest v25 adds a browser-local command-center note over the existing Study and Life workspace. It is not deployed; export before major experiments.';
 }
 
@@ -26740,10 +26784,7 @@ window.StudyQuestV21?.install(window.studyQuestV21Core);
 window.StudyQuestV21AccountSync?.install(window.studyQuestV21Core);
 window.StudyQuestV21Manual?.install(window.studyQuestV21Core);
 window.StudyQuestV24Subtasks?.install(window.studyQuestV21Core);
-window.StudyQuestV24?.install();
-// V25 identity only; shared interface code and persistence keys stay frozen.
-const v25NavLabel = document.querySelector("#v24NavBrand small");
-if (v25NavLabel) v25NavLabel.textContent = "YOUR WORKSPACE · V25";
+window.StudyQuestCompactInterface?.install();
 installV18Accessibility();
 renderV13ModeUI();
 renderAll();

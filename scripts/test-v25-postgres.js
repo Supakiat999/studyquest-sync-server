@@ -84,7 +84,7 @@ async function main() {
   });
   const page = await context.newPage(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(hostedOrigin+'/v25');await page.waitForTimeout(1800);
-  assert.equal(await page.locator('#v24NavBrand small').textContent(),'YOUR WORKSPACE · V25');
+  assert.equal(await page.locator('#v13ModeLabel').textContent(),'Hosted v25');
   if(await page.locator('#v21RecoveryModal.open').count()) {await page.locator('[data-v21-choice="copy"]').click();await page.locator('#v21RecoveryApply').click();await page.waitForTimeout(1500);}
   assert.equal((await request('/api/v2/state',{},cookie)).body.revision,baseline.revision,'read-only startup must not upload');
   await page.evaluate(()=>window.StudyQuestDeviceDateShifts.moveByDay('multi',1));

@@ -51,7 +51,7 @@ const ui=async page=>{await page.evaluate(()=>{activeFilter='all';activeCatFilte
   for(const width of [390,820,1440]){
    await page.setViewportSize({width,height:900});activeVersion=24;const a=await open();await a.setViewportSize({width,height:900});await a.waitForTimeout(250);const before=await ui(a);
    activeVersion=25;const b=await open();await b.setViewportSize({width,height:900});await b.waitForTimeout(250);const after=await ui(b);
-   assert.ok(after.tasks.length>0,'Parity must compare rendered synthetic tasks');assert.deepEqual(after,before,'V25 visual geometry must match v24 at '+width);assert.deepEqual(await full(b),visual);if(runtime==='hosted')assert.equal(await b.locator('#v24NavBrand small').textContent(),'YOUR WORKSPACE · V25');parity.push({width,tasks:after.tasks.length,controls:after.controls});await a.close();await b.close();
+   assert.ok(after.tasks.length>0,'Parity must compare rendered synthetic tasks');assert.deepEqual(after,before,'V25 visual geometry must match v24 at '+width);assert.deepEqual(await full(b),visual);if(runtime==='hosted')assert.equal(await b.locator('#v13ModeLabel').textContent(),'Hosted v25');parity.push({width,tasks:after.tasks.length,controls:after.controls});await a.close();await b.close();
   }
   report.push({runtime,completeHashRoundTrip:true,pendingRoundTrip:true,oldReplyRetainsNewMutation:true,supersededRecoveryCopy:true,persistentReopen:true,accountSwitch:runtime==='hosted',parity});await stopChrome();
  }

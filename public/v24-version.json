@@ -6,19 +6,19 @@
   "aliases": [
     "/claudever24.html"
   ],
-  "hash": "ca6dd1df46758f4be9e3f36cfc020566b93ba30818a924b5e40a23223bd4bc53",
+  "hash": "9eacd03097b8c75f03ca505eaf34e2809131ba8a8223ceab7f4817aae8bd0cd1",
   "assets": {
     "v24-v18-features.js": "c37cefbe493099e2dabdc9b6ff7890d3fda46efdee5abcedcf9d61fb16e5a407",
     "v24-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
     "v24-v20-features.js": "a2faeffec903ce133a333fab81cd1ae0450cd0636b3f26aa8eade89c54954bad",
     "v24-local-features.js": "08b446b3f276ce9bc4b6a88a37ce5b56a37d428fd9a8a3ba7b1e27dce11e9a79",
     "v24-manual-courses.js": "a1251e07327541aff2f628c98fba259f41dcfca21662a69d1b1e1326f4ad489b",
-    "v24-interface.js": "fa19c1fa1cd9334102986b9744afee8f1ee7ce53a0662403328193cae10575af",
-    "v24-interface.css": "aa815481b3373aeafb709066abe4393a13f8f54f981f7671b999e745462d534d",
     "v24-subtasks.js": "351632714d3d4fd5afa60941c873eb11662b82fbb73316f057be06f7bba5d0f3",
     "v24-account-sync.js": "9a548764483a95a2beef9f3c832b1008562de3fb79a0dbdba0533fa26f539e37",
     "v24-date-shifts.css": "eb9c1b0964b106c506e6e9fac120b640a49974a0eead970816efb0d0e7050a86",
-    "v24-date-shifts.js": "012107b2f7277feb7db3cc5647bf6022915946d3b6b4c737b0f9377ddc9ca32a"
+    "v24-date-shifts.js": "012107b2f7277feb7db3cc5647bf6022915946d3b6b4c737b0f9377ddc9ca32a",
+    "compact-interface.js": "0b1807e13750195f11357cc5cf4312c8758a57a91e70fc4ffcbe8914b79817dd",
+    "compact-interface.css": "1bf39534358dc6c251ccc2f0d47949b4fd8da464a01e09e75cfd68cc3fd25289"
   },
   "localOnly": false,
   "hosted": true,
@@ -29,5 +29,6 @@
   "accessMode": "server-controlled",
   "baseHash": "a1118eb73db6d76d7b24aa0cce736ff4c6c0796d7e31066effa923d1ebcb9db4",
   "dataModel": "existing-account-state-with-preserved-subtask-namespaces",
-  "releasedAt": "2026-10-05T11:46:52.415Z"
+  "releasedAt": "2026-10-05T11:46:52.415Z",
+  "presentation": "Laptop v25 compact horizontal layout; hosted account and save code retained"
 }
