@@ -6,7 +6,7 @@
   "aliases": [
     "/claudever26.html"
   ],
-  "hash": "cb6491a14a4215dd1127ac24efae22e1e7268eac702485a1146cd9f5f4ecf661",
+  "hash": "d0820e44a9f7d652a5fb57201494851f5c3344f5cb5aab960b6683a928f224f2",
   "assets": {
     "v24-v18-features.js": "c37cefbe493099e2dabdc9b6ff7890d3fda46efdee5abcedcf9d61fb16e5a407",
     "v24-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
@@ -21,7 +21,7 @@
     "compact-interface.css": "1bf39534358dc6c251ccc2f0d47949b4fd8da464a01e09e75cfd68cc3fd25289",
     "v25-device-display.js": "c413b25e7d4bad36812737d9e69010c4662d4f3bc8c697892fd9da19afb178a7",
     "v25-device-display.css": "660fab08efe7d84dcf73264c33eef18cd1d5ede8c639e7d992a490dec92a7e97",
-    "v26-agenda.js": "66cf624cbf1dbdb09e1da44249d46a22680f9c21e76c29676b0fb7e5f63d1cfa",
+    "v26-agenda.js": "3f3538977a83ef2785cb14ad6c2eebe9f55c25cc26ee241313bdc6ecd6cddf60",
     "v26-agenda.css": "ecb2adbe2e603d19f34e6cd3b06908a262913d424ae6c8a32ca60c39da352fd1"
   },
   "localOnly": false,

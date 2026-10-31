@@ -12548,6 +12548,7 @@ function isTripTask(task) {
 }
 
 function taskMatchesFilter(task, filter = activeFilter) {
+  if (window.studyQuestV16IsSuppressedTask?.(task)) return false;
   if (window.studyQuestV19TaskVisible?.(task) === false) return false;
   const todayStr = today();
   const weekEnd = calendarAddDays(todayStr, 6);
@@ -26769,7 +26770,7 @@ window.StudyQuestV21Manual?.install(window.studyQuestV21Core);
 window.StudyQuestV24Subtasks?.install(window.studyQuestV21Core);
 window.StudyQuestCompactInterface?.install();
 window.StudyQuestV25DeviceDisplay?.install(window.studyQuestV21Core);
-window.StudyQuestV26Agenda.install({getState:()=>state,accountKey:()=>v13DurableUsername(),today:()=>today(),edit:id=>editTask(id),matches:t=>(!activeCatFilter||t.catId===activeCatFilter)&&taskMatchesFilter(t,activeFilter),render:()=>window.renderBins()});
+window.StudyQuestV26Agenda.install({getState:()=>state,accountKey:()=>v13DurableUsername(),today:()=>today(),edit:id=>editTask(id),matches:t=>(!activeCatFilter||t.catId===activeCatFilter)&&taskMatchesFilter(t,activeFilter),isOverdue:t=>taskMatchesFilter(t,'overdue'),render:()=>window.renderBins()});
 installV18Accessibility();
 renderV13ModeUI();
 renderAll();
