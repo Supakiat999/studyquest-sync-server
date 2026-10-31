@@ -1,0 +1,8 @@
+.v26-controls{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.v26-controls>div,.v26-controls fieldset{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.v26-controls [hidden]{display:none!important}.v26-controls label{display:flex;align-items:center;gap:6px;font-size:12px}
+.v26-controls input{max-width:100%;width:10em;min-height:36px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px}
+.v26-controls fieldset{border:0;margin:0;padding:0}.v26-controls legend{font-size:12px}.v26-controls p{font-size:12px;margin:0;color:var(--text-muted)}
+#v26Earlier{border:1px solid var(--border);padding:12px;border-radius:10px}#v26Earlier summary{cursor:pointer;font-weight:700}#v26Earlier p,#v26Earlier small{font-size:11px;color:var(--text-muted)}
+#v26EarlierList{max-height:420px;overflow:auto}.v26-task-link{display:block;width:100%;height:auto;text-align:left;white-space:normal;margin-bottom:5px}#v26EarlierList h4{font-size:11px;margin:10px 0 6px}.v26-controls button:focus-visible,#v26Earlier button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:600px){.v26-controls label{flex-wrap:wrap}.v26-controls>div{align-items:stretch}.v26-controls input{width:100%}}

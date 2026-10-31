@@ -50,6 +50,10 @@ const V24_HTML_PATH = path.join(ROOT, "public", "claudever24.html");
 const V24_VERSION_PATH = path.join(ROOT, "public", "v24-version.json");
 const V24_MANIFEST = JSON.parse(fs.readFileSync(V24_VERSION_PATH, "utf8"));
 const V24_ASSETS = new Set(Object.keys(V24_MANIFEST.assets).map(name => "/" + name));
+const V26_HTML_PATH = path.join(ROOT, "public", "claudever26.html");
+const V26_VERSION_PATH = path.join(ROOT, "public", "v26-version.json");
+const V26_MANIFEST = JSON.parse(fs.readFileSync(V26_VERSION_PATH, "utf8"));
+const V26_ASSETS = new Set(Object.keys(V26_MANIFEST.assets).map(name => "/" + name));
 const V25_HTML_PATH = path.join(ROOT, "public", "claudever25.html");
 const V25_VERSION_PATH = path.join(ROOT, "public", "v25-version.json");
 const V25_MANIFEST = JSON.parse(fs.readFileSync(V25_VERSION_PATH, "utf8"));
@@ -111,6 +115,13 @@ const V24_ACCESS_MODE = (() => {
   return ["off", "canary", "all"].includes(configured) ? configured : "off";
 })();
 const V24_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V24_CANARY_USERS || "")
+  .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
+// Independent opt-in; v26 cannot become the main application in this phase.
+const V26_ACCESS_MODE = (() => {
+  const configured = String(process.env.STUDYQUEST_V26_ACCESS || "off").trim().toLowerCase();
+  return ["off", "canary", "all"].includes(configured) ? configured : "off";
+})();
+const V26_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V26_CANARY_USERS || "")
   .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
 // Independent opt-in; v25 cannot become the main application in this phase.
 const V25_ACCESS_MODE = (() => {
@@ -412,6 +423,24 @@ function v24LoginHtml(value, returnToDefault = false) {
 function canUseRecoveryUxV2(user) {
   if (!user || user.sync_device_id || RECOVERY_UX_MODE === "off") return false;
   return RECOVERY_UX_MODE === "all" || user.username === ADMIN_USERNAME;
+}
+
+function canAccessV26(user) {
+  if (!user || user.sync_device_id || V26_ACCESS_MODE === "off") return false;
+  return V26_ACCESS_MODE === "all" || user.username === ADMIN_USERNAME
+    || V26_CANARY_USERS.has(String(user.username || "").toLowerCase());
+}
+
+function authenticatedV26Html(user) {
+  // Keep inherited feature flags and all persistence namespaces from v24.
+  const bootstrap = `<script>document.documentElement.classList.add("studyquest-account-loading");window.__STUDYQUEST_MULTI_ACCOUNT__=true;window.__STUDYQUEST_AUTH_USER__=${JSON.stringify({username:user.username})};window.__STUDYQUEST_SAFE_SYNC_V2__=${JSON.stringify(safeSyncEnabledFor(user))};window.__STUDYQUEST_V20_HOSTED__=true;window.__STUDYQUEST_V21_HOSTED__=true;window.__STUDYQUEST_V24_HOSTED__=true;window.__STUDYQUEST_V26_HOSTED__=true;</script>`;
+  return htmlTemplate(V26_HTML_PATH).replace("</head>", bootstrap + "\n</head>");
+}
+
+function v26LoginHtml(value) {
+  const anchor = '      const wantsStable = search.get("stable") === "1";';
+  if (!String(value).includes(anchor)) throw new Error("Missing v26 login return anchor");
+  return String(value).replace(anchor, anchor + '\n      if (!user.legacy && !wantsStable && next === "v26") { window.location.replace("/v26"); return; }');
 }
 
 function canAccessV25(user) {
@@ -3667,6 +3696,19 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (["/v26", "/claudever26.html", "/v26-version.json"].includes(url.pathname)) {
+      if (V26_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
+      const user = await currentUser(req, { includeState:false });
+      if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=v26" }); return; }
+      if (!canAccessV26(user)) { send(req, res, 403, "v26 is not enabled for this account"); return; }
+      if (url.pathname === "/v26" || url.pathname === "/claudever26.html") {
+        send(req, res, 200, authenticatedV26Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
+      } else {
+        sendJson(req, res, 200, { ...V26_MANIFEST, deployed:true, main:false, accessMode:V26_ACCESS_MODE });
+      }
+      return;
+    }
+
     if (["/v25", "/claudever25.html", "/v25-version.json"].includes(url.pathname)) {
       if (V25_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
       const user = await currentUser(req, { includeState:false });
@@ -3682,11 +3724,11 @@ const server = http.createServer(async (req, res) => {
 
     // These files contain code only. Either owning version may authorize them;
     // disabling v24 must not break an independently eligible v25 session.
-    if (V24_ASSETS.has(url.pathname) || V25_ASSETS.has(url.pathname)) {
-      if (V24_ACCESS_MODE === "off" && V25_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
+    if (V24_ASSETS.has(url.pathname) || V25_ASSETS.has(url.pathname) || V26_ASSETS.has(url.pathname)) {
+      if (V24_ACCESS_MODE === "off" && V25_ACCESS_MODE === "off" && V26_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
       const user = await currentUser(req, { includeState:false });
-      if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=" + (V25_ACCESS_MODE !== "off" ? "v25" : "v24") }); return; }
-      if (!(V24_ASSETS.has(url.pathname) && canAccessV24(user)) && !(V25_ASSETS.has(url.pathname) && canAccessV25(user))) { send(req, res, 403, "This version is not enabled for this account"); return; }
+      if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=" + (V26_ASSETS.has(url.pathname) && V26_ACCESS_MODE !== "off" && (!V25_ASSETS.has(url.pathname) || V25_ACCESS_MODE === "off") ? "v26" : V25_ACCESS_MODE !== "off" ? "v25" : "v24") }); return; }
+      if (!(V24_ASSETS.has(url.pathname) && canAccessV24(user)) && !(V25_ASSETS.has(url.pathname) && canAccessV25(user)) && !(V26_ASSETS.has(url.pathname) && canAccessV26(user))) { send(req, res, 403, "This version is not enabled for this account"); return; }
       send(req, res, 200, fs.readFileSync(path.join(ROOT, "public", url.pathname.slice(1))), { "content-type":url.pathname.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8", "cache-control":"no-cache" });
       return;
     }
@@ -3847,6 +3889,7 @@ const server = http.createServer(async (req, res) => {
       let stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
       if (url.searchParams.get("next") === "v21") stableHtml = v21LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v22") stableHtml = v22LoginHtml(stableHtml);
+      if (url.searchParams.get("next") === "v26") stableHtml = v26LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v25") stableHtml = v25LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v24" || (MAIN_APP_VERSION === "24" && !url.searchParams.get("next"))) stableHtml = v24LoginHtml(stableHtml, MAIN_APP_VERSION === "24");
       send(req, res, 200, stableHtml, { "content-type": "text/html; charset=utf-8" });
@@ -4049,6 +4092,14 @@ const server = http.createServer(async (req, res) => {
 
       if (url.pathname === "/api/version") {
         const requestedVersion = url.searchParams.get("version");
+        if (requestedVersion === "26") {
+          if (V26_ACCESS_MODE === "off") { sendJson(req, res, 404, { ok:false, error:"NOT_FOUND" }); return; }
+          const user = await currentUser(req, { includeState:false });
+          if (!user) { sendJson(req, res, 401, { ok:false, error:"LOGIN_REQUIRED" }); return; }
+          if (!canAccessV26(user)) { sendJson(req, res, 403, { ok:false, error:"VERSION_NOT_ENABLED" }); return; }
+          sendJson(req, res, 200, { ok:true, ...V26_MANIFEST, deployed:true, main:false, route:"/v26", accessMode:V26_ACCESS_MODE });
+          return;
+        }
         if (requestedVersion === "25") {
           if (V25_ACCESS_MODE === "off") { sendJson(req, res, 404, { ok:false, error:"NOT_FOUND" }); return; }
           const user = await currentUser(req, { includeState:false });
