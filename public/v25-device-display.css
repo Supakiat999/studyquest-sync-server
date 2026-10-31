@@ -1,0 +1,8 @@
+.v25-device-display{margin:16px 0;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--surface2)}
+.v25-device-display h3{font-size:14px;margin:0 0 8px}
+.v25-device-display p{font-size:12px;line-height:1.5;color:var(--text-muted);margin:8px 0 0}
+.v25-device-display-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
+.v25-device-display-controls label{font-size:12px;font-weight:700}
+.v25-device-display-controls select{width:auto;min-width:112px;max-width:100%}
+html.sq-v25-device-scaled .modal{max-width:calc(var(--sq-v25-viewport-width) - 24px)!important;max-height:calc(var(--sq-v25-viewport-height) - 24px)!important}
+@media print{html.sq-v25-device-scaled{zoom:1!important}}

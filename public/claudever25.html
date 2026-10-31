@@ -5463,6 +5463,7 @@
   </style>
 <link rel="stylesheet" href="/compact-interface.css">
 <link rel="stylesheet" href="/v24-date-shifts.css">
+<link rel="stylesheet" href="/v25-device-display.css?build=20261017-1">
 </head>
 <body>
 <div id="app">
@@ -6841,6 +6842,7 @@
   </div>
 </div>
 
+<script src="/v25-device-display.js?build=20261017-1"></script>
 <!-- v19 workload bands use total planned minutes; completion remains a separate state. -->
 <script src="/v24-v18-features.js"></script>
 <script src="/v24-v19-features.js"></script>
@@ -9135,18 +9137,13 @@ async function hydrateV13StateFromDeviceRecovery() {
 
 function preserveV13StateBeforeExit() {
   if (!state || corruptSaveInfo || (V16_READ_ONLY_STARTUP && !v16UserInteracted)) return;
+  // Edits already enter the durable save queue when they are made. A closing
+  // tab may be older than another tab's pending edit, so it must never replace
+  // the active account state, browser mirror, outbox, or queued edit here.
+  // Keep an additional recovery copy without changing save ownership or timers.
   const snapshot = cloneStateForSafety(state);
-  const browserSaved = writeV13BrowserState(snapshot);
-  queueV13DeviceStatePersistence(snapshot, {
-    pending:v13DurableOutboxPending,
-    label:'v13-page-exit',
-    lineage:pendingCloudMutation,
-    browserSaved,
-  }).catch(error => recordAppError('page-exit-save', error));
-  if ((liveSync.pending || getLiveSyncMeta().pending) && !liveSync.conflict) {
-    clearTimeout(cloudSaveTimer);
-    runLiveSyncCycle({ reason:'page-exit' }).catch(() => {});
-  }
+  return persistV13RecoveryOnly(snapshot, 'Page exit safety copy')
+    .catch(error => recordAppError('page-exit-save', error));
 }
 
 function pushUndoSnapshot(label = 'Change') {
@@ -26785,6 +26782,7 @@ window.StudyQuestV21AccountSync?.install(window.studyQuestV21Core);
 window.StudyQuestV21Manual?.install(window.studyQuestV21Core);
 window.StudyQuestV24Subtasks?.install(window.studyQuestV21Core);
 window.StudyQuestCompactInterface?.install();
+window.StudyQuestV25DeviceDisplay?.install(window.studyQuestV21Core);
 installV18Accessibility();
 renderV13ModeUI();
 renderAll();

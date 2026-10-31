@@ -6,7 +6,7 @@
   "aliases": [
     "/claudever25.html"
   ],
-  "hash": "35bd1d3f6ec85cb4afb02c341898658ac8c6369946e5438edbc12594e210ff5b",
+  "hash": "e47e30a6055aa713d820c3232bf8e2a4b0bbef356e601f064759a31a3b6e43be",
   "assets": {
     "v24-v18-features.js": "c37cefbe493099e2dabdc9b6ff7890d3fda46efdee5abcedcf9d61fb16e5a407",
     "v24-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
@@ -18,7 +18,9 @@
     "v24-date-shifts.css": "eb9c1b0964b106c506e6e9fac120b640a49974a0eead970816efb0d0e7050a86",
     "v24-date-shifts.js": "012107b2f7277feb7db3cc5647bf6022915946d3b6b4c737b0f9377ddc9ca32a",
     "compact-interface.js": "0b1807e13750195f11357cc5cf4312c8758a57a91e70fc4ffcbe8914b79817dd",
-    "compact-interface.css": "1bf39534358dc6c251ccc2f0d47949b4fd8da464a01e09e75cfd68cc3fd25289"
+    "compact-interface.css": "1bf39534358dc6c251ccc2f0d47949b4fd8da464a01e09e75cfd68cc3fd25289",
+    "v25-device-display.js": "c413b25e7d4bad36812737d9e69010c4662d4f3bc8c697892fd9da19afb178a7",
+    "v25-device-display.css": "660fab08efe7d84dcf73264c33eef18cd1d5ede8c639e7d992a490dec92a7e97"
   },
   "localOnly": false,
   "hosted": true,
@@ -34,5 +36,6 @@
   "createdAt": "2026-10-14T12:17:03.945Z",
   "rollout": "local-verification-only",
   "provenance": "October 14 verified v24 baseline; same account/storage schema; no migration",
-  "presentation": "Laptop v25 compact horizontal layout; hosted account and save code retained"
+  "presentation": "Laptop v25 compact horizontal layout; hosted account and save code retained",
+  "deviceDisplay": "Account-scoped browser-only preference; no account-state writes"
 }

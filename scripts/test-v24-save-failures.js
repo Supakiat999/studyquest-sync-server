@@ -94,7 +94,7 @@ async function stopChrome(force=false) {
   if(force || !browser){
     assert.ok(path.resolve(profile).startsWith(path.resolve(os.tmpdir())+path.sep),'Only the disposable temporary profile may be killed');
     assert.ok(child.pid>0 && child.exitCode===null);
-    if(process.platform==='win32'){const result=spawnSync('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true});assert.equal(result.status,0,'Only this newly spawned Chrome tree should be stopped');}
+    if(process.platform==='win32'){const result=spawnSync('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true});assert.equal(result.status,0,'Only this newly spawned Chrome tree should be stopped: '+JSON.stringify({pid:child.pid,status:result.status,error:String(result.error || ''),stdout:String(result.stdout || ''),stderr:String(result.stderr || '')}));}
     else child.kill('SIGKILL');
   }else {
     const session=await browser.newBrowserCDPSession();

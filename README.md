@@ -191,6 +191,20 @@ StudyQuest saves to the current device first. Cloud backup is a separate, revisi
 
 Every edit writes to IndexedDB and account-scoped browser storage immediately. Online backup starts after a 500 ms quiet period. Page exit makes a final device copy and attempts a best-effort upload; failed or unfinished network work remains in the durable outbox. A stale clean browser adopts the verified online copy after first making a recovery snapshot. A stale browser with unsent work cannot replace an online copy merely because its revision marker matches: exact base-state, hash-lineage, mutation acknowledgement, and record-removal checks are required.
 
+### Prepared local v24/v25 candidate - October 17, 2026
+
+The local candidate uses a recovery-only snapshot when v24/v25 closes or hides.
+Immediate edit saves and existing retries continue. Exit snapshots cannot
+replace the active account state, browser mirror, pending outbox or queued edit,
+and do not start an exit upload. V25 also adds **Display size on this device**
+in Profile Settings, stored separately for each account/browser/site.
+
+Deployment remains on hold. Already-loaded and older fallback tabs share device
+storage and retain their earlier code; preserve their pending work before safely
+refreshing or closing them during a separately authorized canary. See the local
+workspace report `safety-v25-display-size-2026-10-17/REPORT.md` for evidence and
+the fresh-backup/rollout gates.
+
 ### Verified Save-Safety Recovery - August 13, 2026
 
 - Commit `07b5a60` deployed successfully from `main` before any production restoration.
