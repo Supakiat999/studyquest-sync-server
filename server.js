@@ -3700,12 +3700,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (["/v26", "/claudever26.html", "/v26-version.json"].includes(url.pathname)) {
+    if (["/26", "/v26", "/claudever26.html", "/v26-version.json"].includes(url.pathname)) {
       if (V26_ACCESS_MODE === "off") { send(req, res, 404, "Not found"); return; }
       const user = await currentUser(req, { includeState:false });
       if (!user) { send(req, res, 302, "Login required", { location:"/app.html?next=v26" }); return; }
       if (!canAccessV26(user)) { send(req, res, 403, "v26 is not enabled for this account"); return; }
-      if (url.pathname === "/v26" || url.pathname === "/claudever26.html") {
+      if (url.pathname === "/26" || url.pathname === "/v26" || url.pathname === "/claudever26.html") {
         send(req, res, 200, authenticatedV26Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
       } else {
         sendJson(req, res, 200, { ...V26_MANIFEST, deployed:true, main:MAIN_APP_VERSION === "26", route:MAIN_APP_VERSION === "26" ? "/" : "/v26", accessMode:V26_ACCESS_MODE });

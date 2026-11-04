@@ -6,6 +6,10 @@ const report=[];let current,browser;
  for(const [configured,access,effective] of [['26','all','26'],['26','canary','15'],['26','off','15'],['invalid','all','15'],['15','all','15']]){
   current=await fixture({STUDYQUEST_MAIN_VERSION:configured,STUDYQUEST_V26_ACCESS:access});
   const ordinary=await current.register('qa-main-user');
+  const beforeAlias=(await current.request('/api/v2/state',{},ordinary.cookie)).body;delete beforeAlias.serverTime;
+  const alias=await current.request('/26',{},ordinary.cookie);assert.equal(alias.status,access==='off'?404:access==='all'?200:403);
+  if(access==='all'){assert.match(alias.headers.get('cache-control'),/no-store/);assert.ok(alias.body.includes('const STUDYQUEST_VERSION = 26'));}
+  const afterAlias=(await current.request('/api/v2/state',{},ordinary.cookie)).body;delete afterAlias.serverTime;assert.deepEqual(afterAlias,beforeAlias,'Opening /26 must not mutate account state');
   const health=await current.request('/api/health');assert.equal(health.body.mainVersion,effective);
   const anon=await current.request('/');assert.equal(anon.status,302);assert.equal(anon.location,effective==='26'?'/app.html?next=v26-main':'/app.html?next=v15-main');
   for(const cookie of [current.admin,ordinary.cookie]){

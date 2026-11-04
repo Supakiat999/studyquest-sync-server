@@ -9,7 +9,7 @@ const report=[];let current,browser;
   const off=['default','invalid','off'].includes(mode);
   const code=await current.post('/api/admin/pairing-code',{deviceName:'Synthetic device'},current.admin);
   const paired=await current.post('/api/sync/pair',{code:code.body.code,deviceName:'Synthetic device'});assert.equal(paired.status,200);
-  for(const route of ['/v26','/claudever26.html','/v26-version.json','/api/version?version=26']){
+  for(const route of ['/26','/v26','/claudever26.html','/v26-version.json','/api/version?version=26']){
    assert.equal((await current.request(route)).status,off?404:route.startsWith('/api/')?401:302);
    assert.equal((await current.request(route,{},current.admin)).status,off?404:200);
    assert.equal((await current.request(route,{},canary.cookie)).status,off?404:200);
@@ -43,6 +43,10 @@ const report=[];let current,browser;
    await page.locator('#sqLoginUsername').fill('qa-ordinary');await page.locator('#sqLoginPassword').fill(ordinary.password);await page.locator('.sq-login-card button[type=submit]').click();await page.waitForURL(hosted+'/v26');
    await page.waitForFunction(()=>window.studyQuestV21Core);assert.equal(await page.evaluate(()=>window.__STUDYQUEST_AUTH_USER__.username),'qa-ordinary');
    const failures=[];page.on('pageerror',e=>failures.push(e.message));await page.reload();await page.waitForFunction(()=>window.studyQuestV21Core);assert.deepEqual(failures,[]);
+   const aliasContext=await browser.newContext();await aliasContext.route('**/*',route=>route.request().url().startsWith(current.origin+'/')?route.continue():route.abort());
+   const aliasPage=await aliasContext.newPage();await aliasPage.goto(current.origin+'/26');assert.equal(aliasPage.url(),current.origin+'/app.html?next=v26');
+   await aliasPage.locator('#sqLoginUsername').fill('qa-ordinary');await aliasPage.locator('#sqLoginPassword').fill(ordinary.password);await aliasPage.locator('.sq-login-card button[type=submit]').click();await aliasPage.waitForURL(current.origin+'/v26');
+   await aliasPage.goto(current.origin+'/26');await aliasPage.waitForFunction(()=>window.studyQuestV21Core);assert.equal(await aliasPage.evaluate(()=>window.__STUDYQUEST_AUTH_USER__.username),'qa-ordinary');await aliasContext.close();
    await browser.close();browser=null;
   }
   report.push({mode,assets:Object.keys(manifest.assets).length,passed:true});await current.close();current=null;
