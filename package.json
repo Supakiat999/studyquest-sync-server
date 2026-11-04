@@ -25,7 +25,9 @@
     "test:v24": "node scripts/test-v24-release.js && node scripts/test-v24-hosted-flows.js && node scripts/test-v24-postgres.js",
     "test:backup:restore": "node scripts/test-backup-restore.js",
     "test:v24:save-safety": "node scripts/test-v24-save-failures.js --hosted-only",
-    "test:v25": "node scripts/test-v25-access.js && node scripts/test-v25-hosted-flows.js && node scripts/test-v25-postgres.js && node scripts/test-v25-continuity.js"
+    "test:v25": "node scripts/test-v25-access.js && node scripts/test-v25-hosted-flows.js && node scripts/test-v25-postgres.js && node scripts/test-v25-continuity.js",
+    "check:v26": "node --check public/v26-agenda.js && node scripts/check-html.js public/claudever26.html && node scripts/check-v26-release.js && node scripts/test-v26-main-routing.js",
+    "test:v26": "node scripts/test-v26-access.js && node scripts/test-v26-agenda.js --hosted-only && node scripts/test-v26-earlier-hosted.js && node scripts/test-v26-continuity.js --hosted-only && node scripts/test-v15-v26-continuity.js && node scripts/test-v26-postgres.js && node scripts/test-v26-save-failures.js --hosted-only && node scripts/test-backup-restore.js && node scripts/test-v26-hosted-flows.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

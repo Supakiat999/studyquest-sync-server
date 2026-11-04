@@ -116,7 +116,7 @@ const V24_ACCESS_MODE = (() => {
 })();
 const V24_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V24_CANARY_USERS || "")
   .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
-// Independent opt-in; v26 cannot become the main application in this phase.
+// Independent v26 gate; default promotion additionally requires all-account access.
 const V26_ACCESS_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_V26_ACCESS || "off").trim().toLowerCase();
   return ["off", "canary", "all"].includes(configured) ? configured : "off";
@@ -132,7 +132,8 @@ const V25_CANARY_USERS = new Set(String(process.env.STUDYQUEST_V25_CANARY_USERS 
   .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
 const MAIN_APP_VERSION = (() => {
   const configured = String(process.env.STUDYQUEST_MAIN_VERSION || "15").trim();
-  return ["15", "19", "21", "24"].includes(configured) ? configured : "15";
+  if (configured === "26" && V26_ACCESS_MODE !== "all") return "15";
+  return ["15", "19", "21", "24", "26"].includes(configured) ? configured : "15";
 })();
 const SAFE_SYNC_MODE = (() => {
   const configured = String(process.env.STUDYQUEST_SAFE_SYNC_MODE || "off").trim().toLowerCase();
@@ -437,10 +438,13 @@ function authenticatedV26Html(user) {
   return htmlTemplate(V26_HTML_PATH).replace("</head>", bootstrap + "\n</head>");
 }
 
-function v26LoginHtml(value) {
+function v26LoginHtml(value, returnToDefault = false) {
   const anchor = '      const wantsStable = search.get("stable") === "1";';
   if (!String(value).includes(anchor)) throw new Error("Missing v26 login return anchor");
-  return String(value).replace(anchor, anchor + '\n      if (!user.legacy && !wantsStable && next === "v26") { window.location.replace("/v26"); return; }');
+  return String(value).replace(anchor, anchor
+    + '\n      if (!user.legacy && !wantsStable && next === "v26") { window.location.replace("/v26"); return; }'
+    + '\n      if (!user.legacy && !wantsStable && next === "v26-main") { window.location.replace("/"); return; }'
+    + (returnToDefault ? '\n      if (!user.legacy && !wantsStable && !next) { window.location.replace("/"); return; }' : ''));
 }
 
 function canAccessV25(user) {
@@ -3704,7 +3708,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === "/v26" || url.pathname === "/claudever26.html") {
         send(req, res, 200, authenticatedV26Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
       } else {
-        sendJson(req, res, 200, { ...V26_MANIFEST, deployed:true, main:false, accessMode:V26_ACCESS_MODE });
+        sendJson(req, res, 200, { ...V26_MANIFEST, deployed:true, main:MAIN_APP_VERSION === "26", route:MAIN_APP_VERSION === "26" ? "/" : "/v26", accessMode:V26_ACCESS_MODE });
       }
       return;
     }
@@ -3751,11 +3755,18 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/") {
       const user = await currentUser(req, { includeState:false });
       if (!user || user.sync_device_id) {
+        if (MAIN_APP_VERSION === "26") {
+          send(req, res, 302, "Login required", { location: "/app.html?next=v26-main" });
+          return;
+        }
         send(req, res, 302, "Login required", { location: "/app.html?next=v15-main" });
         return;
       }
-      // Falls through to the previous default whenever v21 is not reachable for
-      // this account, so a paused rollout never leaves anyone without an app.
+      if (MAIN_APP_VERSION === "26" && canAccessV26(user)) {
+        send(req, res, 200, authenticatedV26Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
+        return;
+      }
+      // Retain previous version gates and the authenticated v15 fallback.
       if (MAIN_APP_VERSION === "24" && canAccessV24(user)) {
         send(req, res, 200, authenticatedV24Html(user), { "content-type":"text/html; charset=utf-8", "cache-control":"no-store" });
         return;
@@ -3889,7 +3900,7 @@ const server = http.createServer(async (req, res) => {
       let stableHtml = RECOVERY_UX_MODE === "off" ? fs.readFileSync(HTML_PATH) : stableHtmlWithRecoveryUxV2();
       if (url.searchParams.get("next") === "v21") stableHtml = v21LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v22") stableHtml = v22LoginHtml(stableHtml);
-      if (url.searchParams.get("next") === "v26") stableHtml = v26LoginHtml(stableHtml);
+      if (["v26", "v26-main"].includes(url.searchParams.get("next")) || (MAIN_APP_VERSION === "26" && !url.searchParams.get("next"))) stableHtml = v26LoginHtml(stableHtml, MAIN_APP_VERSION === "26");
       if (url.searchParams.get("next") === "v25") stableHtml = v25LoginHtml(stableHtml);
       if (url.searchParams.get("next") === "v24" || (MAIN_APP_VERSION === "24" && !url.searchParams.get("next"))) stableHtml = v24LoginHtml(stableHtml, MAIN_APP_VERSION === "24");
       send(req, res, 200, stableHtml, { "content-type": "text/html; charset=utf-8" });
@@ -4097,7 +4108,7 @@ const server = http.createServer(async (req, res) => {
           const user = await currentUser(req, { includeState:false });
           if (!user) { sendJson(req, res, 401, { ok:false, error:"LOGIN_REQUIRED" }); return; }
           if (!canAccessV26(user)) { sendJson(req, res, 403, { ok:false, error:"VERSION_NOT_ENABLED" }); return; }
-          sendJson(req, res, 200, { ok:true, ...V26_MANIFEST, deployed:true, main:false, route:"/v26", accessMode:V26_ACCESS_MODE });
+          sendJson(req, res, 200, { ok:true, ...V26_MANIFEST, deployed:true, main:MAIN_APP_VERSION === "26", route:MAIN_APP_VERSION === "26" ? "/" : "/v26", accessMode:V26_ACCESS_MODE });
           return;
         }
         if (requestedVersion === "25") {

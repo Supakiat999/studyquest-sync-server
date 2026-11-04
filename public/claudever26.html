@@ -5464,8 +5464,8 @@
 <link rel="stylesheet" href="/compact-interface.css">
 <link rel="stylesheet" href="/v24-date-shifts.css">
 <link rel="stylesheet" href="/v25-device-display.css?build=20261017-1">
-<link rel="stylesheet" href="/v26-agenda.css">
-<script src="/v26-agenda.js"></script>
+<link rel="stylesheet" href="/v26-agenda.css?build=20261104-release">
+<script src="/v26-agenda.js?build=20261104-release"></script>
 </head>
 <body>
 <div id="app">
@@ -26770,7 +26770,36 @@ window.StudyQuestV21Manual?.install(window.studyQuestV21Core);
 window.StudyQuestV24Subtasks?.install(window.studyQuestV21Core);
 window.StudyQuestCompactInterface?.install();
 window.StudyQuestV25DeviceDisplay?.install(window.studyQuestV21Core);
-window.StudyQuestV26Agenda.install({getState:()=>state,accountKey:()=>v13DurableUsername(),today:()=>today(),edit:id=>editTask(id),matches:t=>(!activeCatFilter||t.catId===activeCatFilter)&&taskMatchesFilter(t,activeFilter),isOverdue:t=>taskMatchesFilter(t,'overdue'),render:()=>window.renderBins()});
+function moveV26EarlierTask(id, date) {
+  const agenda = window.StudyQuestV26Agenda;
+  const task = state.tasks.find(item => item.id === id);
+  if (!task || !taskMatchesFilter(task, 'overdue') || !Number.isFinite(agenda.ms(date)) || task.date === date) return;
+  const previousDate = task.date, previousEndDate = task.endDate;
+  const span = Number.isFinite(agenda.ms(task.endDate)) && task.endDate > task.date
+    ? agenda.ms(task.endDate) - agenda.ms(task.date) : 0;
+  const endDate = span ? new Date(agenda.ms(date) + span).toISOString().slice(0, 10) : '';
+  if (endDate && !Number.isFinite(agenda.ms(endDate))) { showToast('Choose a date within the supported calendar.', '#f76a6a'); return; }
+  pushUndoSnapshot('Move earlier unfinished task');
+  task.date = date;
+  task.endDate = endDate;
+  try { saveState(); } catch (error) {
+    task.date = previousDate;
+    task.endDate = previousEndDate;
+    showToast('The task date could not be saved. Please try again.', '#f76a6a');
+    return;
+  }
+  renderAll();
+  showToast('📅 Task moved to ' + date);
+}
+window.StudyQuestV26Agenda.install({
+  getState:()=>state, accountKey:()=>v13DurableUsername(), today:()=>today(),
+  edit:id=>editTask(id), remove:id=>deleteTask(id),
+  assign:id=>{editTask(id);document.getElementById('modalTitle').textContent='📅 Assign Deadline';document.getElementById('taskDate').focus();},
+  startDrag:(id,event)=>{draggedTaskId=id;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',id);},
+  endDrag:()=>{draggedTaskId=null;}, move:moveV26EarlierTask,
+  matches:t=>(!activeCatFilter||t.catId===activeCatFilter)&&taskMatchesFilter(t,activeFilter),
+  isOverdue:t=>taskMatchesFilter(t,'overdue'), render:()=>window.renderBins()
+});
 installV18Accessibility();
 renderV13ModeUI();
 renderAll();

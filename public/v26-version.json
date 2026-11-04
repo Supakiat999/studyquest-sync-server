@@ -6,7 +6,7 @@
   "aliases": [
     "/claudever26.html"
   ],
-  "hash": "d0820e44a9f7d652a5fb57201494851f5c3344f5cb5aab960b6683a928f224f2",
+  "hash": "ce243432c1ffc27825c390352ab7c2c922695f6e672dadc68b0d69dc55d340db",
   "assets": {
     "v24-v18-features.js": "c37cefbe493099e2dabdc9b6ff7890d3fda46efdee5abcedcf9d61fb16e5a407",
     "v24-v19-features.js": "b943ae05b751c2dac79bde4c636ed8b5c1cb4d67205fbff8d6a519035c51b231",
@@ -21,8 +21,8 @@
     "compact-interface.css": "1bf39534358dc6c251ccc2f0d47949b4fd8da464a01e09e75cfd68cc3fd25289",
     "v25-device-display.js": "c413b25e7d4bad36812737d9e69010c4662d4f3bc8c697892fd9da19afb178a7",
     "v25-device-display.css": "660fab08efe7d84dcf73264c33eef18cd1d5ede8c639e7d992a490dec92a7e97",
-    "v26-agenda.js": "3f3538977a83ef2785cb14ad6c2eebe9f55c25cc26ee241313bdc6ecd6cddf60",
-    "v26-agenda.css": "ecb2adbe2e603d19f34e6cd3b06908a262913d424ae6c8a32ca60c39da352fd1"
+    "v26-agenda.js": "206b11484b8cfa1536daa7c95160b6b1abb13d464a15e270602af20d7719d322",
+    "v26-agenda.css": "6a212d8c50efd63ba33bbf1d10a1306b9999c3a4f3fc5f3629aa9811a232b805"
   },
   "localOnly": false,
   "hosted": true,
@@ -35,7 +35,7 @@
   "dataModel": "existing-account-state-with-preserved-subtask-namespaces",
   "releasedAt": null,
   "baseVersion": 25,
-  "createdAt": "2026-10-31T13:40:00.000Z",
+  "createdAt": "2026-10-31T13:40:00Z",
   "rollout": "isolated-verification-only",
   "provenance": "Verified v25 a87153b baseline; existing account/storage schema and mutation lineage; no migration",
   "presentation": "Laptop layout inherited from v25; v26 flexible agenda and automatic earlier unfinished panel",

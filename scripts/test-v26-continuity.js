@@ -19,7 +19,7 @@ const full=page=>page.evaluate(()=>cloneV20CloudState(state));
 const ui=async page=>{await page.bringToFront();await page.evaluate(()=>{activeFilter='all';activeCatFilter=null;renderAll();activateStudyQuestTab('tasks');});await page.waitForFunction(()=>{const rows=[...document.querySelectorAll('.task-item[data-id]')];return rows.length>0&&rows.every(row=>row.querySelector('.sq-date-shift-inline-row'));});return page.evaluate(()=>({tasks:[...document.querySelectorAll('.task-item')].map(el=>({text:el.innerText.replaceAll('v25','v26'),width:Math.round(el.getBoundingClientRect().width),height:Math.round(el.getBoundingClientRect().height)})),controls:document.querySelectorAll('.sq-date-shift-inline-row').length,overflow:document.documentElement.scrollWidth>innerWidth}));};
 (async()=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));loopback='http://127.0.0.1:'+server.address().port;
- for(const runtime of ['local','hosted']){
+ for(const runtime of (process.argv.includes('--hosted-only')?['hosted']:['local','hosted'])){
   mode=runtime;fixtureUsername='qa-safety';activeVersion=25;origin=runtime==='local'?loopback:'https://studyquest-continuity-fixture.onrender.com';
   profile=fs.mkdtempSync(path.join(os.tmpdir(),'studyquest-v26-continuity-'));await launch();let page=await open();
   const initial=await reset(page,25);control.offline=true;
